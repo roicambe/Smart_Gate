@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS students (
 CREATE TABLE IF NOT EXISTS visitors (
     person_id INTEGER PRIMARY KEY,
     purpose_of_visit VARCHAR NOT NULL,
+    person_to_visit VARCHAR NOT NULL,
     id_presented VARCHAR NOT NULL,
     contact_number VARCHAR NOT NULL,
     FOREIGN KEY (person_id) REFERENCES persons(person_id)
@@ -76,20 +77,29 @@ CREATE TABLE IF NOT EXISTS events (
     is_enabled BOOLEAN NOT NULL DEFAULT 1
 );
 
-INSERT OR IGNORE INTO events (event_name, event_date, start_time, end_time, required_role, is_enabled) 
+CREATE TABLE IF NOT EXISTS event_attendance (
+    attendance_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL,
+    person_id INTEGER NOT NULL,
+    scanned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (event_id) REFERENCES events(event_id),
+    FOREIGN KEY (person_id) REFERENCES persons(person_id)
+);
+
+INSERT OR IGNORE INTO events (event_name, event_date, start_time, end_time, required_role, is_enabled)  
 VALUES ('Flag Ceremony', DATE('now', 'localtime'), '07:30', '08:00', 'all', 1);
 
 -- Admin
 CREATE TABLE IF NOT EXISTS audit_logs (
     audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    admin_id INTEGER NOT NULL,
-    action_type TEXT CHECK(action_type IN ('create', 'read', 'update', 'delete')) NOT NULL,
+    admin_id INTEGER NOT NULL, 
+    action_type TEXT CHECK(action_type IN ('INSERT', 'READ', 'UPDATE', 'DELETE')) NOT NULL,
     target_table VARCHAR NOT NULL,
     target_id INTEGER NOT NULL,
     old_values JSON NULL,
     new_values JSON NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (admin_id) REFERENCES persons(person_id)
+    FOREIGN KEY (admin_id) REFERENCES accounts(account_id)
 );
 
 CREATE TABLE IF NOT EXISTS accounts (

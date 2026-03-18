@@ -2,12 +2,13 @@ import React, { useState } from "react";
 import HeaderBar from "./components/HeaderBar";
 import { MainMenu } from "./components/MainMenu";
 import { ActionMenu } from "./components/ActionMenu";
+import { EventActionMenu } from "./components/EventActionMenu";
 import { AdminLayout } from "./components/AdminLayout";
 import bgImage from "../imgs/plp-background.jpg";
 
 function App() {
     const [view, setView] = useState("main"); // 'main', 'action_entrance', 'action_exit', 'admin_dashboard', etc.
-    const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+    const [adminSession, setAdminSession] = useState(null); // stores { account_id, username, full_name, role }
 
     return (
         <div className="relative flex flex-col h-screen text-slate-50 overflow-hidden font-sans">
@@ -20,7 +21,7 @@ function App() {
             </div>
 
             <div className="relative z-10 flex flex-col h-full w-full">
-                <HeaderBar setView={setView} isAdminLoggedIn={isAdminLoggedIn} setIsAdminLoggedIn={setIsAdminLoggedIn} />
+                <HeaderBar setView={setView} isAdminLoggedIn={adminSession} setIsAdminLoggedIn={setAdminSession} />
 
                 {/* Main Content Area - min-h-0 ensures flex child can shrink for scroll containment */}
                 <main className="flex-1 min-h-0 w-full overflow-hidden">
@@ -28,8 +29,9 @@ function App() {
                     {(view === "action_entrance" || view === "action_exit") && (
                         <ActionMenu view={view} setView={setView} />
                     )}
-                    {view.startsWith("admin_") && isAdminLoggedIn && (
-                        <AdminLayout view={view} setView={setView} setIsAdminLoggedIn={setIsAdminLoggedIn} />
+                    {view === "action_event" && <EventActionMenu setView={setView} />}
+                    {view.startsWith("admin_") && adminSession && (
+                        <AdminLayout view={view} setView={setView} setIsAdminLoggedIn={setAdminSession} adminSession={adminSession} />
                     )}
                 </main>
 

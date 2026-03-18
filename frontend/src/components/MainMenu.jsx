@@ -42,7 +42,7 @@ export const MainMenu = ({ setView }) => {
 
                 {/* Flag Ceremony Card */}
                 <button
-                    onClick={() => console.log('Ceremony Proceed')}
+                    onClick={() => setView('action_event')}
                     className="group relative flex flex-col items-center justify-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/30 transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-white/30 text-left w-full h-full"
                 >
                     <div className="h-20 w-20 bg-slate-500/20 text-slate-300 rounded-full flex items-center justify-center mb-6 group-hover:scale-110 group-hover:bg-slate-500 group-hover:text-white transition-all duration-300 shadow-lg border border-slate-500/30">

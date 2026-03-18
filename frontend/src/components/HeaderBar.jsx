@@ -9,6 +9,7 @@ const appWindow = getCurrentWindow();
 const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn }) => {
     const [showCloseModal, setShowCloseModal] = useState(false);
     const [showAdminModal, setShowAdminModal] = useState(false);
+    const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [loginError, setLoginError] = useState("");
 
@@ -32,14 +33,15 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn }) => {
         e.preventDefault();
         setLoginError("");
         try {
-            const success = await invoke('admin_login', { password });
-            if (success) {
-                setIsAdminLoggedIn(true);
+            const response = await invoke('admin_login', { username, password });
+            if (response.success) {
+                setIsAdminLoggedIn(response.account);
                 setView('admin_dashboard');
                 setShowAdminModal(false);
                 setPassword("");
+                setUsername("");
             } else {
-                setLoginError("Invalid passcode.");
+                setLoginError(response.message || "Invalid credentials.");
             }
         } catch (error) {
             console.error(error);
@@ -70,16 +72,22 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn }) => {
                             Administrator Login
                         </button>
                     ) : (
-                        <button
-                            onClick={() => {
-                                setIsAdminLoggedIn(false);
-                                setView('main');
-                            }}
-                            className="text-sm font-medium text-white/80 hover:text-rose-400 transition-colors flex items-center gap-1.5 focus:outline-none"
-                        >
-                            <Lock className="w-4 h-4" />
-                            Logout Admin
-                        </button>
+                        <div className="flex items-center gap-6">
+                            <div className="text-right">
+                                <p className="text-sm font-bold text-white tracking-wide">Welcome, {isAdminLoggedIn.full_name}</p>
+                                <p className="text-xs text-brand-300 font-medium">{isAdminLoggedIn.role}</p>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    setIsAdminLoggedIn(false);
+                                    setView('main');
+                                }}
+                                className="text-sm font-medium text-white/80 hover:text-rose-400 transition-colors flex items-center gap-1.5 focus:outline-none"
+                            >
+                                <Lock className="w-4 h-4" />
+                                Logout
+                            </button>
+                        </div>
                     )}
 
                     {/* Divider */}
@@ -117,12 +125,19 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn }) => {
                         </div>
                         <form onSubmit={handleLogin} className="p-6">
                             <input
+                                type="text"
+                                placeholder="Enter username..."
+                                value={username}
+                                onChange={(e) => setUsername(e.target.value)}
+                                className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50 mb-3 text-center tracking-wide"
+                                autoFocus
+                            />
+                            <input
                                 type="password"
                                 placeholder="Enter passcode..."
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
-                                className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50 mb-2 text-center tracking-widest"
-                                autoFocus
+                                className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50 mb-2 text-center tracking-wide"
                             />
                             {loginError && <div className="text-rose-400 text-sm text-center mb-4">{loginError}</div>}
                             <div className="flex gap-3 mt-4">

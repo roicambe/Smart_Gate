@@ -5,8 +5,62 @@ import { invoke } from "@tauri-apps/api/core";
 export const ActionMenu = ({ view, setView }) => {
     const isEntrance = view === 'action_entrance';
     const [showManualModal, setShowManualModal] = useState(false);
+    const [showVisitorModal, setShowVisitorModal] = useState(false);
     const [manualId, setManualId] = useState("");
     const [status, setStatus] = useState(null);
+    const [successVisitor, setSuccessVisitor] = useState(null);
+    const [showHardwareModal, setShowHardwareModal] = useState(false);
+
+    const [visitorForm, setVisitorForm] = useState({
+        firstName: '',
+        lastName: '',
+        contactNumber: '',
+        purpose: '',
+        personToVisit: ''
+    });
+
+    const handleVisitorSubmit = async (e) => {
+        e.preventDefault();
+        setStatus(null);
+        try {
+            const yearPart = new Date().getFullYear().toString().slice(-2);
+            const randomPart = Math.floor(1000 + Math.random() * 9000).toString().padStart(4, '0');
+            const generatedId = `VIS-${yearPart}${randomPart}`;
+            
+            await invoke('register_user', {
+                role: "visitor",
+                schoolId: generatedId,
+                firstName: visitorForm.firstName,
+                lastName: visitorForm.lastName,
+                contactNumber: visitorForm.contactNumber,
+                purpose: visitorForm.purpose,
+                personToVisit: visitorForm.personToVisit,
+                middleName: null,
+                programId: null,
+                yearLevel: null,
+                departmentId: null,
+                positionTitle: null,
+                idPresented: generatedId
+            });
+            
+            const result = await invoke('manual_id_entry', {
+                schoolId: generatedId,
+                scannerFunction: 'entrance'
+            });
+            
+            if (result.success) {
+                setSuccessVisitor({ id: generatedId, name: `${visitorForm.firstName} ${visitorForm.lastName}` });
+            } else {
+                setStatus({ type: 'error', message: result.message });
+            }
+        } catch (error) {
+            console.error(error);
+            setStatus({ type: 'error', message: typeof error === 'string' ? error : "Failed to register visitor." });
+        } finally {
+            setShowVisitorModal(false);
+            setVisitorForm({ firstName: '', lastName: '', contactNumber: '', purpose: '', personToVisit: '' });
+        }
+    };
 
     const handleManualSubmit = async (e) => {
         e.preventDefault();
@@ -77,54 +131,114 @@ export const ActionMenu = ({ view, setView }) => {
             )}
 
             {/* Grid of Enlarged Action Cards (Glassmorphism) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 flex-1 place-content-center items-center">
-                {/* Manually Input ID */}
-                <button
-                    onClick={() => { setStatus(null); setShowManualModal(true); }}
-                    className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]"
-                >
-                    <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
-                        <Keyboard className="w-12 h-12 drop-shadow-md" />
-                    </div>
-                    <div>
-                        <h3 className="text-3xl font-bold text-white mb-2 drop-shadow-sm">Manual ID</h3>
-                        <p className="text-white/70 text-lg">Type in a student or employee ID.</p>
-                    </div>
-                </button>
+            {isEntrance ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 flex-1 place-content-center items-center">
+                    {/* Manually Input ID */}
+                    <button
+                        onClick={() => { setStatus(null); setShowManualModal(true); }}
+                        className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]"
+                    >
+                        <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
+                            <Keyboard className="w-12 h-12 drop-shadow-md" />
+                        </div>
+                        <div>
+                            <h3 className="text-3xl font-bold text-white mb-2 drop-shadow-sm">Manual ID</h3>
+                            <p className="text-white/70 text-lg">Type in a student or employee ID.</p>
+                        </div>
+                    </button>
 
-                {/* QR Scanner */}
-                <button className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]">
-                    <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
-                        <QrCode className="w-12 h-12 drop-shadow-md" />
-                    </div>
-                    <div>
-                        <h3 className="text-3xl font-bold text-white mb-2 drop-shadow-sm">QR Scanner</h3>
-                        <p className="text-white/70 text-lg">Scan digital ID codes.</p>
-                    </div>
-                </button>
+                    {/* QR Scanner */}
+                    <button 
+                        onClick={() => setShowHardwareModal(true)}
+                        className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]">
+                        <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
+                            <QrCode className="w-12 h-12 drop-shadow-md" />
+                        </div>
+                        <div>
+                            <h3 className="text-3xl font-bold text-white mb-2 drop-shadow-sm">QR Scanner</h3>
+                            <p className="text-white/70 text-lg">Scan digital ID codes.</p>
+                        </div>
+                    </button>
 
-                {/* Face Recognition */}
-                <button className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]">
-                    <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
-                        <ScanFace className="w-12 h-12 drop-shadow-md" />
-                    </div>
-                    <div>
-                        <h3 className="text-3xl font-bold text-white mb-2 drop-shadow-sm">Face Scan</h3>
-                        <p className="text-white/70 text-lg">Automatically scan incoming faces.</p>
-                    </div>
-                </button>
+                    {/* Face Recognition */}
+                    <button 
+                        onClick={() => setShowHardwareModal(true)}
+                        className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]">
+                        <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
+                            <ScanFace className="w-12 h-12 drop-shadow-md" />
+                        </div>
+                        <div>
+                            <h3 className="text-3xl font-bold text-white mb-2 drop-shadow-sm">Face Scan</h3>
+                            <p className="text-white/70 text-lg">Automatically scan incoming faces.</p>
+                        </div>
+                    </button>
 
-                {/* Visitors */}
-                <button className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]">
-                    <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
-                        <Users className="w-12 h-12 drop-shadow-md" />
+                    {/* Visitors */}
+                    <button 
+                        onClick={() => { 
+                            setStatus(null); 
+                            setShowVisitorModal(true); 
+                        }}
+                        className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]"
+                    >
+                        <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
+                            <Users className="w-12 h-12 drop-shadow-md" />
+                        </div>
+                        <div>
+                            <h3 className="text-3xl font-bold text-white mb-2 drop-shadow-sm">Visitors</h3>
+                            <p className="text-white/70 text-lg">Register external guests temporarily.</p>
+                        </div>
+                    </button>
+                </div>
+            ) : (
+                <div className="flex flex-col items-center gap-6 flex-1 justify-center w-full max-w-4xl mx-auto z-10">
+                    <div className="flex flex-col sm:flex-row gap-6 w-full justify-center">
+                        <div className="flex-1">
+                            {/* Manually Input ID */}
+                            <button
+                                onClick={() => { setStatus(null); setShowManualModal(true); }}
+                                className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]"
+                            >
+                                <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
+                                    <Keyboard className="w-12 h-12 drop-shadow-md" />
+                                </div>
+                                <div>
+                                    <h3 className="text-3xl font-bold text-white mb-2 drop-shadow-sm">Manual ID</h3>
+                                    <p className="text-white/70 text-lg">Type in a student or employee ID.</p>
+                                </div>
+                            </button>
+                        </div>
+                        <div className="flex-1">
+                            {/* QR Scanner */}
+                            <button 
+                                onClick={() => setShowHardwareModal(true)}
+                                className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]">
+                                <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
+                                    <QrCode className="w-12 h-12 drop-shadow-md" />
+                                </div>
+                                <div>
+                                    <h3 className="text-3xl font-bold text-white mb-2 drop-shadow-sm">QR Scanner</h3>
+                                    <p className="text-white/70 text-lg">Scan digital ID codes.</p>
+                                </div>
+                            </button>
+                        </div>
                     </div>
-                    <div>
-                        <h3 className="text-3xl font-bold text-white mb-2 drop-shadow-sm">Visitors</h3>
-                        <p className="text-white/70 text-lg">Register external guests temporarily.</p>
+                    {/* Face Recognition (Bottom Row) */}
+                    <div className="w-full sm:w-1/2 mx-auto justify-self-center">
+                        <button 
+                            onClick={() => setShowHardwareModal(true)}
+                            className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]">
+                            <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
+                                <ScanFace className="w-12 h-12 drop-shadow-md" />
+                            </div>
+                            <div>
+                                <h3 className="text-3xl font-bold text-white mb-2 drop-shadow-sm">Face Scan</h3>
+                                <p className="text-white/70 text-lg">Automatically scan incoming faces.</p>
+                            </div>
+                        </button>
                     </div>
-                </button>
-            </div>
+                </div>
+            )}
 
             {/* Manual ID Modal */}
             {showManualModal && (
@@ -166,6 +280,107 @@ export const ActionMenu = ({ view, setView }) => {
                                     </button>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Visitor Registration Modal */}
+            {showVisitorModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md">
+                    <div className="bg-black/90 backdrop-blur-3xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-2xl overflow-y-auto max-h-[90vh] animate-in zoom-in-95 fade-in duration-200">
+                        <div className="p-8">
+                            <div className="flex items-center gap-4 mb-8">
+                                <div className="h-14 w-14 bg-white/10 rounded-2xl flex items-center justify-center text-white border border-white/20 shadow-inner">
+                                    <Users className="w-7 h-7" />
+                                </div>
+                                <div>
+                                    <h2 className="text-2xl font-bold text-white tracking-wide">Visitor Registration</h2>
+                                    <p className="text-white/60 text-sm">Logging incoming guest to campus.</p>
+                                </div>
+                            </div>
+                            <form onSubmit={handleVisitorSubmit} className="space-y-5">
+                                <div className="grid grid-cols-2 gap-5">
+                                    <div>
+                                        <label className="block text-sm font-medium text-white/70 mb-1">First Name <span className="text-rose-500">*</span></label>
+                                        <input required type="text" value={visitorForm.firstName} onChange={e => setVisitorForm({...visitorForm, firstName: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="Juan" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-white/70 mb-1">Last Name <span className="text-rose-500">*</span></label>
+                                        <input required type="text" value={visitorForm.lastName} onChange={e => setVisitorForm({...visitorForm, lastName: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="Dela Cruz" />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-5">
+                                    <div>
+                                        <label className="block text-sm font-medium text-white/70 mb-1">Contact Number <span className="text-rose-500">*</span></label>
+                                        <input required type="text" value={visitorForm.contactNumber} onChange={e => setVisitorForm({...visitorForm, contactNumber: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="09xxxxxxxxx" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-white/70 mb-1">Person to Visit <span className="text-rose-500">*</span></label>
+                                        <input required type="text" value={visitorForm.personToVisit} onChange={e => setVisitorForm({...visitorForm, personToVisit: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="Prof. Smith" />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-white/70 mb-1">Purpose of Visit <span className="text-rose-500">*</span></label>
+                                    <input required type="text" value={visitorForm.purpose} onChange={e => setVisitorForm({...visitorForm, purpose: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="Meeting / Delivery" />
+                                </div>
+                                
+                                <div className="flex gap-4 pt-6 mt-4 border-t border-white/10">
+                                    <button type="button" onClick={() => setShowVisitorModal(false)} className="flex-1 px-4 py-3 bg-white/5 border border-white/10 text-white/80 font-medium rounded-xl hover:bg-white/10 hover:text-white transition-all focus:outline-none">Cancel</button>
+                                    <button type="submit" className="flex-[2] px-4 py-3 bg-white text-black font-bold rounded-xl hover:bg-slate-200 transition-all focus:outline-none focus:ring-4 focus:ring-white/30 flex items-center justify-center gap-2 text-lg shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:shadow-[0_0_30px_rgba(255,255,255,0.4)]">Complete Registration <ArrowRight className="w-5 h-5" /></button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {/* Hardware Placeholder Modal */}
+            {showHardwareModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md">
+                    <div className="bg-black/80 backdrop-blur-2xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 fade-in duration-200">
+                        <div className="p-8 text-center flex flex-col items-center">
+                            <AlertCircle className="w-16 h-16 text-blue-400 mb-4" />
+                            <h2 className="text-2xl font-bold text-white tracking-wide mb-2">Hardware Integration in Progress</h2>
+                            <p className="text-white/70 mb-8">Please use Manual ID for now to register entry or exit.</p>
+                            <button
+                                onClick={() => setShowHardwareModal(false)}
+                                className="px-8 py-3 bg-white text-black font-bold rounded-xl hover:bg-slate-200 transition-all focus:outline-none focus:ring-4 focus:ring-white/30"
+                            >
+                                Understood
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Success Visitor Modal */}
+            {successVisitor && (
+                <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-md">
+                    <div className="bg-emerald-950/80 backdrop-blur-2xl border border-emerald-500/30 rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 fade-in duration-200">
+                        <div className="p-8 text-center flex flex-col items-center">
+                            <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center border-4 border-emerald-500/30 mb-6">
+                                <CheckCircle2 className="w-10 h-10 text-emerald-400" />
+                            </div>
+                            <h2 className="text-3xl font-bold text-white tracking-wide mb-2">Visitor Registered!</h2>
+                            <p className="text-emerald-100/70 mb-6">Temporary Visitor Registration Successful</p>
+                            
+                            <div className="bg-black/50 border border-emerald-500/30 p-6 rounded-2xl w-full mb-6 relative overflow-hidden group">
+                                <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-transparent"></div>
+                                <p className="text-emerald-200/60 text-sm font-semibold uppercase tracking-wider mb-2">Temporary Visitor ID</p>
+                                <p className="text-4xl font-mono font-bold text-white tracking-widest">{successVisitor.id}</p>
+                                <p className="text-white/80 mt-4 text-lg">{successVisitor.name}</p>
+                            </div>
+                            
+                            <p className="text-emerald-200/80 mb-8 font-medium italic">
+                                "Please use this ID for Manual Entry and for logging your Departure (Exit)."
+                            </p>
+                            
+                            <button
+                                onClick={() => setSuccessVisitor(null)}
+                                className="w-full px-6 py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl transition-all shadow-[0_0_20px_rgba(16,185,129,0.2)] focus:outline-none focus:ring-4 focus:ring-emerald-500/30 text-lg"
+                            >
+                                Done
+                            </button>
                         </div>
                     </div>
                 </div>

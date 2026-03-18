@@ -27,6 +27,42 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
     let schema = include_str!("../../docs/database/schema.sql");
     conn.execute_batch(schema).map_err(|e| format!("Failed to execute schema: {}", e))?;
 
+    // Fix Visitor Schema (dynamically add person_to_visit if missing)
+    let _ = conn.execute("ALTER TABLE visitors ADD COLUMN person_to_visit TEXT DEFAULT ''", params![]);
+
+    // Admin RBAC updates (dynamically add full_name and role if missing)
+    let _ = conn.execute("ALTER TABLE accounts ADD COLUMN full_name VARCHAR DEFAULT 'Administrator'", params![]);
+    let _ = conn.execute("ALTER TABLE accounts ADD COLUMN role VARCHAR DEFAULT 'Super Admin'", params![]);
+
+    // Fix audit_logs CHECK constraint migration:
+    // Old schema used lowercase ('create','read','update','delete') but the Rust code inserts
+    // uppercase ('INSERT','UPDATE','DELETE'). We recreate the table if the old constraint is present.
+    let old_constraint_exists: bool = conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='audit_logs' AND sql LIKE \"%'create'%\"",
+        [],
+        |row| row.get::<_, i64>(0),
+    ).unwrap_or(0) > 0;
+
+    if old_constraint_exists {
+        conn.execute_batch("
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE IF NOT EXISTS audit_logs_new (
+                audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                admin_id INTEGER NOT NULL,
+                action_type TEXT CHECK(action_type IN ('INSERT', 'READ', 'UPDATE', 'DELETE')) NOT NULL,
+                target_table VARCHAR NOT NULL,
+                target_id INTEGER NOT NULL,
+                old_values JSON NULL,
+                new_values JSON NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (admin_id) REFERENCES accounts(account_id)
+            );
+            DROP TABLE audit_logs;
+            ALTER TABLE audit_logs_new RENAME TO audit_logs;
+            PRAGMA foreign_keys = ON;
+        ").map_err(|e| format!("Failed to migrate audit_logs: {}", e))?;
+    }
+
     Ok(pool)
 }
 
@@ -291,6 +327,7 @@ pub fn register_user(
     department_id: Option<i64>,
     position_title: Option<String>,
     purpose: Option<String>,
+    person_to_visit: Option<String>,
     id_presented: Option<String>,
     contact_number: Option<String>,
 ) -> Result<i64, String> {
@@ -320,8 +357,8 @@ pub fn register_user(
         },
         "visitor" => {
             tx.execute(
-                "INSERT INTO visitors (person_id, purpose_of_visit, id_presented, contact_number) VALUES (?1, ?2, ?3, ?4)",
-                params![person_id, purpose.unwrap_or_default(), id_presented.unwrap_or_default(), contact_number.unwrap_or_default()],
+                "INSERT INTO visitors (person_id, purpose_of_visit, person_to_visit, id_presented, contact_number) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![person_id, purpose.unwrap_or_default(), person_to_visit.unwrap_or_default(), id_presented.unwrap_or_default(), contact_number.unwrap_or_default()],
             ).map_err(|e| e.to_string())?;
         },
         _ => return Err("Invalid role specified".to_string()),
@@ -344,6 +381,7 @@ pub fn update_user(
     department_id: Option<i64>,
     position_title: Option<String>,
     purpose: Option<String>,
+    person_to_visit: Option<String>,
     id_presented: Option<String>,
     contact_number: Option<String>,
 ) -> Result<(), String> {
@@ -371,8 +409,8 @@ pub fn update_user(
         },
         "visitor" => {
             tx.execute(
-                "UPDATE visitors SET purpose_of_visit = ?1, id_presented = ?2, contact_number = ?3 WHERE person_id = ?4",
-                params![purpose.unwrap_or_default(), id_presented.unwrap_or_default(), contact_number.unwrap_or_default(), person_id],
+                "UPDATE visitors SET purpose_of_visit = ?1, person_to_visit = ?2, id_presented = ?3, contact_number = ?4 WHERE person_id = ?5",
+                params![purpose.unwrap_or_default(), person_to_visit.unwrap_or_default(), id_presented.unwrap_or_default(), contact_number.unwrap_or_default(), person_id],
             ).map_err(|e| e.to_string())?;
         },
         _ => return Err("Invalid role specified".to_string()),
@@ -445,12 +483,12 @@ pub fn get_visitors(pool: &DbPool) -> Result<Vec<VisitorDetails>, String> {
     
     // Simplistic approach: get the first entry today as time_in, and the last exit today as time_out
     let mut stmt = conn.prepare(
-        "SELECT p.person_id, p.first_name, p.middle_name, p.last_name, v.purpose_of_visit, v.id_presented, v.contact_number,
-            (SELECT MIN(e.scanned_at) FROM entry_logs e JOIN scanners s ON e.scanner_id = s.scanner_id WHERE e.person_id = p.person_id AND s.function = 'entrance' AND DATE(e.scanned_at) = DATE('now', 'localtime')) as time_in,
-            (SELECT MAX(e.scanned_at) FROM entry_logs e JOIN scanners s ON e.scanner_id = s.scanner_id WHERE e.person_id = p.person_id AND s.function = 'exit' AND DATE(e.scanned_at) = DATE('now', 'localtime')) as time_out
+        "SELECT p.person_id, p.first_name, p.middle_name, p.last_name, v.purpose_of_visit, v.person_to_visit, v.id_presented, v.contact_number,
+            (SELECT MIN(e.scanned_at) FROM entry_logs e JOIN scanners s ON e.scanner_id = s.scanner_id WHERE e.person_id = p.person_id AND s.function = 'entrance') as time_in,
+            (SELECT MAX(e.scanned_at) FROM entry_logs e JOIN scanners s ON e.scanner_id = s.scanner_id WHERE e.person_id = p.person_id AND s.function = 'exit') as time_out
          FROM persons p
          JOIN visitors v ON p.person_id = v.person_id
-         WHERE p.role = 'visitor' AND p.is_active = 1"
+         WHERE p.role = 'visitor'"
     ).map_err(|e| e.to_string())?;
 
     let iter = stmt.query_map([], |row| {
@@ -460,10 +498,11 @@ pub fn get_visitors(pool: &DbPool) -> Result<Vec<VisitorDetails>, String> {
             middle_name: row.get(2).unwrap_or(None),
             last_name: row.get(3)?,
             purpose_of_visit: row.get(4)?,
-            id_presented: row.get(5)?,
-            contact_number: row.get(6)?,
-            time_in: row.get(7).unwrap_or(None),
-            time_out: row.get(8).unwrap_or(None),
+            person_to_visit: row.get(5)?,
+            id_presented: row.get(6)?,
+            contact_number: row.get(7)?,
+            time_in: row.get(8).unwrap_or(None),
+            time_out: row.get(9).unwrap_or(None),
         })
     }).map_err(|e| e.to_string())?;
 
@@ -582,6 +621,77 @@ pub fn get_access_logs(pool: &DbPool, start_date: Option<String>, end_date: Opti
     }
 
     
+    Ok(list)
+}
+
+pub fn get_event_attendance_logs(pool: &DbPool, start_date: Option<String>, end_date: Option<String>) -> Result<Vec<EventAttendanceLog>, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let mut base_query = "
+        SELECT a.attendance_id, p.first_name, p.last_name, p.school_id_number, p.role, e.event_name, a.scanned_at
+        FROM event_attendance a
+        JOIN persons p ON a.person_id = p.person_id
+        JOIN events e ON a.event_id = e.event_id
+    ".to_string();
+
+    if start_date.is_some() && end_date.is_some() {
+        base_query.push_str(" WHERE DATE(a.scanned_at) BETWEEN DATE(?1) AND DATE(?2)");
+    } else if start_date.is_some() {
+        base_query.push_str(" WHERE DATE(a.scanned_at) >= DATE(?1)");
+    } else if end_date.is_some() {
+        base_query.push_str(" WHERE DATE(a.scanned_at) <= DATE(?1)");
+    }
+
+    base_query.push_str(" ORDER BY a.scanned_at DESC LIMIT 100");
+
+    let mut stmt = conn.prepare(&base_query).map_err(|e| e.to_string())?;
+
+    let mut list = Vec::new();
+
+    if let (Some(start), Some(end)) = (&start_date, &end_date) {
+        let iter = stmt.query_map(params![start, end], |row| {
+            let first_name: String = row.get(1)?;
+            let last_name: String = row.get(2)?;
+            Ok(EventAttendanceLog {
+                log_id: row.get(0)?,
+                person_name: format!("{} {}", first_name, last_name),
+                school_id_number: row.get(3)?,
+                role: row.get(4)?,
+                event_name: row.get(5)?,
+                scanned_at: row.get(6)?,
+            })
+        }).map_err(|e| e.to_string())?;
+        for item in iter { list.push(item.map_err(|e| e.to_string())?); }
+    } else if let Some(date) = start_date.or(end_date) {
+        let iter = stmt.query_map(params![date], |row| {
+            let first_name: String = row.get(1)?;
+            let last_name: String = row.get(2)?;
+            Ok(EventAttendanceLog {
+                log_id: row.get(0)?,
+                person_name: format!("{} {}", first_name, last_name),
+                school_id_number: row.get(3)?,
+                role: row.get(4)?,
+                event_name: row.get(5)?,
+                scanned_at: row.get(6)?,
+            })
+        }).map_err(|e| e.to_string())?;
+        for item in iter { list.push(item.map_err(|e| e.to_string())?); }
+    } else {
+        let iter = stmt.query_map([], |row| {
+            let first_name: String = row.get(1)?;
+            let last_name: String = row.get(2)?;
+            Ok(EventAttendanceLog {
+                log_id: row.get(0)?,
+                person_name: format!("{} {}", first_name, last_name),
+                school_id_number: row.get(3)?,
+                role: row.get(4)?,
+                event_name: row.get(5)?,
+                scanned_at: row.get(6)?,
+            })
+        }).map_err(|e| e.to_string())?;
+        for item in iter { list.push(item.map_err(|e| e.to_string())?); }
+    }
+
     Ok(list)
 }
 
@@ -748,9 +858,10 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
 
 
         // 2b. Insert into entry_logs
+        let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         conn.execute(
-            "INSERT INTO entry_logs (person_id, scanner_id) VALUES (?1, ?2)",
-            params![person_id, scanner_id],
+            "INSERT INTO entry_logs (person_id, scanner_id, scanned_at) VALUES (?1, ?2, ?3)",
+            params![person_id, scanner_id, now],
         ).map_err(|e| e.to_string())?;
 
         Ok(ScanResult {
@@ -841,9 +952,10 @@ pub fn manual_id_entry(pool: &DbPool, school_id: &str, scanner_function: &str) -
              }
         }
 
+        let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         conn.execute(
-            "INSERT INTO entry_logs (person_id, scanner_id) VALUES (?1, ?2)",
-            params![person_id, scanner_id],
+            "INSERT INTO entry_logs (person_id, scanner_id, scanned_at) VALUES (?1, ?2, ?3)",
+            params![person_id, scanner_id, now],
         ).map_err(|e| e.to_string())?;
 
         Ok(ScanResult {
@@ -940,50 +1052,130 @@ pub fn get_audit_logs(pool: &DbPool, start_date: Option<String>, end_date: Optio
         }).map_err(|e| e.to_string())?;
         for log in iter { if let Ok(l) = log { logs.push(l); } }
     }
-    
+
     Ok(logs)
 }
 
 // ------ Admin Dashboard & Auth ------
 
-pub fn admin_login(pool: &DbPool, password: &str) -> Result<bool, String> {
+pub fn admin_login(pool: &DbPool, username: &str, password: &str) -> Result<AdminLoginResponse, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     
-    let mut stmt = conn.prepare("SELECT password_hash FROM accounts WHERE username = 'admin'")
+    let mut stmt = conn.prepare("SELECT account_id, password_hash, full_name, role, created_at FROM accounts WHERE username = ?1")
         .map_err(|e| e.to_string())?;
         
-    let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+    let mut rows = stmt.query(params![username]).map_err(|e| e.to_string())?;
     
     if let Some(row) = rows.next().map_err(|e| e.to_string())? {
-        let stored_hash: String = row.get(0).map_err(|e| e.to_string())?;
+        let account_id: i64 = row.get(0).map_err(|e| e.to_string())?;
+        let stored_hash: String = row.get(1).map_err(|e| e.to_string())?;
+        let full_name: String = row.get(2).map_err(|e| e.to_string())?;
+        let role: String = row.get(3).map_err(|e| e.to_string())?;
+        let created_at: String = row.get(4).map_err(|e| e.to_string())?;
+        
         if stored_hash == password {
-            return Ok(true);
+            return Ok(AdminLoginResponse {
+                success: true,
+                message: "Login successful".to_string(),
+                account: Some(AdminAccount {
+                    account_id,
+                    username: username.to_string(),
+                    full_name,
+                    role,
+                    created_at,
+                }),
+            });
         }
     }
     
-    Ok(false)
+    Ok(AdminLoginResponse {
+        success: false,
+        message: "Invalid credentials".to_string(),
+        account: None,
+    })
 }
 
-pub fn update_admin_credentials(pool: &DbPool, current_password: &str, new_password: &str) -> Result<bool, String> {
+pub fn update_admin_credentials(pool: &DbPool, account_id: i64, current_password: &str, new_password: &str) -> Result<bool, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     
-    let mut stmt = conn.prepare("SELECT password_hash FROM accounts WHERE username = 'admin'")
+    let mut stmt = conn.prepare("SELECT password_hash FROM accounts WHERE account_id = ?1")
         .map_err(|e| e.to_string())?;
         
-    let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
+    let mut rows = stmt.query(params![account_id]).map_err(|e| e.to_string())?;
     
     if let Some(row) = rows.next().map_err(|e| e.to_string())? {
         let stored_hash: String = row.get(0).map_err(|e| e.to_string())?;
         if stored_hash == current_password {
             conn.execute(
-                "UPDATE accounts SET password_hash = ?1 WHERE username = 'admin'",
-                params![new_password],
+                "UPDATE accounts SET password_hash = ?1 WHERE account_id = ?2",
+                params![new_password, account_id],
             ).map_err(|e| e.to_string())?;
             return Ok(true);
         }
     }
     
     Ok(false)
+}
+
+pub fn get_admin_accounts(pool: &DbPool) -> Result<Vec<AdminAccount>, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT account_id, username, full_name, role, created_at FROM accounts")
+        .map_err(|e| e.to_string())?;
+        
+    let iter = stmt.query_map([], |row| {
+        Ok(AdminAccount {
+            account_id: row.get(0)?,
+            username: row.get(1)?,
+            full_name: row.get(2)?,
+            role: row.get(3)?,
+            created_at: row.get(4)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut list = Vec::new();
+    for item in iter { list.push(item.map_err(|e| e.to_string())?); }
+    Ok(list)
+}
+
+pub fn add_admin_account(pool: &DbPool, username: &str, password: &str, full_name: &str, role: &str, active_admin_id: i64) -> Result<i64, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO accounts (username, password_hash, full_name, role) VALUES (?1, ?2, ?3, ?4)",
+        params![username, password, full_name, role],
+    ).map_err(|e| e.to_string())?;
+    let target_id = conn.last_insert_rowid();
+
+    let _ = log_audit_action(pool, active_admin_id, "INSERT", "accounts", target_id);
+    Ok(target_id)
+}
+
+pub fn update_admin_role(pool: &DbPool, account_id: i64, new_role: &str, active_admin_id: i64) -> Result<(), String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    conn.execute("UPDATE accounts SET role = ?1 WHERE account_id = ?2", params![new_role, account_id])
+        .map_err(|e| e.to_string())?;
+        
+    let _ = log_audit_action(pool, active_admin_id, "UPDATE", "accounts", account_id);
+    Ok(())
+}
+
+pub fn reset_admin_password(pool: &DbPool, account_id: i64, new_password: &str, active_admin_id: i64) -> Result<(), String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    conn.execute("UPDATE accounts SET password_hash = ?1 WHERE account_id = ?2", params![new_password, account_id])
+        .map_err(|e| e.to_string())?;
+        
+    let _ = log_audit_action(pool, active_admin_id, "UPDATE", "accounts", account_id);
+    Ok(())
+}
+
+pub fn update_admin_info(pool: &DbPool, account_id: i64, username: &str, full_name: &str, active_admin_id: i64) -> Result<(), String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE accounts SET username = ?1, full_name = ?2 WHERE account_id = ?3",
+        params![username, full_name, account_id],
+    ).map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(pool, active_admin_id, "UPDATE", "accounts", account_id);
+    Ok(())
 }
 
 pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
@@ -1030,6 +1222,132 @@ pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
         exits_today,
         attendance_trend,
     })
+}
+
+pub fn log_event_attendance(pool: &DbPool, event_id: i64, school_id: &str) -> Result<ScanResult, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    // 1. Fetch Event and Validate Date/Time
+    let event: Event = conn.query_row(
+        "SELECT event_id, event_name, event_date, start_time, end_time, required_role, is_enabled FROM events WHERE event_id = ?1",
+        params![event_id],
+        |row| {
+            Ok(Event {
+                event_id: row.get(0)?,
+                event_name: row.get(1)?,
+                event_date: row.get(2)?,
+                start_time: row.get(3)?,
+                end_time: row.get(4)?,
+                required_role: row.get(5)?,
+                is_enabled: row.get::<_, i32>(6)? == 1,
+            })
+        }
+    ).map_err(|_| "Event not found.")?;
+
+    if !event.is_enabled {
+         return Ok(ScanResult {
+             success: false,
+             message: "Attendance Closed: Event is not enabled.".to_string(),
+             person_name: None,
+             role: None,
+         });
+    }
+
+    let now = chrono::Local::now();
+    let current_day = now.format("%A").to_string(); // e.g. "Monday"
+    let current_date = now.format("%Y-%m-%d").to_string(); // e.g. "2026-03-18"
+    let current_time = now.format("%H:%M").to_string(); // e.g. "14:53"
+
+    let is_valid_day = event.event_date == current_date || 
+                       event.event_date.to_lowercase() == current_day.to_lowercase() ||
+                       event.event_date.to_lowercase() == format!("every {}", current_day.to_lowercase()) ||
+                       event.event_date.to_lowercase() == "everyday";
+
+    let is_valid_time = current_time >= event.start_time && current_time <= event.end_time;
+
+    if !is_valid_day || !is_valid_time {
+         return Ok(ScanResult {
+             success: false,
+             message: "Attendance Closed: No active event at this time.".to_string(),
+             person_name: None,
+             role: None,
+         });
+    }
+
+    // 2. Check if person exists and is active
+    let mut stmt = conn.prepare("SELECT person_id, first_name, last_name, role, is_active FROM persons WHERE school_id_number = ?1")
+        .map_err(|e| e.to_string())?;
+        
+    let mut person_iter = stmt.query_map(params![school_id], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, i32>(4)? == 1,
+        ))
+    }).map_err(|e| e.to_string())?;
+
+    let person_data = person_iter.next();
+
+    if let Some(Ok((person_id, first_name, last_name, role, is_active))) = person_data {
+        if !is_active {
+            return Ok(ScanResult {
+                success: false,
+                message: "Access Denied: ID is inactive.".to_string(),
+                person_name: Some(format!("{} {}", first_name, last_name)),
+                role: Some(role),
+            });
+        }
+
+        // Check if role matches Required Role (unless "all")
+        if event.required_role != "all" && event.required_role.to_lowercase() != role.to_lowercase() {
+            return Ok(ScanResult {
+                success: false,
+                message: format!("Access Denied: Event requires {} role.", event.required_role),
+                person_name: Some(format!("{} {}", first_name, last_name)),
+                role: Some(role),
+            });
+        }
+
+        // 3. Check if already recorded for this event
+        let existing: Option<i64> = conn.query_row(
+            "SELECT attendance_id FROM event_attendance WHERE event_id = ?1 AND person_id = ?2",
+            params![event_id, person_id],
+            |row| row.get(0)
+        ).optional().map_err(|e| e.to_string())?;
+
+        if existing.is_some() {
+            return Ok(ScanResult {
+                success: false,
+                message: "Attendance already recorded for this event".to_string(),
+                person_name: Some(format!("{} {}", first_name, last_name)),
+                role: Some(role),
+            });
+        }
+
+        // 4. Insert into event_attendance
+        let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        conn.execute(
+            "INSERT INTO event_attendance (event_id, person_id, scanned_at) VALUES (?1, ?2, ?3)",
+            params![event_id, person_id, now],
+        ).map_err(|e| e.to_string())?;
+
+        Ok(ScanResult {
+            success: true,
+            message: "Event Attendance Recorded Successfully.".to_string(),
+            person_name: Some(format!("{} {}", first_name, last_name)),
+            role: Some(role),
+        })
+
+    } else {
+        Ok(ScanResult {
+            success: false,
+            message: "Access Denied: ID not found.".to_string(),
+            person_name: None,
+            role: None,
+        })
+    }
 }
 
 #[cfg(test)]

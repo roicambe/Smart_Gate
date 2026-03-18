@@ -94,7 +94,7 @@ export const AdminDashboard = () => {
                         </div>
                         <h3 className="text-xl font-bold text-slate-900 tracking-wide">Today's Traffic Flow</h3>
                     </div>
-                    <div className="flex-1 w-full relative pl-2">
+                    <div className="flex-1 w-full relative pl-2" style={{ minHeight: '280px' }}>
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={barData} margin={{ top: 20, right: 10, left: -20, bottom: 0 }}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
@@ -121,7 +121,7 @@ export const AdminDashboard = () => {
                         </div>
                         <h3 className="text-xl font-bold text-slate-900 tracking-wide">7-Day Attendance Trend</h3>
                     </div>
-                    <div className="flex-1 w-full relative">
+                    <div className="flex-1 w-full relative" style={{ minHeight: '280px' }}>
                         <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={attendance_trend} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
                                 <defs>
