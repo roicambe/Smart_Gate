@@ -284,7 +284,7 @@ export const AcademicStructure = () => {
                                     }
 
                                     return (
-                                        <tr key={itemId} className="hover:bg-slate-50 even:bg-slate-50/50 transition-colors group">
+                                        <tr key={`${activeTab}-${itemId}`} className="hover:bg-slate-50 even:bg-slate-50/50 transition-colors group">
                                             <td className="px-6 py-4 font-mono font-medium text-slate-900">{code}</td>
                                             <td className="px-6 py-4 font-medium text-slate-900">{name}</td>
                                             {activeTab === 'program' && <td className="px-6 py-4 text-slate-600">{deptName}</td>}

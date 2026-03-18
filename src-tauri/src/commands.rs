@@ -51,7 +51,22 @@ pub fn add_person(
 
 #[tauri::command] pub fn get_scanners(pool: State<'_, DbPool>) -> Result<Vec<Scanner>, String> { db::get_scanners(&pool) }
 #[tauri::command] pub fn add_scanner(pool: State<'_, DbPool>, scanner: Scanner) -> Result<i64, String> { db::add_scanner(&pool, scanner) }
-#[tauri::command] pub fn get_access_logs(pool: State<'_, DbPool>, start_date: Option<String>, end_date: Option<String>) -> Result<Vec<AccessLogDetails>, String> { db::get_access_logs(&pool, start_date, end_date) }
+#[tauri::command] pub fn get_access_logs(
+    pool: State<'_, DbPool>,
+    start_date: Option<String>,
+    end_date: Option<String>,
+) -> Result<Vec<AccessLogDetails>, String> {
+    db::get_access_logs(&pool, start_date, end_date)
+}
+
+#[tauri::command]
+pub fn get_event_attendance_logs(
+    pool: State<'_, DbPool>,
+    start_date: Option<String>,
+    end_date: Option<String>,
+) -> Result<Vec<EventAttendanceLog>, String> {
+    db::get_event_attendance_logs(&pool, start_date, end_date)
+}
 
 #[tauri::command] pub fn get_events(pool: State<'_, DbPool>) -> Result<Vec<Event>, String> { db::get_events(&pool) }
 #[tauri::command] pub fn add_event(pool: State<'_, DbPool>, event: Event) -> Result<i64, String> { db::add_event(&pool, event) }
@@ -65,13 +80,38 @@ pub fn add_person(
 pub fn get_audit_logs(pool: State<'_, DbPool>, start_date: Option<String>, end_date: Option<String>) -> Result<Vec<AuditLogDetails>, String> {
     db::get_audit_logs(&pool, start_date, end_date)
 }#[tauri::command]
-pub fn admin_login(pool: State<'_, DbPool>, password: String) -> Result<bool, String> {
-    db::admin_login(&pool, &password)
+pub fn admin_login(pool: State<'_, DbPool>, username: String, password: String) -> Result<AdminLoginResponse, String> {
+    db::admin_login(&pool, &username, &password)
 }
 
 #[tauri::command]
-pub fn update_admin_credentials(pool: State<'_, DbPool>, current_password: String, new_password: String) -> Result<bool, String> {
-    db::update_admin_credentials(&pool, &current_password, &new_password)
+pub fn update_admin_credentials(pool: State<'_, DbPool>, account_id: i64, current_password: String, new_password: String) -> Result<bool, String> {
+    db::update_admin_credentials(&pool, account_id, &current_password, &new_password)
+}
+
+#[tauri::command]
+pub fn get_admin_accounts(pool: State<'_, DbPool>) -> Result<Vec<AdminAccount>, String> {
+    db::get_admin_accounts(&pool)
+}
+
+#[tauri::command]
+pub fn add_admin_account(pool: State<'_, DbPool>, username: String, password: String, full_name: String, role: String, active_admin_id: i64) -> Result<i64, String> {
+    db::add_admin_account(&pool, &username, &password, &full_name, &role, active_admin_id)
+}
+
+#[tauri::command]
+pub fn update_admin_role(pool: State<'_, DbPool>, account_id: i64, new_role: String, active_admin_id: i64) -> Result<(), String> {
+    db::update_admin_role(&pool, account_id, &new_role, active_admin_id)
+}
+
+#[tauri::command]
+pub fn reset_admin_password(pool: State<'_, DbPool>, account_id: i64, new_password: String, active_admin_id: i64) -> Result<(), String> {
+    db::reset_admin_password(&pool, account_id, &new_password, active_admin_id)
+}
+
+#[tauri::command]
+pub fn update_admin_info(pool: State<'_, DbPool>, account_id: i64, username: String, full_name: String, active_admin_id: i64) -> Result<(), String> {
+    db::update_admin_info(&pool, account_id, &username, &full_name, active_admin_id)
 }
 
 #[tauri::command]
@@ -97,6 +137,7 @@ pub fn register_user(
     department_id: Option<i64>,
     position_title: Option<String>,
     purpose: Option<String>,
+    person_to_visit: Option<String>,
     id_presented: Option<String>,
     contact_number: Option<String>,
 ) -> Result<i64, String> {
@@ -112,6 +153,7 @@ pub fn register_user(
         department_id,
         position_title,
         purpose,
+        person_to_visit,
         id_presented,
         contact_number,
     )
@@ -140,6 +182,7 @@ pub fn update_user(
     department_id: Option<i64>,
     position_title: Option<String>,
     purpose: Option<String>,
+    person_to_visit: Option<String>,
     id_presented: Option<String>,
     contact_number: Option<String>,
 ) -> Result<(), String> {
@@ -156,6 +199,7 @@ pub fn update_user(
         department_id,
         position_title,
         purpose,
+        person_to_visit,
         id_presented,
         contact_number,
     )
@@ -164,4 +208,9 @@ pub fn update_user(
 #[tauri::command]
 pub fn delete_user(pool: State<'_, DbPool>, person_id: i64, role: String) -> Result<(), String> {
     db::delete_user(&pool, person_id, &role)
+}
+
+#[tauri::command]
+pub fn log_event_attendance(pool: State<'_, DbPool>, event_id: i64, school_id: String) -> Result<ScanResult, String> {
+    db::log_event_attendance(&pool, event_id, &school_id)
 }

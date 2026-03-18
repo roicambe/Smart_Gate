@@ -42,12 +42,10 @@ export const EventManagement = () => {
     const handleRegisterSubmit = async (e) => {
         e.preventDefault();
         try {
-            const finalDate = formData.event_name.trim().toLowerCase() === 'flag ceremony' ? 'Every Monday' : formData.event_date;
             await invoke('add_event', {
                 event: {
                     event_id: 0,
-                    ...formData,
-                    event_date: finalDate
+                    ...formData
                 }
             });
             setStatus({ type: 'success', message: 'Event added successfully!' });
@@ -76,13 +74,11 @@ export const EventManagement = () => {
     const handleEditSubmit = async (e) => {
         e.preventDefault();
         try {
-            const finalDate = formData.event_name.trim().toLowerCase() === 'flag ceremony' ? 'Every Monday' : formData.event_date;
             await invoke('update_event', {
                 eventId: selectedEvent.event_id,
                 event: {
                     event_id: selectedEvent.event_id,
-                    ...formData,
-                    event_date: finalDate
+                    ...formData
                 }
             });
             setStatus({ type: 'success', message: 'Event updated successfully!' });
@@ -237,12 +233,18 @@ export const EventManagement = () => {
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="block text-xs text-white/60 mb-1 font-medium">Event Date <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                        {formData.event_name.trim().toLowerCase() === 'flag ceremony' ? (
-                                            <input disabled type="text" value="Every Monday" className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white/50 focus:outline-none cursor-not-allowed" />
-                                        ) : (
-                                            <input required type="date" value={formData.event_date} onChange={e => setFormData({ ...formData, event_date: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" style={{ colorScheme: 'dark' }} />
-                                        )}
+                                        <label className="block text-xs text-white/60 mb-1 font-medium">Event Day / Date <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                        <select required value={formData.event_date} onChange={e => setFormData({ ...formData, event_date: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none appearance-none">
+                                            <option value="" className="bg-slate-900" disabled>Select Day</option>
+                                            <option value="Monday" className="bg-slate-900">Every Monday</option>
+                                            <option value="Tuesday" className="bg-slate-900">Every Tuesday</option>
+                                            <option value="Wednesday" className="bg-slate-900">Every Wednesday</option>
+                                            <option value="Thursday" className="bg-slate-900">Every Thursday</option>
+                                            <option value="Friday" className="bg-slate-900">Every Friday</option>
+                                            <option value="Saturday" className="bg-slate-900">Every Saturday</option>
+                                            <option value="Sunday" className="bg-slate-900">Every Sunday</option>
+                                            <option value="Everyday" className="bg-slate-900">Everyday</option>
+                                        </select>
                                     </div>
                                     <div>
                                         <label className="block text-xs text-white/60 mb-1 font-medium">Required Role <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>

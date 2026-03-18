@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Users, Search, Edit2, Trash2, X, AlertCircle, CheckCircle2, UserPlus, Eye, Check, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
-export const UserManagement = () => {
+export const UserManagement = ({ adminSession }) => {
+    const isSuperAdmin = adminSession?.role === 'Super Admin';
     const [mainTab, setMainTab] = useState('members'); // 'members', 'visitors'
     const [subTab, setSubTab] = useState('student'); // 'student', 'professor', 'staff'
     const activeRole = mainTab === 'visitors' ? 'visitor' : subTab;
@@ -249,12 +250,14 @@ export const UserManagement = () => {
                     <h1 className="text-3xl font-bold text-slate-900 mb-2">User Registry</h1>
                     <p className="text-slate-500">Manage students, professors, staff, and visitors.</p>
                 </div>
-                <button
-                    onClick={handleRegisterClick}
-                    className="flex items-center gap-2 bg-blue-600 text-white hover:bg-blue-700 px-5 py-2.5 rounded-xl font-bold shadow-sm transition-all focus:outline-none focus:ring-4 focus:ring-blue-500/30"
-                >
-                    <UserPlus className="w-5 h-5" /> Register Profile
-                </button>
+                {isSuperAdmin && (
+                    <button
+                        onClick={handleRegisterClick}
+                        className="flex items-center gap-2 bg-blue-600 text-white hover:bg-blue-700 px-5 py-2.5 rounded-xl font-bold shadow-sm transition-all focus:outline-none focus:ring-4 focus:ring-blue-500/30"
+                    >
+                        <UserPlus className="w-5 h-5" /> Register Profile
+                    </button>
+                )}
             </div>
 
             {/* Controls: Tabs & Search */}
@@ -311,23 +314,34 @@ export const UserManagement = () => {
                     <table className="w-full text-left text-sm text-slate-600">
                         <thead className="text-xs uppercase bg-slate-100 border-b border-slate-200 text-slate-700 sticky top-0 z-10">
                             <tr>
-                                <th className="px-6 py-4 font-semibold tracking-wider">{mainTab === 'visitors' ? 'Presented ID' : 'ID Number'}</th>
-                                <th className="px-6 py-4 font-semibold tracking-wider">Name</th>
-                                <th className="px-6 py-4 font-semibold tracking-wider">
-                                    {mainTab === 'visitors' ? 'Purpose of Visit' : (subTab === 'student' ? 'Program / Year' : 'Department')}
-                                </th>
-                                <th className="px-6 py-4 font-semibold tracking-wider">Status / Time</th>
+                                <th className="px-6 py-4 font-semibold tracking-wider">ID Number</th>
+                                <th className="px-6 py-4 font-semibold tracking-wider">Full Name</th>
+                                {mainTab === 'visitors' ? (
+                                    <>
+                                        <th className="px-6 py-4 font-semibold tracking-wider">Purpose</th>
+                                        <th className="px-6 py-4 font-semibold tracking-wider">Person to Visit</th>
+                                        <th className="px-6 py-4 font-semibold tracking-wider">Registration Date</th>
+                                        <th className="px-6 py-4 font-semibold tracking-wider">Registration Time</th>
+                                    </>
+                                ) : (
+                                    <>
+                                        <th className="px-6 py-4 font-semibold tracking-wider">
+                                            {subTab === 'student' ? 'Program / Year' : 'Department'}
+                                        </th>
+                                        <th className="px-6 py-4 font-semibold tracking-wider">Status</th>
+                                    </>
+                                )}
                                 <th className="px-6 py-4 font-semibold tracking-wider text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {isLoading ? (
                                 <tr>
-                                    <td colSpan="5" className="text-center py-20 text-slate-500">Loading data...</td>
+                                    <td colSpan={mainTab === 'visitors' ? 7 : 5} className="text-center py-20 text-slate-500">Loading data...</td>
                                 </tr>
                             ) : filteredUsers.length === 0 ? (
                                 <tr>
-                                    <td colSpan="5" className="text-center py-20">
+                                    <td colSpan={mainTab === 'visitors' ? 7 : 5} className="text-center py-20">
                                         <div className="flex flex-col items-center justify-center space-y-3">
                                             <Users className="w-12 h-12 text-slate-300" />
                                             <p className="text-slate-500 text-base">No {activeRole}s found.</p>
@@ -339,28 +353,32 @@ export const UserManagement = () => {
                                     <tr key={user.person_id} className="hover:bg-slate-50 even:bg-slate-50/50 transition-colors group">
                                         <td className="px-6 py-4 font-mono font-medium text-slate-900">{mainTab === 'visitors' ? user.id_presented : user.school_id_number}</td>
                                         <td className="px-6 py-4 font-medium text-slate-900">{user.first_name} {user.last_name || ''}</td>
-                                        <td className="px-6 py-4 text-slate-600">
-                                            {mainTab === 'visitors'
-                                                ? user.purpose_of_visit
-                                                : (subTab === 'student'
-                                                    ? `${user.program_name} ${user.year_level ? `- Yr ${user.year_level}` : ''}`
-                                                    : `${user.department_name || 'N/A'} - ${user.position_title}`)
-                                            }
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            {mainTab === 'visitors' ? (
-                                                <div className="text-xs">
-                                                    <span className="text-emerald-600">IN: {user.time_in ? new Date(user.time_in).toLocaleTimeString([], { timeStyle: 'short' }) : '--:--'}</span>
-                                                    <br />
-                                                    <span className="text-rose-600">OUT: {user.time_out ? new Date(user.time_out).toLocaleTimeString([], { timeStyle: 'short' }) : '--:--'}</span>
-                                                </div>
-                                            ) : (
-                                                <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${user.is_active ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-rose-100 text-rose-700 border border-rose-200'
-                                                    }`}>
-                                                    {user.is_active ? 'Active' : 'Inactive'}
-                                                </span>
-                                            )}
-                                        </td>
+                                        {mainTab === 'visitors' ? (
+                                            <>
+                                                <td className="px-6 py-4 text-slate-600">{user.purpose_of_visit}</td>
+                                                <td className="px-6 py-4 text-slate-600">{user.person_to_visit || 'N/A'}</td>
+                                                <td className="px-6 py-4 text-slate-600">
+                                                    {user.time_in ? new Date(user.time_in).toLocaleDateString() : 'N/A'}
+                                                </td>
+                                                <td className="px-6 py-4 text-slate-600">
+                                                    {user.time_in ? new Date(user.time_in).toLocaleTimeString([], { timeStyle: 'short' }) : 'N/A'}
+                                                </td>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <td className="px-6 py-4 text-slate-600">
+                                                    {subTab === 'student'
+                                                        ? `${user.program_name} ${user.year_level ? `- Yr ${user.year_level}` : ''}`
+                                                        : `${user.department_name || 'N/A'} - ${user.position_title}`}
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${user.is_active ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-rose-100 text-rose-700 border border-rose-200'
+                                                        }`}>
+                                                        {user.is_active ? 'Active' : 'Inactive'}
+                                                    </span>
+                                                </td>
+                                            </>
+                                        )}
                                         <td className="px-6 py-4 text-right space-x-2">
                                             <button
                                                 className="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors border border-transparent hover:border-blue-200 opacity-0 group-hover:opacity-100 focus:opacity-100"
@@ -368,14 +386,18 @@ export const UserManagement = () => {
                                                 onClick={() => handleViewClick(user)}>
                                                 <Eye className="w-4 h-4" />
                                             </button>
-                                            <button className="p-2 text-amber-600 hover:bg-amber-100 rounded-lg transition-colors border border-transparent hover:border-amber-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Edit"
-                                                onClick={() => handleEditClick(user)}>
-                                                <Edit2 className="w-4 h-4" />
-                                            </button>
-                                            <button className="p-2 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors border border-transparent hover:border-rose-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Delete"
-                                                onClick={() => handleDeleteClick(user)}>
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
+                                            {isSuperAdmin && (
+                                                <>
+                                                    <button className="p-2 text-amber-600 hover:bg-amber-100 rounded-lg transition-colors border border-transparent hover:border-amber-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Edit"
+                                                        onClick={() => handleEditClick(user)}>
+                                                        <Edit2 className="w-4 h-4" />
+                                                    </button>
+                                                    <button className="p-2 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors border border-transparent hover:border-rose-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Delete"
+                                                        onClick={() => handleDeleteClick(user)}>
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                </>
+                                            )}
                                         </td>
                                     </tr>
                                 ))
@@ -609,9 +631,11 @@ export const UserManagement = () => {
                                 <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Role</p><p className="font-semibold text-slate-900 capitalize">{activeRole}</p></div>
                                 {activeRole === 'visitor' ? (
                                     <>
+                                        <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Contact Option</p><p className="font-semibold text-slate-900">{selectedUser.contact_number || 'N/A'}</p></div>
                                         <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Purpose</p><p className="font-semibold text-slate-900">{selectedUser.purpose_of_visit}</p></div>
-                                        <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Time In</p><p className="font-semibold text-slate-900">{selectedUser.time_in ? new Date(selectedUser.time_in).toLocaleString() : '--'}</p></div>
-                                        <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Time Out</p><p className="font-semibold text-slate-900">{selectedUser.time_out ? new Date(selectedUser.time_out).toLocaleString() : '--'}</p></div>
+                                        <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Person to Visit</p><p className="font-semibold text-slate-900">{selectedUser.person_to_visit || 'N/A'}</p></div>
+                                        <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Reg. Date/Time</p><p className="font-semibold text-slate-900">{selectedUser.time_in ? new Date(selectedUser.time_in).toLocaleString() : '--'}</p></div>
+                                        <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Exit Time</p><p className="font-semibold text-slate-900">{selectedUser.time_out ? new Date(selectedUser.time_out).toLocaleString() : '--'}</p></div>
                                     </>
                                 ) : (
                                     <>

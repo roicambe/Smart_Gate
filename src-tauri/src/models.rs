@@ -114,10 +114,45 @@ pub struct VisitorDetails {
     pub middle_name: Option<String>,
     pub last_name: String,
     pub purpose_of_visit: String,
+    pub person_to_visit: String,
     pub id_presented: String,
     pub contact_number: String,
     pub time_in: Option<String>,
     pub time_out: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct EventAttendance {
+    pub attendance_id: i64,
+    pub event_id: i64,
+    pub person_id: i64,
+    pub scanned_at: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct EventAttendanceLog {
+    pub log_id: i64,
+    pub person_name: String,
+    pub school_id_number: String,
+    pub role: String,
+    pub event_name: String,
+    pub scanned_at: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AdminAccount {
+    pub account_id: i64,
+    pub username: String,
+    pub full_name: String,
+    pub role: String,
+    pub created_at: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AdminLoginResponse {
+    pub success: bool,
+    pub message: String,
+    pub account: Option<AdminAccount>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

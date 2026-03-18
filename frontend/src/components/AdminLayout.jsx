@@ -9,24 +9,28 @@ import { AcademicStructure } from './views/AcademicStructure';
 import { EventManagement } from './views/EventManagement';
 import { AuditTrail } from './views/AuditTrail';
 
-export const AdminLayout = ({ view, setView, setIsAdminLoggedIn }) => {
-    const navItems = [
+export const AdminLayout = ({ view, setView, setIsAdminLoggedIn, adminSession }) => {
+    const isSuperAdmin = adminSession?.role === 'Super Admin';
+
+    const rawNavItems = [
         { id: 'admin_dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { id: 'admin_access_logs', label: 'Access Logs', icon: History },
         { id: 'admin_users', label: 'User Registry', icon: Users },
-        { id: 'admin_academic', label: 'Academic Structure', icon: Building },
-        { id: 'admin_events', label: 'Event Management', icon: Calendar },
-        { id: 'admin_face', label: 'Face Recognition', icon: ScanFace },
-        { id: 'admin_audit', label: 'Audit Trail', icon: ShieldAlert },
-        { id: 'admin_settings', label: 'System Settings', icon: Settings },
+        { id: 'admin_academic', label: 'Academic Structure', icon: Building, reqSuper: true },
+        { id: 'admin_events', label: 'Event Management', icon: Calendar, reqSuper: true },
+        { id: 'admin_face', label: 'Face Recognition', icon: ScanFace, reqSuper: true },
+        { id: 'admin_audit', label: 'Audit Trail', icon: ShieldAlert, reqSuper: true },
+        { id: 'admin_settings', label: 'System Settings', icon: Settings, reqSuper: true },
     ];
+
+    const navItems = rawNavItems.filter(item => !item.reqSuper || isSuperAdmin);
 
     const renderView = () => {
         switch (view) {
             case 'admin_dashboard': return <AdminDashboard />;
             case 'admin_access_logs': return <AccessLogs />;
-            case 'admin_settings': return <SystemSettings setIsAdminLoggedIn={setIsAdminLoggedIn} setView={setView} />;
-            case 'admin_users': return <UserManagement />;
+            case 'admin_settings': return <SystemSettings setIsAdminLoggedIn={setIsAdminLoggedIn} setView={setView} adminSession={adminSession} />;
+            case 'admin_users': return <UserManagement adminSession={adminSession} />;
 
             case 'admin_academic': return <AcademicStructure />;
             case 'admin_events': return <EventManagement />;
