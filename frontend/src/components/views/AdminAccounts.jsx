@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { ShieldCheck, UserPlus, KeyRound, Edit2, X, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export const AdminAccounts = ({ adminSession }) => {
+    const ROLE_OPTIONS = ['System Administrator', 'Gate Supervisor'];
     const [accounts, setAccounts] = useState([]);
     const [status, setStatus] = useState(null);
 
@@ -13,7 +14,7 @@ export const AdminAccounts = ({ adminSession }) => {
     const [selectedAccount, setSelectedAccount] = useState(null);
 
     // Forms
-    const [addForm, setAddForm] = useState({ username: '', password: '', full_name: '', role: 'Admin' });
+    const [addForm, setAddForm] = useState({ username: '', password: '', full_name: '', role: 'System Administrator' });
     const [resetPass, setResetPass] = useState('');
     const [editForm, setEditForm] = useState({ username: '', full_name: '' });
 
@@ -40,9 +41,9 @@ export const AdminAccounts = ({ adminSession }) => {
                 role: addForm.role,
                 activeAdminId: adminSession.account_id
             });
-            setStatus({ type: 'success', message: 'Admin account created successfully.' });
+            setStatus({ type: 'success', message: 'Administrator account created successfully.' });
             setShowAddModal(false);
-            setAddForm({ username: '', password: '', full_name: '', role: 'Admin' });
+            setAddForm({ username: '', password: '', full_name: '', role: 'System Administrator' });
             fetchAccounts();
         } catch (e) {
             setStatus({ type: 'error', message: typeof e === 'string' ? e : 'Failed to create.' });
@@ -128,7 +129,7 @@ export const AdminAccounts = ({ adminSession }) => {
                     onClick={() => setShowAddModal(true)}
                     className="flex items-center gap-2 bg-indigo-600 text-white hover:bg-indigo-700 px-4 py-2 rounded-lg font-bold shadow-sm transition-all focus:outline-none"
                 >
-                    <UserPlus className="w-4 h-4" /> New Admin
+                    <UserPlus className="w-4 h-4" /> New Account
                 </button>
             </div>
 
@@ -154,8 +155,9 @@ export const AdminAccounts = ({ adminSession }) => {
                                         disabled={acc.account_id === adminSession.account_id}
                                         className="bg-slate-100 border-none text-sm font-semibold text-slate-700 rounded-lg px-2 py-1 outline-none min-w-[120px] focus:ring-2 focus:ring-indigo-500/50 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                                     >
-                                        <option value="Super Admin">Super Admin</option>
-                                        <option value="Admin">Admin</option>
+                                        {ROLE_OPTIONS.map(role => (
+                                            <option key={role} value={role}>{role}</option>
+                                        ))}
                                     </select>
                                 </td>
                                 <td className="px-6 py-4 text-right">
@@ -216,15 +218,15 @@ export const AdminAccounts = ({ adminSession }) => {
                                 <div className="space-y-3">
                                     <label className="block text-sm font-semibold text-white/80">Role Allocation</label>
                                     <div className="flex gap-3">
-                                        <label className={`flex-1 flex flex-col items-center justify-center p-4 rounded-xl border cursor-pointer transition-all ${addForm.role === 'Admin' ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'bg-black/40 border-white/10 text-white/50 hover:border-white/30'}`}>
-                                            <input type="radio" name="role" value="Admin" checked={addForm.role === 'Admin'} onChange={(e) => setAddForm({ ...addForm, role: e.target.value })} className="sr-only" />
-                                            <span className="font-bold text-lg mb-1">Admin</span>
-                                            <span className="text-xs text-center leading-tight opacity-70">Gate Supervisor</span>
+                                        <label className={`flex-1 flex flex-col items-center justify-center p-4 rounded-xl border cursor-pointer transition-all ${addForm.role === 'System Administrator' ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'bg-black/40 border-white/10 text-white/50 hover:border-white/30'}`}>
+                                            <input type="radio" name="role" value="System Administrator" checked={addForm.role === 'System Administrator'} onChange={(e) => setAddForm({ ...addForm, role: e.target.value })} className="sr-only" />
+                                            <span className="font-bold text-lg mb-1">System Administrator</span>
+                                            <span className="text-xs text-center leading-tight opacity-70">Full system access</span>
                                         </label>
-                                        <label className={`flex-1 flex flex-col items-center justify-center p-4 rounded-xl border cursor-pointer transition-all ${addForm.role === 'Super Admin' ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'bg-black/40 border-white/10 text-white/50 hover:border-white/30'}`}>
-                                            <input type="radio" name="role" value="Super Admin" checked={addForm.role === 'Super Admin'} onChange={(e) => setAddForm({ ...addForm, role: e.target.value })} className="sr-only" />
-                                            <span className="font-bold text-lg mb-1">Super Admin</span>
-                                            <span className="text-xs text-center leading-tight opacity-70">System Admin</span>
+                                        <label className={`flex-1 flex flex-col items-center justify-center p-4 rounded-xl border cursor-pointer transition-all ${addForm.role === 'Gate Supervisor' ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'bg-black/40 border-white/10 text-white/50 hover:border-white/30'}`}>
+                                            <input type="radio" name="role" value="Gate Supervisor" checked={addForm.role === 'Gate Supervisor'} onChange={(e) => setAddForm({ ...addForm, role: e.target.value })} className="sr-only" />
+                                            <span className="font-bold text-lg mb-1">Gate Supervisor</span>
+                                            <span className="text-xs text-center leading-tight opacity-70">Gate operations access</span>
                                         </label>
                                     </div>
                                 </div>

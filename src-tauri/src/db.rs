@@ -1,11 +1,27 @@
+use chrono::{Duration, Local};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, OptionalExtension};
+use std::collections::HashMap;
 use std::fs;
 use tauri::Manager;
 use crate::models::*;
 
 pub type DbPool = Pool<SqliteConnectionManager>;
+
+fn table_has_column(conn: &rusqlite::Connection, table: &str, column: &str) -> Result<bool, String> {
+    let pragma = format!("PRAGMA table_info({table})");
+    let mut stmt = conn.prepare(&pragma).map_err(|e| e.to_string())?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1)).map_err(|e| e.to_string())?;
+
+    for item in columns {
+        if item.map_err(|e| e.to_string())? == column {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
 
 pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
     // Determine the path to the database file
@@ -27,12 +43,48 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
     let schema = include_str!("../../docs/database/schema.sql");
     conn.execute_batch(schema).map_err(|e| format!("Failed to execute schema: {}", e))?;
 
-    // Fix Visitor Schema (dynamically add person_to_visit if missing)
-    let _ = conn.execute("ALTER TABLE visitors ADD COLUMN person_to_visit TEXT DEFAULT ''", params![]);
+    // Normalize legacy person schema to the current id_number/email/contact_number layout.
+    if table_has_column(&conn, "persons", "school_id_number")? && !table_has_column(&conn, "persons", "id_number")? {
+        conn.execute("ALTER TABLE persons RENAME COLUMN school_id_number TO id_number", params![])
+            .map_err(|e| format!("Failed to migrate persons.id_number: {}", e))?;
+    }
+    let _ = conn.execute("ALTER TABLE persons ADD COLUMN email VARCHAR UNIQUE NULL", params![]);
+    let _ = conn.execute("ALTER TABLE persons ADD COLUMN contact_number VARCHAR NULL", params![]);
 
-    // Admin RBAC updates (dynamically add full_name and role if missing)
+    // Fix Visitor Schema (dynamically add person_to_visit if missing) and move legacy contact data into persons.
+    let _ = conn.execute("ALTER TABLE visitors ADD COLUMN person_to_visit TEXT DEFAULT ''", params![]);
+    if table_has_column(&conn, "visitors", "contact_number")? {
+        conn.execute(
+            "UPDATE persons
+             SET contact_number = COALESCE(persons.contact_number, (
+                 SELECT v.contact_number FROM visitors v WHERE v.person_id = persons.person_id
+             ))
+             WHERE role = 'visitor'",
+            params![],
+        ).map_err(|e| format!("Failed to migrate visitor contact numbers: {}", e))?;
+    }
+
+    // Admin RBAC updates and role normalization.
     let _ = conn.execute("ALTER TABLE accounts ADD COLUMN full_name VARCHAR DEFAULT 'Administrator'", params![]);
-    let _ = conn.execute("ALTER TABLE accounts ADD COLUMN role VARCHAR DEFAULT 'Super Admin'", params![]);
+    conn.execute(
+        "UPDATE accounts
+         SET full_name = COALESCE(NULLIF(TRIM(full_name), ''), 'Administrator')",
+        params![],
+    ).map_err(|e| format!("Failed to normalize account names: {}", e))?;
+    conn.execute(
+        "UPDATE accounts
+         SET role = CASE
+             WHEN role IN ('Super Admin', 'System Administrator') THEN 'System Administrator'
+             WHEN role IN ('Admin', 'Gate Supervisor') THEN 'Gate Supervisor'
+             ELSE role
+         END",
+        params![],
+    ).map_err(|e| format!("Failed to normalize account roles: {}", e))?;
+    conn.execute(
+        "INSERT OR IGNORE INTO accounts (username, password_hash, full_name, role)
+         VALUES ('admin', 'admin123', 'Administrator', 'System Administrator')",
+        params![],
+    ).map_err(|e| format!("Failed to seed default admin account: {}", e))?;
 
     // Fix audit_logs CHECK constraint migration:
     // Old schema used lowercase ('create','read','update','delete') but the Rust code inserts
@@ -211,14 +263,16 @@ pub fn add_person(pool: &DbPool, person: Person) -> Result<i64, String> {
     let is_active = if person.is_active { 1 } else { 0 };
     
     conn.execute(
-        "INSERT INTO persons (school_id_number, role, first_name, middle_name, last_name, face_template_path, is_active)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO persons (id_number, role, first_name, middle_name, last_name, email, contact_number, face_template_path, is_active)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
-            person.school_id_number,
+            person.id_number,
             person.role,
             person.first_name,
             person.middle_name,
             person.last_name,
+            person.email,
+            person.contact_number,
             person.face_template_path,
             is_active
         ],
@@ -230,19 +284,21 @@ pub fn add_person(pool: &DbPool, person: Person) -> Result<i64, String> {
 pub fn get_persons(pool: &DbPool) -> Result<Vec<Person>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     
-    let mut stmt = conn.prepare("SELECT person_id, school_id_number, role, first_name, middle_name, last_name, face_template_path, is_active FROM persons")
+    let mut stmt = conn.prepare("SELECT person_id, id_number, role, first_name, middle_name, last_name, email, contact_number, face_template_path, is_active FROM persons")
         .map_err(|e| e.to_string())?;
         
     let person_iter = stmt.query_map([], |row| {
         Ok(Person {
             person_id: row.get(0)?,
-            school_id_number: row.get(1)?,
+            id_number: row.get(1)?,
             role: row.get(2)?,
             first_name: row.get(3)?,
             middle_name: row.get(4).unwrap_or(None),
             last_name: row.get(5)?,
-            face_template_path: row.get(6)?,
-            is_active: row.get::<_, i32>(7)? == 1,
+            email: row.get(6).unwrap_or(None),
+            contact_number: row.get(7).unwrap_or(None),
+            face_template_path: row.get(8)?,
+            is_active: row.get::<_, i32>(9)? == 1,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -278,7 +334,7 @@ pub fn add_student(pool: &DbPool, student: Student) -> Result<(), String> {
 pub fn get_students(pool: &DbPool) -> Result<Vec<StudentDetails>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT p.person_id, p.school_id_number, p.first_name, p.middle_name, p.last_name, p.is_active,
+        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.email, p.contact_number, p.is_active,
                 s.program_id, pr.program_name, s.year_level
          FROM persons p
          JOIN students s ON p.person_id = s.person_id
@@ -288,14 +344,16 @@ pub fn get_students(pool: &DbPool) -> Result<Vec<StudentDetails>, String> {
     let iter = stmt.query_map([], |row| {
         Ok(StudentDetails {
             person_id: row.get(0)?,
-            school_id_number: row.get(1)?,
+            id_number: row.get(1)?,
             first_name: row.get(2)?,
             middle_name: row.get(3).unwrap_or(None),
             last_name: row.get(4)?,
-            is_active: row.get::<_, i32>(5)? == 1,
-            program_id: row.get(6)?,
-            program_name: row.get(7)?,
-            year_level: row.get(8).unwrap_or(None),
+            email: row.get(5).unwrap_or(None),
+            contact_number: row.get(6).unwrap_or(None),
+            is_active: row.get::<_, i32>(7)? == 1,
+            program_id: row.get(8)?,
+            program_name: row.get(9)?,
+            year_level: row.get(10).unwrap_or(None),
         })
     }).map_err(|e| e.to_string())?;
     
@@ -318,10 +376,12 @@ pub fn add_employee(pool: &DbPool, employee: Employee) -> Result<(), String> {
 pub fn register_user(
     pool: &DbPool,
     role: &str,
-    school_id: &str,
+    id_number: &str,
     first_name: &str,
     middle_name: Option<String>,
     last_name: &str,
+    email: Option<String>,
+    contact_number: Option<String>,
     program_id: Option<i64>,
     year_level: Option<i64>,
     department_id: Option<i64>,
@@ -329,15 +389,14 @@ pub fn register_user(
     purpose: Option<String>,
     person_to_visit: Option<String>,
     id_presented: Option<String>,
-    contact_number: Option<String>,
 ) -> Result<i64, String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     tx.execute(
-        "INSERT INTO persons (school_id_number, role, first_name, middle_name, last_name, is_active)
-         VALUES (?1, ?2, ?3, ?4, ?5, 1)",
-        params![school_id, role, first_name, middle_name, last_name],
+        "INSERT INTO persons (id_number, role, first_name, middle_name, last_name, email, contact_number, is_active)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
+        params![id_number, role, first_name, middle_name, last_name, email, contact_number],
     ).map_err(|e| e.to_string())?;
 
     let person_id = tx.last_insert_rowid();
@@ -357,8 +416,8 @@ pub fn register_user(
         },
         "visitor" => {
             tx.execute(
-                "INSERT INTO visitors (person_id, purpose_of_visit, person_to_visit, id_presented, contact_number) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![person_id, purpose.unwrap_or_default(), person_to_visit.unwrap_or_default(), id_presented.unwrap_or_default(), contact_number.unwrap_or_default()],
+                "INSERT INTO visitors (person_id, purpose_of_visit, person_to_visit, id_presented) VALUES (?1, ?2, ?3, ?4)",
+                params![person_id, purpose.unwrap_or_default(), person_to_visit.unwrap_or_default(), id_presented.unwrap_or_default()],
             ).map_err(|e| e.to_string())?;
         },
         _ => return Err("Invalid role specified".to_string()),
@@ -372,10 +431,12 @@ pub fn update_user(
     pool: &DbPool,
     person_id: i64,
     role: &str,
-    school_id: &str,
+    id_number: &str,
     first_name: &str,
     middle_name: Option<String>,
     last_name: &str,
+    email: Option<String>,
+    contact_number: Option<String>,
     program_id: Option<i64>,
     year_level: Option<i64>,
     department_id: Option<i64>,
@@ -383,15 +444,15 @@ pub fn update_user(
     purpose: Option<String>,
     person_to_visit: Option<String>,
     id_presented: Option<String>,
-    contact_number: Option<String>,
 ) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     tx.execute(
-        "UPDATE persons SET school_id_number = ?1, first_name = ?2, middle_name = ?3, last_name = ?4
-         WHERE person_id = ?5",
-        params![school_id, first_name, middle_name, last_name, person_id],
+        "UPDATE persons
+         SET id_number = ?1, first_name = ?2, middle_name = ?3, last_name = ?4, email = ?5, contact_number = ?6
+         WHERE person_id = ?7",
+        params![id_number, first_name, middle_name, last_name, email, contact_number, person_id],
     ).map_err(|e| e.to_string())?;
 
     match role {
@@ -409,8 +470,8 @@ pub fn update_user(
         },
         "visitor" => {
             tx.execute(
-                "UPDATE visitors SET purpose_of_visit = ?1, person_to_visit = ?2, id_presented = ?3, contact_number = ?4 WHERE person_id = ?5",
-                params![purpose.unwrap_or_default(), person_to_visit.unwrap_or_default(), id_presented.unwrap_or_default(), contact_number.unwrap_or_default(), person_id],
+                "UPDATE visitors SET purpose_of_visit = ?1, person_to_visit = ?2, id_presented = ?3 WHERE person_id = ?4",
+                params![purpose.unwrap_or_default(), person_to_visit.unwrap_or_default(), id_presented.unwrap_or_default(), person_id],
             ).map_err(|e| e.to_string())?;
         },
         _ => return Err("Invalid role specified".to_string()),
@@ -450,7 +511,7 @@ pub fn delete_user(pool: &DbPool, person_id: i64, role: &str) -> Result<(), Stri
 pub fn get_employees(pool: &DbPool) -> Result<Vec<EmployeeDetails>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT p.person_id, p.school_id_number, p.first_name, p.middle_name, p.last_name, p.is_active,
+        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.email, p.contact_number, p.is_active,
                 e.department_id, e.position_title, d.department_name
          FROM persons p
          JOIN employees e ON p.person_id = e.person_id
@@ -460,14 +521,16 @@ pub fn get_employees(pool: &DbPool) -> Result<Vec<EmployeeDetails>, String> {
     let iter = stmt.query_map([], |row| {
         Ok(EmployeeDetails {
             person_id: row.get(0)?,
-            school_id_number: row.get(1)?,
+            id_number: row.get(1)?,
             first_name: row.get(2)?,
             middle_name: row.get(3).unwrap_or(None),
             last_name: row.get(4)?,
-            is_active: row.get::<_, i32>(5)? == 1,
-            department_id: row.get(6)?,
-            position_title: row.get(7)?,
-            department_name: row.get(8)?,
+            email: row.get(5).unwrap_or(None),
+            contact_number: row.get(6).unwrap_or(None),
+            is_active: row.get::<_, i32>(7)? == 1,
+            department_id: row.get(8)?,
+            position_title: row.get(9)?,
+            department_name: row.get(10)?,
         })
     }).map_err(|e| e.to_string())?;
     
@@ -483,7 +546,7 @@ pub fn get_visitors(pool: &DbPool) -> Result<Vec<VisitorDetails>, String> {
     
     // Simplistic approach: get the first entry today as time_in, and the last exit today as time_out
     let mut stmt = conn.prepare(
-        "SELECT p.person_id, p.first_name, p.middle_name, p.last_name, v.purpose_of_visit, v.person_to_visit, v.id_presented, v.contact_number,
+        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.email, p.contact_number, v.purpose_of_visit, v.person_to_visit, v.id_presented,
             (SELECT MIN(e.scanned_at) FROM entry_logs e JOIN scanners s ON e.scanner_id = s.scanner_id WHERE e.person_id = p.person_id AND s.function = 'entrance') as time_in,
             (SELECT MAX(e.scanned_at) FROM entry_logs e JOIN scanners s ON e.scanner_id = s.scanner_id WHERE e.person_id = p.person_id AND s.function = 'exit') as time_out
          FROM persons p
@@ -494,15 +557,17 @@ pub fn get_visitors(pool: &DbPool) -> Result<Vec<VisitorDetails>, String> {
     let iter = stmt.query_map([], |row| {
         Ok(VisitorDetails {
             person_id: row.get(0)?,
-            first_name: row.get(1)?,
-            middle_name: row.get(2).unwrap_or(None),
-            last_name: row.get(3)?,
-            purpose_of_visit: row.get(4)?,
-            person_to_visit: row.get(5)?,
-            id_presented: row.get(6)?,
-            contact_number: row.get(7)?,
-            time_in: row.get(8).unwrap_or(None),
-            time_out: row.get(9).unwrap_or(None),
+            id_number: row.get(1)?,
+            first_name: row.get(2)?,
+            middle_name: row.get(3).unwrap_or(None),
+            last_name: row.get(4)?,
+            email: row.get(5).unwrap_or(None),
+            contact_number: row.get(6).unwrap_or(None),
+            purpose_of_visit: row.get(7)?,
+            person_to_visit: row.get(8)?,
+            id_presented: row.get(9)?,
+            time_in: row.get(10).unwrap_or(None),
+            time_out: row.get(11).unwrap_or(None),
         })
     }).map_err(|e| e.to_string())?;
 
@@ -553,7 +618,7 @@ pub fn get_access_logs(pool: &DbPool, start_date: Option<String>, end_date: Opti
     let conn = pool.get().map_err(|e| e.to_string())?;
     
     let mut base_query = "
-        SELECT l.log_id, l.scanned_at, p.first_name, p.last_name, p.school_id_number, p.role, s.location_name, s.function
+        SELECT l.log_id, l.scanned_at, p.first_name, p.last_name, p.id_number, p.role, s.location_name, s.function
         FROM entry_logs l
         JOIN persons p ON l.person_id = p.person_id
         JOIN scanners s ON l.scanner_id = s.scanner_id
@@ -581,7 +646,7 @@ pub fn get_access_logs(pool: &DbPool, start_date: Option<String>, end_date: Opti
                 log_id: row.get(0)?,
                 scanned_at: row.get(1)?,
                 person_name: format!("{} {}", first_name, last_name),
-                school_id_number: row.get(4)?,
+                id_number: row.get(4)?,
                 role: row.get(5)?,
                 scanner_location: row.get(6)?,
                 scanner_function: row.get(7)?,
@@ -596,7 +661,7 @@ pub fn get_access_logs(pool: &DbPool, start_date: Option<String>, end_date: Opti
                 log_id: row.get(0)?,
                 scanned_at: row.get(1)?,
                 person_name: format!("{} {}", first_name, last_name),
-                school_id_number: row.get(4)?,
+                id_number: row.get(4)?,
                 role: row.get(5)?,
                 scanner_location: row.get(6)?,
                 scanner_function: row.get(7)?,
@@ -611,7 +676,7 @@ pub fn get_access_logs(pool: &DbPool, start_date: Option<String>, end_date: Opti
                 log_id: row.get(0)?,
                 scanned_at: row.get(1)?,
                 person_name: format!("{} {}", first_name, last_name),
-                school_id_number: row.get(4)?,
+                id_number: row.get(4)?,
                 role: row.get(5)?,
                 scanner_location: row.get(6)?,
                 scanner_function: row.get(7)?,
@@ -628,7 +693,7 @@ pub fn get_event_attendance_logs(pool: &DbPool, start_date: Option<String>, end_
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let mut base_query = "
-        SELECT a.attendance_id, p.first_name, p.last_name, p.school_id_number, p.role, e.event_name, a.scanned_at
+        SELECT a.attendance_id, p.first_name, p.last_name, p.id_number, p.role, e.event_name, a.scanned_at
         FROM event_attendance a
         JOIN persons p ON a.person_id = p.person_id
         JOIN events e ON a.event_id = e.event_id
@@ -655,7 +720,7 @@ pub fn get_event_attendance_logs(pool: &DbPool, start_date: Option<String>, end_
             Ok(EventAttendanceLog {
                 log_id: row.get(0)?,
                 person_name: format!("{} {}", first_name, last_name),
-                school_id_number: row.get(3)?,
+                id_number: row.get(3)?,
                 role: row.get(4)?,
                 event_name: row.get(5)?,
                 scanned_at: row.get(6)?,
@@ -669,7 +734,7 @@ pub fn get_event_attendance_logs(pool: &DbPool, start_date: Option<String>, end_
             Ok(EventAttendanceLog {
                 log_id: row.get(0)?,
                 person_name: format!("{} {}", first_name, last_name),
-                school_id_number: row.get(3)?,
+                id_number: row.get(3)?,
                 role: row.get(4)?,
                 event_name: row.get(5)?,
                 scanned_at: row.get(6)?,
@@ -683,7 +748,7 @@ pub fn get_event_attendance_logs(pool: &DbPool, start_date: Option<String>, end_
             Ok(EventAttendanceLog {
                 log_id: row.get(0)?,
                 person_name: format!("{} {}", first_name, last_name),
-                school_id_number: row.get(3)?,
+                id_number: row.get(3)?,
                 role: row.get(4)?,
                 event_name: row.get(5)?,
                 scanned_at: row.get(6)?,
@@ -881,13 +946,13 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
     }
 }
 
-pub fn manual_id_entry(pool: &DbPool, school_id: &str, scanner_function: &str) -> Result<ScanResult, String> {
+pub fn manual_id_entry(pool: &DbPool, id_number: &str, scanner_function: &str) -> Result<ScanResult, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT person_id, first_name, last_name, role, is_active FROM persons WHERE school_id_number = ?1")
+    let mut stmt = conn.prepare("SELECT person_id, first_name, last_name, role, is_active FROM persons WHERE id_number = ?1")
         .map_err(|e| e.to_string())?;
         
-    let mut person_iter = stmt.query_map(params![school_id], |row| {
+    let mut person_iter = stmt.query_map(params![id_number], |row| {
         Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, String>(1)?,
@@ -1180,6 +1245,8 @@ pub fn update_admin_info(pool: &DbPool, account_id: i64, username: &str, full_na
 
 pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
+    let today = Local::now().date_naive();
+    let seven_days_ago = today - Duration::days(6);
 
     let total_students: i64 = conn.query_row(
         "SELECT COUNT(*) FROM persons WHERE role = 'student'", [], |row| row.get(0)
@@ -1203,16 +1270,58 @@ pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
         [], |row| row.get(0)
     ).unwrap_or(0);
 
-    // Mock trend data for UI purposes until complex date grouping is implemented
-    let attendance_trend = vec![
-        ChartDataPoint { date: "Mon".to_string(), students: 0, employees: 0, visitors: 0 },
-        ChartDataPoint { date: "Tue".to_string(), students: 0, employees: 0, visitors: 0 },
-        ChartDataPoint { date: "Wed".to_string(), students: 0, employees: 0, visitors: 0 },
-        ChartDataPoint { date: "Thu".to_string(), students: 0, employees: 0, visitors: 0 },
-        ChartDataPoint { date: "Fri".to_string(), students: 0, employees: 0, visitors: 0 },
-        ChartDataPoint { date: "Sat".to_string(), students: 0, employees: 0, visitors: 0 },
-        ChartDataPoint { date: "Sun".to_string(), students: 0, employees: 0, visitors: 0 },
-    ];
+    let mut trend_stmt = conn.prepare(
+        "SELECT DATE(e.scanned_at) AS scan_date, p.role, COUNT(DISTINCT e.person_id) AS total
+         FROM entry_logs e
+         JOIN persons p ON p.person_id = e.person_id
+         JOIN scanners s ON s.scanner_id = e.scanner_id
+         WHERE s.function = 'entrance'
+           AND DATE(e.scanned_at) BETWEEN ?1 AND ?2
+         GROUP BY DATE(e.scanned_at), p.role
+         ORDER BY DATE(e.scanned_at) ASC"
+    ).map_err(|e| e.to_string())?;
+
+    let trend_rows = trend_stmt.query_map(
+        params![
+            seven_days_ago.format("%Y-%m-%d").to_string(),
+            today.format("%Y-%m-%d").to_string()
+        ],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        },
+    ).map_err(|e| e.to_string())?;
+
+    let mut trend_lookup: HashMap<String, (i64, i64, i64)> = HashMap::new();
+    for item in trend_rows {
+        let (scan_date, role, total) = item.map_err(|e| e.to_string())?;
+        let daily_totals = trend_lookup.entry(scan_date).or_insert((0, 0, 0));
+
+        match role.as_str() {
+            "student" => daily_totals.0 += total,
+            "professor" | "staff" => daily_totals.1 += total,
+            "visitor" => daily_totals.2 += total,
+            _ => {}
+        }
+    }
+
+    let attendance_trend = (0..7)
+        .map(|offset| {
+            let current_day = seven_days_ago + Duration::days(offset);
+            let key = current_day.format("%Y-%m-%d").to_string();
+            let (students, employees, visitors) = trend_lookup.get(&key).copied().unwrap_or((0, 0, 0));
+
+            ChartDataPoint {
+                date: current_day.format("%a").to_string(),
+                students,
+                employees,
+                visitors,
+            }
+        })
+        .collect();
 
     Ok(DashboardData {
         total_students,
@@ -1224,7 +1333,7 @@ pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
     })
 }
 
-pub fn log_event_attendance(pool: &DbPool, event_id: i64, school_id: &str) -> Result<ScanResult, String> {
+pub fn log_event_attendance(pool: &DbPool, event_id: i64, id_number: &str) -> Result<ScanResult, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     // 1. Fetch Event and Validate Date/Time
@@ -1275,10 +1384,10 @@ pub fn log_event_attendance(pool: &DbPool, event_id: i64, school_id: &str) -> Re
     }
 
     // 2. Check if person exists and is active
-    let mut stmt = conn.prepare("SELECT person_id, first_name, last_name, role, is_active FROM persons WHERE school_id_number = ?1")
+    let mut stmt = conn.prepare("SELECT person_id, first_name, last_name, role, is_active FROM persons WHERE id_number = ?1")
         .map_err(|e| e.to_string())?;
         
-    let mut person_iter = stmt.query_map(params![school_id], |row| {
+    let mut person_iter = stmt.query_map(params![id_number], |row| {
         Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, String>(1)?,
@@ -1402,11 +1511,13 @@ mod tests {
         // 1. Add typical user
         let person_id = add_person(&pool, Person {
             person_id: 0,
-            school_id_number: "2020-12345".to_string(),
+            id_number: "2020-12345".to_string(),
             role: "student".to_string(),
             first_name: "John".to_string(),
             middle_name: None,
             last_name: "Doe".to_string(),
+            email: None,
+            contact_number: None,
             face_template_path: None,
             is_active: true,
         }).unwrap();

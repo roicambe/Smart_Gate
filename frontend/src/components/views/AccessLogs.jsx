@@ -90,7 +90,7 @@ export const AccessLogs = () => {
     
     const filteredLogs = currentData.filter(log => {
         const matchesSearch = log.person_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            log.school_id_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            log.id_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
             (activeTab === 'eventLogs' && log.event_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
             log.role.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesRole = roleFilter === 'All' || log.role.toLowerCase() === roleFilter.toLowerCase();
@@ -123,7 +123,7 @@ export const AccessLogs = () => {
                     return {
                         'Timestamp': formatDate(log.scanned_at),
                         'Name': log.person_name,
-                        'ID Number': log.school_id_number,
+                        'ID Number': log.id_number,
                         'Role': log.role,
                         'Location': log.scanner_location,
                         'Action': log.scanner_function.toUpperCase()
@@ -132,7 +132,7 @@ export const AccessLogs = () => {
                     return {
                         'Timestamp': formatDate(log.scanned_at),
                         'Name': log.person_name,
-                        'ID Number': log.school_id_number,
+                        'ID Number': log.id_number,
                         'Role': log.role,
                         'Event Name': log.event_name,
                     };
@@ -251,7 +251,7 @@ export const AccessLogs = () => {
                     tableRows.push([
                         formatDate(log.scanned_at),
                         log.person_name,
-                        log.school_id_number,
+                        log.id_number,
                         log.role,
                         log.scanner_location,
                         log.scanner_function.toUpperCase()
@@ -260,7 +260,7 @@ export const AccessLogs = () => {
                     tableRows.push([
                         formatDate(log.scanned_at),
                         log.person_name,
-                        log.school_id_number,
+                        log.id_number,
                         log.role,
                         log.event_name
                     ]);
@@ -521,7 +521,7 @@ export const AccessLogs = () => {
                                                     {log.person_name}
                                                 </span>
                                                 <span className="text-[11px] text-slate-500 font-mono">
-                                                    {log.school_id_number}
+                                                    {log.id_number}
                                                 </span>
                                             </div>
                                         </td>

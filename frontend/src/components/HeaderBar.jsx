@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X, Minus, ShieldCheck, AlertTriangle, Lock } from "lucide-react";
+import { X, Minus, ShieldCheck, AlertTriangle, Lock, Eye, EyeOff } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import logoImage from "../../imgs/plp-logo.png";
@@ -11,6 +11,7 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn }) => {
     const [showAdminModal, setShowAdminModal] = useState(false);
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
+    const [showPassword, setShowPassword] = useState(false);
     const [loginError, setLoginError] = useState("");
 
     const handleMinimize = () => {
@@ -40,6 +41,7 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn }) => {
                 setShowAdminModal(false);
                 setPassword("");
                 setUsername("");
+                setShowPassword(false);
             } else {
                 setLoginError(response.message || "Invalid credentials.");
             }
@@ -132,18 +134,31 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn }) => {
                                 className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50 mb-3 text-center tracking-wide"
                                 autoFocus
                             />
-                            <input
-                                type="password"
-                                placeholder="Enter passcode..."
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50 mb-2 text-center tracking-wide"
-                            />
+                            <div className="relative mb-2">
+                                <input
+                                    type={showPassword ? "text" : "password"}
+                                    placeholder="Enter passcode..."
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 pr-11 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-center tracking-wide"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPassword((current) => !current)}
+                                    className="absolute inset-y-0 right-0 flex items-center px-3 text-white/90 hover:text-white focus:outline-none"
+                                    aria-label={showPassword ? "Hide password" : "Show password"}
+                                >
+                                    {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                                </button>
+                            </div>
                             {loginError && <div className="text-rose-400 text-sm text-center mb-4">{loginError}</div>}
                             <div className="flex gap-3 mt-4">
                                 <button
                                     type="button"
-                                    onClick={() => setShowAdminModal(false)}
+                                    onClick={() => {
+                                        setShowAdminModal(false);
+                                        setShowPassword(false);
+                                    }}
                                     className="flex-1 px-4 py-2.5 bg-white/5 border border-white/10 text-white/80 font-medium rounded-lg hover:bg-white/10 hover:text-white transition-all focus:outline-none"
                                 >
                                     Cancel

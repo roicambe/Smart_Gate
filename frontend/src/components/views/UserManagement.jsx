@@ -2,8 +2,60 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Users, Search, Edit2, Trash2, X, AlertCircle, CheckCircle2, UserPlus, Eye, Check, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
+const visitorYearCode = new Date().getFullYear().toString().slice(-2);
+
+const ID_NUMBER_RULES = {
+    student: {
+        placeholder: '00-00000',
+        pattern: /^\d{2}-\d{5}$/,
+        hint: 'Student IDs must follow the 00-00000 format.',
+        maxLength: 8,
+    },
+    professor: {
+        placeholder: '0000000',
+        pattern: /^\d{7}$/,
+        hint: 'Professor IDs must be exactly 7 digits.',
+        maxLength: 7,
+    },
+    staff: {
+        placeholder: '0000000',
+        pattern: /^\d{7}$/,
+        hint: 'Staff IDs must be exactly 7 digits.',
+        maxLength: 7,
+    },
+    visitor: {
+        placeholder: `VIS-${visitorYearCode}xxxx`,
+        pattern: new RegExp(`^VIS-${visitorYearCode}\\d{4}$`),
+        hint: `Visitor IDs must follow the VIS-${visitorYearCode}xxxx format.`,
+        maxLength: 10,
+    },
+};
+
+const trimToNull = (value) => {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+};
+
+const buildUserPayload = (role, data) => ({
+    role,
+    idNumber: (data.id_number || '').trim(),
+    firstName: (data.first_name || '').trim(),
+    middleName: trimToNull(data.middle_name),
+    lastName: (data.last_name || '').trim(),
+    email: trimToNull(data.email),
+    contactNumber: trimToNull(data.contact_number),
+    programId: role === 'student' && data.program_id ? parseInt(data.program_id, 10) : null,
+    yearLevel: role === 'student' && data.year_level ? parseInt(data.year_level, 10) : null,
+    departmentId: (role === 'professor' || role === 'staff') && data.department_id ? parseInt(data.department_id, 10) : null,
+    positionTitle: role === 'professor' || role === 'staff' ? trimToNull(data.position_title) : null,
+    purpose: role === 'visitor' ? trimToNull(data.purpose_of_visit) : null,
+    personToVisit: role === 'visitor' ? trimToNull(data.person_to_visit) : null,
+    idPresented: role === 'visitor' ? trimToNull(data.id_presented) : null,
+});
+
 export const UserManagement = ({ adminSession }) => {
-    const isSuperAdmin = adminSession?.role === 'Super Admin';
+    const isSystemAdministrator = adminSession?.role === 'System Administrator';
     const [mainTab, setMainTab] = useState('members'); // 'members', 'visitors'
     const [subTab, setSubTab] = useState('student'); // 'student', 'professor', 'staff'
     const activeRole = mainTab === 'visitors' ? 'visitor' : subTab;
@@ -26,7 +78,7 @@ export const UserManagement = ({ adminSession }) => {
     // Form State
     const [formData, setFormData] = useState({
         role: 'student',
-        school_id: '',
+        id_number: '',
         first_name: '',
         middle_name: '',
         last_name: '',
@@ -35,9 +87,10 @@ export const UserManagement = ({ adminSession }) => {
         year_level: '',
         position_title: '',
         email: '',
-        phone_number: '',
+        contact_number: '',
         id_presented: '',
         purpose_of_visit: '',
+        person_to_visit: '',
         is_active: true,
     });
 
@@ -100,16 +153,24 @@ export const UserManagement = ({ adminSession }) => {
         fetchUsers();
     }, [mainTab, subTab]);
 
+    const activeIdRule = ID_NUMBER_RULES[formData.role];
+    const trimmedIdNumber = (formData.id_number || '').trim();
+    const isIdNumberValid = activeIdRule.pattern.test(trimmedIdNumber);
+    const idNumberValidationMessage = trimmedIdNumber && !isIdNumberValid ? activeIdRule.hint : '';
+
     const handleRegisterSubmit = async (e) => {
         e.preventDefault();
         try {
-            await invoke('register_user', {
-                ...formData,
-                year_level: formData.year_level ? parseInt(formData.year_level) : null,
-                program_id: formData.role === 'student' ? parseInt(formData.program_id) : null,
-                department_id: (formData.role === 'professor' || formData.role === 'staff') ? parseInt(formData.department_id) : null,
-                is_active: formData.is_active
-            });
+            const payload = buildUserPayload(formData.role, formData);
+            const personId = await invoke('register_user', payload);
+
+            if (formData.role !== 'visitor' && !formData.is_active) {
+                await invoke('update_person_status', {
+                    personId,
+                    isActive: false,
+                });
+            }
+
             setStatus({ type: 'success', message: 'User registered successfully!' });
             setShowRegisterModal(false);
             fetchUsers();
@@ -123,18 +184,19 @@ export const UserManagement = ({ adminSession }) => {
         setSelectedUser(user);
         setFormData({
             role: activeRole,
-            school_id: user.school_id_number || '',
+            id_number: user.id_number || '',
             first_name: user.first_name || '',
             middle_name: user.middle_name || '',
             last_name: user.last_name || '',
-            program_id: user.program_id || (programs.length > 0 ? programs[0].program_id.toString() : ''),
-            department_id: user.department_id || (departments.length > 0 ? departments[0].department_id.toString() : ''),
-            year_level: user.year_level || '',
+            program_id: user.program_id ? user.program_id.toString() : (programs.length > 0 ? programs[0].program_id.toString() : ''),
+            department_id: user.department_id ? user.department_id.toString() : (departments.length > 0 ? departments[0].department_id.toString() : ''),
+            year_level: user.year_level ? user.year_level.toString() : '',
             position_title: user.position_title || '',
             email: user.email || '',
-            phone_number: user.phone_number || '',
+            contact_number: user.contact_number || '',
             id_presented: user.id_presented || '',
             purpose_of_visit: user.purpose_of_visit || '',
+            person_to_visit: user.person_to_visit || '',
             is_active: user.is_active ?? true,
         });
         setIsEmailAutoGenerated(!user.email);
@@ -144,17 +206,20 @@ export const UserManagement = ({ adminSession }) => {
     const handleEditSubmit = async (e) => {
         e.preventDefault();
         try {
+            const payload = buildUserPayload(activeRole, formData);
+
             await invoke('update_user', {
                 personId: selectedUser.person_id,
-                role: activeRole,
-                data: {
-                    ...formData,
-                    year_level: formData.year_level ? parseInt(formData.year_level) : null,
-                    program_id: formData.role === 'student' ? parseInt(formData.program_id) : null,
-                    department_id: (formData.role === 'professor' || formData.role === 'staff') ? parseInt(formData.department_id) : null,
-                    is_active: formData.is_active
-                }
+                ...payload,
             });
+
+            if (activeRole !== 'visitor') {
+                await invoke('update_person_status', {
+                    personId: selectedUser.person_id,
+                    isActive: formData.is_active,
+                });
+            }
+
             setStatus({ type: 'success', message: 'User updated successfully!' });
             setShowEditModal(false);
             fetchUsers();
@@ -187,7 +252,7 @@ export const UserManagement = ({ adminSession }) => {
     const handleRegisterClick = () => {
         setFormData({
             role: activeRole,
-            school_id: '',
+            id_number: '',
             first_name: '',
             middle_name: '',
             last_name: '',
@@ -196,9 +261,10 @@ export const UserManagement = ({ adminSession }) => {
             year_level: '',
             position_title: '',
             email: '',
-            phone_number: '',
+            contact_number: '',
             id_presented: '',
             purpose_of_visit: '',
+            person_to_visit: '',
             is_active: true,
         });
         setStatus(null);
@@ -214,7 +280,7 @@ export const UserManagement = ({ adminSession }) => {
     // Filter logic
     const filteredUsers = users.filter(user =>
         (user.first_name + ' ' + (user.last_name || '')).toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (user.school_id_number || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (user.id_number || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (user.id_presented || '').toLowerCase().includes(searchQuery.toLowerCase())
     );
 
@@ -250,7 +316,7 @@ export const UserManagement = ({ adminSession }) => {
                     <h1 className="text-3xl font-bold text-slate-900 mb-2">User Registry</h1>
                     <p className="text-slate-500">Manage students, professors, staff, and visitors.</p>
                 </div>
-                {isSuperAdmin && (
+                {isSystemAdministrator && (
                     <button
                         onClick={handleRegisterClick}
                         className="flex items-center gap-2 bg-blue-600 text-white hover:bg-blue-700 px-5 py-2.5 rounded-xl font-bold shadow-sm transition-all focus:outline-none focus:ring-4 focus:ring-blue-500/30"
@@ -351,7 +417,7 @@ export const UserManagement = ({ adminSession }) => {
                             ) : (
                                 paginatedUsers.map((user) => (
                                     <tr key={user.person_id} className="hover:bg-slate-50 even:bg-slate-50/50 transition-colors group">
-                                        <td className="px-6 py-4 font-mono font-medium text-slate-900">{mainTab === 'visitors' ? user.id_presented : user.school_id_number}</td>
+                                        <td className="px-6 py-4 font-mono font-medium text-slate-900">{user.id_number}</td>
                                         <td className="px-6 py-4 font-medium text-slate-900">{user.first_name} {user.last_name || ''}</td>
                                         {mainTab === 'visitors' ? (
                                             <>
@@ -386,7 +452,7 @@ export const UserManagement = ({ adminSession }) => {
                                                 onClick={() => handleViewClick(user)}>
                                                 <Eye className="w-4 h-4" />
                                             </button>
-                                            {isSuperAdmin && (
+                                            {isSystemAdministrator && (
                                                 <>
                                                     <button className="p-2 text-amber-600 hover:bg-amber-100 rounded-lg transition-colors border border-transparent hover:border-amber-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Edit"
                                                         onClick={() => handleEditClick(user)}>
@@ -474,112 +540,133 @@ export const UserManagement = ({ adminSession }) => {
                                 </div>
                             )}
 
-                            {/* Visitor Conditional Fields */}
-                            {formData.role === 'visitor' ? (
-                                <div className="space-y-6">
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <label className="block text-xs text-white/60 mb-1 font-medium">Presented ID Type/Number <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                            <input required type="text" value={formData.id_presented} onChange={e => setFormData({ ...formData, id_presented: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white font-mono focus:ring-2 focus:ring-white/20 focus:outline-none" />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs text-white/60 mb-1 font-medium">Visitor Name <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                            <input required type="text" value={formData.first_name} onChange={e => setFormData({ ...formData, first_name: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" />
-                                        </div>
-                                    </div>
+                            <div className="space-y-6">
+                                <div className="space-y-4">
                                     <div>
-                                        <label className="block text-xs text-white/60 mb-1 font-medium">Purpose of Visit <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                        <input required type="text" value={formData.purpose_of_visit} onChange={e => setFormData({ ...formData, purpose_of_visit: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" />
+                                        <label className="block text-xs text-white/60 mb-1 font-medium">
+                                            {formData.role === 'student' ? 'Student ID Number' : formData.role === 'visitor' ? 'Visitor ID Number' : 'ID Number'} <span className="text-rose-500 text-base font-bold ml-0.5">*</span>
+                                        </label>
+                                        <input
+                                            required
+                                            type="text"
+                                            inputMode={formData.role === 'visitor' ? 'text' : 'numeric'}
+                                            value={formData.id_number}
+                                            maxLength={activeIdRule.maxLength}
+                                            onChange={e => setFormData({
+                                                ...formData,
+                                                id_number: formData.role === 'visitor' ? e.target.value.toUpperCase() : e.target.value,
+                                            })}
+                                            className={`w-full bg-black/40 border rounded-xl px-4 py-3 text-white font-mono placeholder-white/20 focus:ring-2 focus:outline-none transition-all ${idNumberValidationMessage ? 'border-rose-400/70 focus:ring-rose-500/40 focus:border-rose-400' : 'border-white/10 focus:ring-blue-500/50 focus:border-blue-500/50'}`}
+                                            placeholder={activeIdRule.placeholder}
+                                        />
+                                        <p className={`mt-2 text-xs font-medium transition-colors ${idNumberValidationMessage ? 'text-rose-300' : 'text-white/45'}`}>
+                                            {idNumberValidationMessage || activeIdRule.hint}
+                                        </p>
                                     </div>
-                                </div>
-                            ) : (
-                                <div className="space-y-6">
-                                    <div className="grid grid-cols-3 gap-4">
-                                        <div className="col-span-3">
-                                            <label className="block text-xs text-white/60 mb-1 font-medium">
-                                                {formData.role === 'student' ? 'Student ID Number' : 'ID Number'} <span className="text-rose-500 text-base font-bold ml-0.5">*</span>
-                                            </label>
-                                            <input required type="text" value={formData.school_id} onChange={e => setFormData({ ...formData, school_id: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white font-mono placeholder-white/20 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 focus:outline-none transition-all" placeholder="e.g. 23-00001" />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs text-white/60 mb-1 font-medium">First Name <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+
+                                    <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-3">
+                                        <div className="flex min-w-0 w-full flex-col">
+                                            <label className="mb-1 flex min-h-[20px] items-end text-xs font-medium text-white/60">First Name <span className="ml-0.5 text-base font-bold text-rose-500">*</span></label>
                                             <input required type="text" value={formData.first_name} onChange={e => setFormData({ ...formData, first_name: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" />
                                         </div>
-                                        <div>
-                                            <label className="block text-xs text-white/60 mb-1 font-medium">Middle Name</label>
+                                        <div className="flex min-w-0 w-full flex-col">
+                                            <label className="mb-1 flex min-h-[24px] items-end text-xs font-medium text-white/60">Middle Name</label>
                                             <input type="text" value={formData.middle_name} onChange={e => setFormData({ ...formData, middle_name: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" />
                                         </div>
-                                        <div>
-                                            <label className="block text-xs text-white/60 mb-1 font-medium">Last Name <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                        <div className="flex min-w-0 w-full flex-col">
+                                            <label className="mb-1 flex min-h-[20px] items-end text-xs font-medium text-white/60">Last Name <span className="ml-0.5 text-base font-bold text-rose-500">*</span></label>
                                             <input required type="text" value={formData.last_name} onChange={e => setFormData({ ...formData, last_name: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" />
                                         </div>
                                     </div>
 
-                                    <div className="h-px w-full bg-white/5 my-6"></div>
-
-                                    {/* Conditional Form Fields based on Role */}
-                                    {formData.role === 'student' && (
-                                        <div className="grid grid-cols-2 gap-4 animate-in fade-in">
-                                            <div>
-                                                <label className="block text-xs text-white/60 mb-1 font-medium">Program <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                                <select required value={formData.program_id} onChange={e => setFormData({ ...formData, program_id: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none appearance-none">
-                                                    {programs.length === 0 && <option value="" disabled>No Programs Available</option>}
-                                                    {programs.map(p => (
-                                                        <option key={p.program_id} value={p.program_id} className="bg-slate-900">{p.program_code} - {p.program_name}</option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label className="block text-xs text-white/60 mb-1 font-medium">Year Level <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                                <select required value={formData.year_level} onChange={e => setFormData({ ...formData, year_level: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none appearance-none">
-                                                    <option value="" disabled className="bg-slate-900">Select Year Level</option>
-                                                    <option value="1" className="bg-slate-900">1st Year</option>
-                                                    <option value="2" className="bg-slate-900">2nd Year</option>
-                                                    <option value="3" className="bg-slate-900">3rd Year</option>
-                                                    <option value="4" className="bg-slate-900">4th Year</option>
-                                                    <option value="5" className="bg-slate-900">5th Year</option>
-                                                </select>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {(formData.role === 'professor' || formData.role === 'staff') && (
-                                        <div className="grid grid-cols-2 gap-4 animate-in fade-in">
-                                            <div>
-                                                <label className="block text-xs text-white/60 mb-1 font-medium">Department <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                                <select required value={formData.department_id} onChange={e => setFormData({ ...formData, department_id: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none appearance-none">
-                                                    {departments.length === 0 && <option value="" disabled>No Departments Available</option>}
-                                                    {departments.map(d => (
-                                                        <option key={d.department_id} value={d.department_id} className="bg-slate-900">{d.department_code} - {d.department_name}</option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                            <div>
-                                                <label className="block text-xs text-white/60 mb-1 font-medium">Designation / Title <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                                <input required type="text" value={formData.position_title} onChange={e => setFormData({ ...formData, position_title: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" placeholder="e.g. Associate Professor" />
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    <div className="grid grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                                         <div>
                                             <label className="block text-xs text-white/60 mb-1 font-medium">Email Address</label>
                                             <input type="email" value={formData.email} onChange={e => { setIsEmailAutoGenerated(false); setFormData({ ...formData, email: e.target.value }); }} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" />
                                         </div>
                                         <div>
                                             <label className="block text-xs text-white/60 mb-1 font-medium">Contact Number</label>
-                                            <input type="text" value={formData.phone_number} onChange={e => setFormData({ ...formData, phone_number: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white font-mono focus:ring-2 focus:ring-white/20 focus:outline-none" />
+                                            <input type="text" value={formData.contact_number} onChange={e => setFormData({ ...formData, contact_number: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white font-mono focus:ring-2 focus:ring-white/20 focus:outline-none" />
                                         </div>
                                     </div>
+                                </div>
+
+                                <div className="h-px w-full bg-white/5 my-6"></div>
+
+                                {formData.role === 'student' && (
+                                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 animate-in fade-in">
+                                        <div>
+                                            <label className="block text-xs text-white/60 mb-1 font-medium">Program <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                            <select required value={formData.program_id} onChange={e => setFormData({ ...formData, program_id: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none appearance-none">
+                                                {programs.length === 0 && <option value="" disabled>No Programs Available</option>}
+                                                {programs.map(p => (
+                                                    <option key={p.program_id} value={p.program_id} className="bg-slate-900">{p.program_code} - {p.program_name}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-white/60 mb-1 font-medium">Year Level <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                            <select required value={formData.year_level} onChange={e => setFormData({ ...formData, year_level: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none appearance-none">
+                                                <option value="" disabled className="bg-slate-900">Select Year Level</option>
+                                                <option value="1" className="bg-slate-900">1st Year</option>
+                                                <option value="2" className="bg-slate-900">2nd Year</option>
+                                                <option value="3" className="bg-slate-900">3rd Year</option>
+                                                <option value="4" className="bg-slate-900">4th Year</option>
+                                                <option value="5" className="bg-slate-900">5th Year</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {(formData.role === 'professor' || formData.role === 'staff') && (
+                                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 animate-in fade-in">
+                                        <div>
+                                            <label className="block text-xs text-white/60 mb-1 font-medium">Department <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                            <select required value={formData.department_id} onChange={e => setFormData({ ...formData, department_id: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none appearance-none">
+                                                {departments.length === 0 && <option value="" disabled>No Departments Available</option>}
+                                                {departments.map(d => (
+                                                    <option key={d.department_id} value={d.department_id} className="bg-slate-900">{d.department_code} - {d.department_name}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-white/60 mb-1 font-medium">Designation / Title <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                            <input required type="text" value={formData.position_title} onChange={e => setFormData({ ...formData, position_title: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" placeholder="e.g. Associate Professor" />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {formData.role === 'visitor' && (
+                                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 animate-in fade-in">
+                                        <div>
+                                            <label className="block text-xs text-white/60 mb-1 font-medium">Purpose of Visit <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                            <input required type="text" value={formData.purpose_of_visit} onChange={e => setFormData({ ...formData, purpose_of_visit: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-white/60 mb-1 font-medium">Person to Visit <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                            <input required type="text" value={formData.person_to_visit} onChange={e => setFormData({ ...formData, person_to_visit: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" />
+                                        </div>
+                                        <div className="md:col-span-2">
+                                            <label className="block text-xs text-white/60 mb-1 font-medium">Presented ID Type/Number <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                            <input required type="text" value={formData.id_presented} onChange={e => setFormData({ ...formData, id_presented: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white font-mono focus:ring-2 focus:ring-white/20 focus:outline-none" />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {formData.role !== 'visitor' && (
                                     <div className="flex items-center gap-3 mt-4 p-4 bg-white/5 border border-white/10 rounded-xl">
                                         <input type="checkbox" id="isActive" checked={formData.is_active} onChange={e => setFormData({ ...formData, is_active: e.target.checked })} className="w-5 h-5 text-emerald-500 bg-black/50 border-white/20 rounded focus:ring-emerald-500/50" />
                                         <label htmlFor="isActive" className="text-sm font-medium text-white">ID Card Active (Allowed Entry)</label>
                                     </div>
-                                </div>
-                            )}
+                                )}
+                            </div>
 
                             <div className="pt-6">
-                                <button type="submit" className={`w-full ${showEditModal ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-[0_0_20px_rgba(245,158,11,0.2)] hover:shadow-[0_0_30px_rgba(245,158,11,0.4)]' : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_20px_rgba(16,185,129,0.2)] hover:shadow-[0_0_30px_rgba(16,185,129,0.4)]'} font-bold text-lg py-4 rounded-xl transition-all focus:outline-none focus:ring-4 focus:ring-white/40 flex justify-center items-center gap-2 hover:scale-[1.01]`}>
+                                <button
+                                    type="submit"
+                                    disabled={!isIdNumberValid}
+                                    className={`w-full ${showEditModal ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-[0_0_20px_rgba(245,158,11,0.2)] hover:shadow-[0_0_30px_rgba(245,158,11,0.4)]' : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_20px_rgba(16,185,129,0.2)] hover:shadow-[0_0_30px_rgba(16,185,129,0.4)]'} font-bold text-lg py-4 rounded-xl transition-all focus:outline-none focus:ring-4 focus:ring-white/40 flex justify-center items-center gap-2 hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100 disabled:shadow-none`}
+                                >
                                     <Check className="w-6 h-6" /> {showEditModal ? 'Save Changes' : 'Confirm & Register'}
                                 </button>
                             </div>
@@ -624,14 +711,16 @@ export const UserManagement = ({ adminSession }) => {
                                 </div>
                                 <div>
                                     <h3 className="text-lg font-bold text-slate-900">{selectedUser.first_name} {selectedUser.middle_name} {selectedUser.last_name || ''}</h3>
-                                    <p className="text-sm font-mono text-slate-500">{activeRole === 'visitor' ? selectedUser.id_presented : selectedUser.school_id_number}</p>
+                                    <p className="text-sm font-mono text-slate-500">{selectedUser.id_number}</p>
                                 </div>
                             </div>
                             <div className="grid grid-cols-2 gap-y-4 gap-x-6 text-sm">
                                 <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Role</p><p className="font-semibold text-slate-900 capitalize">{activeRole}</p></div>
                                 {activeRole === 'visitor' ? (
                                     <>
-                                        <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Contact Option</p><p className="font-semibold text-slate-900">{selectedUser.contact_number || 'N/A'}</p></div>
+                                        <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Contact Number</p><p className="font-semibold text-slate-900">{selectedUser.contact_number || 'N/A'}</p></div>
+                                        <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Email</p><p className="font-semibold text-slate-900">{selectedUser.email || 'N/A'}</p></div>
+                                        <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Presented ID</p><p className="font-semibold text-slate-900">{selectedUser.id_presented || 'N/A'}</p></div>
                                         <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Purpose</p><p className="font-semibold text-slate-900">{selectedUser.purpose_of_visit}</p></div>
                                         <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Person to Visit</p><p className="font-semibold text-slate-900">{selectedUser.person_to_visit || 'N/A'}</p></div>
                                         <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Reg. Date/Time</p><p className="font-semibold text-slate-900">{selectedUser.time_in ? new Date(selectedUser.time_in).toLocaleString() : '--'}</p></div>
@@ -652,7 +741,7 @@ export const UserManagement = ({ adminSession }) => {
                                             </>
                                         )}
                                         <div className="col-span-2"><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Email</p><p className="font-semibold text-slate-900">{selectedUser.email || 'N/A'}</p></div>
-                                        <div className="col-span-2"><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Phone</p><p className="font-semibold text-slate-900">{selectedUser.phone_number || 'N/A'}</p></div>
+                                        <div className="col-span-2"><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Contact Number</p><p className="font-semibold text-slate-900">{selectedUser.contact_number || 'N/A'}</p></div>
                                         <div className="col-span-2 pt-2"><span className={`inline-flex px-3 py-1.5 text-xs font-bold rounded-full ${selectedUser.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>{selectedUser.is_active ? 'Active Profile' : 'Inactive Profile'}</span></div>
                                     </>
                                 )}

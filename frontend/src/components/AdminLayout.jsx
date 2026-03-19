@@ -10,7 +10,7 @@ import { EventManagement } from './views/EventManagement';
 import { AuditTrail } from './views/AuditTrail';
 
 export const AdminLayout = ({ view, setView, setIsAdminLoggedIn, adminSession }) => {
-    const isSuperAdmin = adminSession?.role === 'Super Admin';
+    const isSystemAdministrator = adminSession?.role === 'System Administrator';
 
     const rawNavItems = [
         { id: 'admin_dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -23,7 +23,7 @@ export const AdminLayout = ({ view, setView, setIsAdminLoggedIn, adminSession })
         { id: 'admin_settings', label: 'System Settings', icon: Settings, reqSuper: true },
     ];
 
-    const navItems = rawNavItems.filter(item => !item.reqSuper || isSuperAdmin);
+    const navItems = rawNavItems.filter(item => !item.reqSuper || isSystemAdministrator);
 
     const renderView = () => {
         switch (view) {

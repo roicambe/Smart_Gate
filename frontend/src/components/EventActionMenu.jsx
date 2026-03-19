@@ -59,7 +59,7 @@ export const EventActionMenu = ({ setView }) => {
         try {
             const result = await invoke('log_event_attendance', {
                 eventId: parseInt(selectedEventId, 10),
-                schoolId: manualId
+                idNumber: manualId
             });
 
             if (result.success) {
