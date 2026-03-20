@@ -18,4 +18,14 @@
     body {
         @apply bg-slate-900 text-slate-100 select-none overflow-hidden m-0 p-0;
     }
+
+    input[data-password-toggle="custom"]::-ms-reveal,
+    input[data-password-toggle="custom"]::-ms-clear {
+        display: none;
+    }
+
+    input[data-password-toggle="custom"]::-webkit-credentials-auto-fill-button,
+    input[data-password-toggle="custom"]::-webkit-textfield-decoration-container {
+        display: none;
+    }
 }

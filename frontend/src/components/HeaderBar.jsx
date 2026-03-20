@@ -139,17 +139,45 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn }) => {
                                     type={showPassword ? "text" : "password"}
                                     placeholder="Enter passcode..."
                                     value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 pr-11 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-center tracking-wide"
+                                    onChange={(e) => {
+                                        const nextPassword = e.target.value;
+                                        setPassword(nextPassword);
+                                        if (!nextPassword) {
+                                            setShowPassword(false);
+                                        }
+                                    }}
+                                    data-password-toggle="custom"
+                                    className="w-full bg-black/40 border border-white/10 rounded-lg px-11 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-center tracking-wide"
                                 />
-                                <button
-                                    type="button"
-                                    onClick={() => setShowPassword((current) => !current)}
-                                    className="absolute inset-y-0 right-0 flex items-center px-3 text-white/90 hover:text-white focus:outline-none"
-                                    aria-label={showPassword ? "Hide password" : "Show password"}
-                                >
-                                    {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                                </button>
+                                {password && (
+                                    <button
+                                        type="button"
+                                        onMouseDown={(e) => {
+                                            e.preventDefault();
+                                            setShowPassword(true);
+                                        }}
+                                        onMouseUp={() => setShowPassword(false)}
+                                        onMouseLeave={() => setShowPassword(false)}
+                                        onTouchStart={() => setShowPassword(true)}
+                                        onTouchEnd={() => setShowPassword(false)}
+                                        onTouchCancel={() => setShowPassword(false)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === " " || e.key === "Enter") {
+                                                setShowPassword(true);
+                                            }
+                                        }}
+                                        onKeyUp={(e) => {
+                                            if (e.key === " " || e.key === "Enter") {
+                                                setShowPassword(false);
+                                            }
+                                        }}
+                                        onBlur={() => setShowPassword(false)}
+                                        className="absolute inset-y-0 right-0 flex items-center px-3 text-white/90 hover:text-white focus:outline-none"
+                                        aria-label={showPassword ? "Hide password" : "Show password"}
+                                    >
+                                        {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                                    </button>
+                                )}
                             </div>
                             {loginError && <div className="text-rose-400 text-sm text-center mb-4">{loginError}</div>}
                             <div className="flex gap-3 mt-4">
