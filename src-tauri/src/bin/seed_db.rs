@@ -41,13 +41,13 @@ fn main() -> Result<()> {
 
     // 3. Insert Person: Roi Yvann Cambe
     conn.execute(
-        "INSERT OR IGNORE INTO persons (school_id_number, role, first_name, middle_name, last_name, is_active)
+        "INSERT OR IGNORE INTO persons (id_number, role, first_name, middle_name, last_name, is_active)
          VALUES (?1, ?2, ?3, ?4, ?5, 1)",
         params!["23-00193", "student", "Roi Yvann", "Montemayor", "Cambe"],
     )?;
     
     let person_id: i64 = conn.query_row(
-        "SELECT person_id FROM persons WHERE school_id_number = ?1",
+        "SELECT person_id FROM persons WHERE id_number = ?1",
         params!["23-00193"],
         |row| row.get(0),
     ).unwrap_or(0);

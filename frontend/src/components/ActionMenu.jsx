@@ -29,9 +29,10 @@ export const ActionMenu = ({ view, setView }) => {
             
             await invoke('register_user', {
                 role: "visitor",
-                schoolId: generatedId,
+                idNumber: generatedId,
                 firstName: visitorForm.firstName,
                 lastName: visitorForm.lastName,
+                email: null,
                 contactNumber: visitorForm.contactNumber,
                 purpose: visitorForm.purpose,
                 personToVisit: visitorForm.personToVisit,
@@ -44,7 +45,7 @@ export const ActionMenu = ({ view, setView }) => {
             });
             
             const result = await invoke('manual_id_entry', {
-                schoolId: generatedId,
+                idNumber: generatedId,
                 scannerFunction: 'entrance'
             });
             
@@ -68,7 +69,7 @@ export const ActionMenu = ({ view, setView }) => {
         try {
             const scannerFunction = isEntrance ? 'entrance' : 'exit';
             const result = await invoke('manual_id_entry', {
-                schoolId: manualId,
+                idNumber: manualId,
                 scannerFunction
             });
 

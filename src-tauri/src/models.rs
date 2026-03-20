@@ -18,11 +18,13 @@ pub struct Program {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Person {
     pub person_id: i64,
-    pub school_id_number: String,
+    pub id_number: String,
     pub role: String,
     pub first_name: String,
     pub middle_name: Option<String>,
     pub last_name: String,
+    pub email: Option<String>,
+    pub contact_number: Option<String>,
     pub face_template_path: Option<String>,
     pub is_active: bool,
 }
@@ -84,10 +86,12 @@ pub struct AuditLog {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct StudentDetails {
     pub person_id: i64,
-    pub school_id_number: String,
+    pub id_number: String,
     pub first_name: String,
     pub middle_name: Option<String>,
     pub last_name: String,
+    pub email: Option<String>,
+    pub contact_number: Option<String>,
     pub is_active: bool,
     pub program_id: i64,
     pub program_name: String,
@@ -97,10 +101,12 @@ pub struct StudentDetails {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EmployeeDetails {
     pub person_id: i64,
-    pub school_id_number: String,
+    pub id_number: String,
     pub first_name: String,
     pub middle_name: Option<String>,
     pub last_name: String,
+    pub email: Option<String>,
+    pub contact_number: Option<String>,
     pub is_active: bool,
     pub department_id: i64,
     pub position_title: String,
@@ -110,13 +116,15 @@ pub struct EmployeeDetails {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct VisitorDetails {
     pub person_id: i64,
+    pub id_number: String,
     pub first_name: String,
     pub middle_name: Option<String>,
     pub last_name: String,
+    pub email: Option<String>,
     pub purpose_of_visit: String,
     pub person_to_visit: String,
     pub id_presented: String,
-    pub contact_number: String,
+    pub contact_number: Option<String>,
     pub time_in: Option<String>,
     pub time_out: Option<String>,
 }
@@ -133,7 +141,7 @@ pub struct EventAttendance {
 pub struct EventAttendanceLog {
     pub log_id: i64,
     pub person_name: String,
-    pub school_id_number: String,
+    pub id_number: String,
     pub role: String,
     pub event_name: String,
     pub scanned_at: String,
@@ -186,7 +194,7 @@ pub struct AccessLogDetails {
     pub log_id: i64,
     pub scanned_at: String,
     pub person_name: String,
-    pub school_id_number: String,
+    pub id_number: String,
     pub role: String,
     pub scanner_location: String,
     pub scanner_function: String,

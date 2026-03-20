@@ -4,7 +4,7 @@ import { MyAccount } from './MyAccount';
 import { AdminAccounts } from './AdminAccounts';
 
 export const SystemSettings = ({ setIsAdminLoggedIn, setView, adminSession }) => {
-    const isSuperAdmin = adminSession?.role === 'Super Admin';
+    const isSystemAdministrator = adminSession?.role === 'System Administrator';
     const [activeTab, setActiveTab] = useState('my_account');
 
     return (
@@ -28,7 +28,7 @@ export const SystemSettings = ({ setIsAdminLoggedIn, setView, adminSession }) =>
                     >
                         My Profile
                     </button>
-                    {isSuperAdmin && (
+                    {isSystemAdministrator && (
                         <button
                             onClick={() => setActiveTab('admin_accounts')}
                             className={`px-6 py-2.5 rounded-lg font-medium transition-all duration-300 ${activeTab === 'admin_accounts'
@@ -57,7 +57,7 @@ export const SystemSettings = ({ setIsAdminLoggedIn, setView, adminSession }) =>
                         <MyAccount adminSession={adminSession} setIsAdminLoggedIn={setIsAdminLoggedIn} setView={setView} />
                     </div>
                 )}
-                {activeTab === 'admin_accounts' && isSuperAdmin && (
+                {activeTab === 'admin_accounts' && isSystemAdministrator && (
                     <AdminAccounts adminSession={adminSession} />
                 )}
             </div>

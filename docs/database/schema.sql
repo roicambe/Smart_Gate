@@ -16,11 +16,13 @@ CREATE TABLE IF NOT EXISTS programs (
 -- User Management
 CREATE TABLE IF NOT EXISTS persons (
     person_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    school_id_number VARCHAR UNIQUE NOT NULL,
+    id_number VARCHAR UNIQUE NOT NULL, -- Renamed from school_id_number
     role TEXT CHECK(role IN ('student', 'professor', 'staff', 'visitor')) NOT NULL,
     first_name VARCHAR NOT NULL,
     middle_name VARCHAR NULL,
     last_name VARCHAR NOT NULL,
+    email VARCHAR UNIQUE NULL,        -- Added: Normalized contact data
+    contact_number VARCHAR NULL,      -- Added: Normalized contact data
     face_template_path VARCHAR NULL,
     is_active BOOLEAN NOT NULL DEFAULT 1    
 );
@@ -38,7 +40,6 @@ CREATE TABLE IF NOT EXISTS visitors (
     purpose_of_visit VARCHAR NOT NULL,
     person_to_visit VARCHAR NOT NULL,
     id_presented VARCHAR NOT NULL,
-    contact_number VARCHAR NOT NULL,
     FOREIGN KEY (person_id) REFERENCES persons(person_id)
 );
 
@@ -106,11 +107,10 @@ CREATE TABLE IF NOT EXISTS accounts (
     account_id INTEGER PRIMARY KEY AUTOINCREMENT,
     username VARCHAR UNIQUE NOT NULL,
     password_hash VARCHAR NOT NULL,
+    full_name VARCHAR NOT NULL DEFAULT 'Administrator',
+    role TEXT CHECK(role IN ('System Administrator', 'Gate Supervisor')) NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
--- Insert default admin account if it doesn't exist
-INSERT OR IGNORE INTO accounts (username, password_hash) VALUES ('admin', 'admin123');
 
 -- Seed Official University Academic Structure
 INSERT OR IGNORE INTO departments (department_id, department_code, department_name) VALUES

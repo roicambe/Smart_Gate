@@ -10,21 +10,25 @@ pub fn get_persons(pool: State<'_, DbPool>) -> Result<Vec<Person>, String> {
 #[tauri::command]
 pub fn add_person(
     pool: State<'_, DbPool>,
-    school_id_number: String,
+    id_number: String,
     role: String,
     first_name: String,
     middle_name: Option<String>,
     last_name: String,
+    email: Option<String>,
+    contact_number: Option<String>,
     face_template_path: Option<String>,
     is_active: bool,
 ) -> Result<i64, String> {
     let person = Person {
         person_id: 0, // Assigned by DB
-        school_id_number,
+        id_number,
         role,
         first_name,
         middle_name,
         last_name,
+        email,
+        contact_number,
         face_template_path,
         is_active,
     };
@@ -128,10 +132,12 @@ pub fn get_visitors(pool: State<'_, DbPool>) -> Result<Vec<VisitorDetails>, Stri
 pub fn register_user(
     pool: State<'_, DbPool>,
     role: String,
-    school_id: String,
+    id_number: String,
     first_name: String,
     middle_name: Option<String>,
     last_name: String,
+    email: Option<String>,
+    contact_number: Option<String>,
     program_id: Option<i64>,
     year_level: Option<i64>,
     department_id: Option<i64>,
@@ -139,15 +145,16 @@ pub fn register_user(
     purpose: Option<String>,
     person_to_visit: Option<String>,
     id_presented: Option<String>,
-    contact_number: Option<String>,
 ) -> Result<i64, String> {
     db::register_user(
         &pool,
         &role,
-        &school_id,
+        &id_number,
         &first_name,
         middle_name,
         &last_name,
+        email,
+        contact_number,
         program_id,
         year_level,
         department_id,
@@ -155,17 +162,16 @@ pub fn register_user(
         purpose,
         person_to_visit,
         id_presented,
-        contact_number,
     )
 }
 
 #[tauri::command]
 pub fn manual_id_entry(
     pool: State<'_, DbPool>,
-    school_id: String,
+    id_number: String,
     scanner_function: String,
 ) -> Result<ScanResult, String> {
-    db::manual_id_entry(&pool, &school_id, &scanner_function)
+    db::manual_id_entry(&pool, &id_number, &scanner_function)
 }
 
 #[tauri::command]
@@ -173,10 +179,12 @@ pub fn update_user(
     pool: State<'_, DbPool>,
     person_id: i64,
     role: String,
-    school_id: String,
+    id_number: String,
     first_name: String,
     middle_name: Option<String>,
     last_name: String,
+    email: Option<String>,
+    contact_number: Option<String>,
     program_id: Option<i64>,
     year_level: Option<i64>,
     department_id: Option<i64>,
@@ -184,16 +192,17 @@ pub fn update_user(
     purpose: Option<String>,
     person_to_visit: Option<String>,
     id_presented: Option<String>,
-    contact_number: Option<String>,
 ) -> Result<(), String> {
     db::update_user(
         &pool,
         person_id,
         &role,
-        &school_id,
+        &id_number,
         &first_name,
         middle_name,
         &last_name,
+        email,
+        contact_number,
         program_id,
         year_level,
         department_id,
@@ -201,7 +210,6 @@ pub fn update_user(
         purpose,
         person_to_visit,
         id_presented,
-        contact_number,
     )
 }
 
@@ -211,6 +219,6 @@ pub fn delete_user(pool: State<'_, DbPool>, person_id: i64, role: String) -> Res
 }
 
 #[tauri::command]
-pub fn log_event_attendance(pool: State<'_, DbPool>, event_id: i64, school_id: String) -> Result<ScanResult, String> {
-    db::log_event_attendance(&pool, event_id, &school_id)
+pub fn log_event_attendance(pool: State<'_, DbPool>, event_id: i64, id_number: String) -> Result<ScanResult, String> {
+    db::log_event_attendance(&pool, event_id, &id_number)
 }
