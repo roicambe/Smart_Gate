@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X, Minus, ShieldCheck, AlertTriangle, Lock } from "lucide-react";
+import { X, Minus, ShieldCheck, AlertTriangle, Lock, Eye, EyeOff } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import logoImage from "../../imgs/plp-logo.png";
@@ -9,7 +9,9 @@ const appWindow = getCurrentWindow();
 const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn }) => {
     const [showCloseModal, setShowCloseModal] = useState(false);
     const [showAdminModal, setShowAdminModal] = useState(false);
+    const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
+    const [showPassword, setShowPassword] = useState(false);
     const [loginError, setLoginError] = useState("");
 
     const handleMinimize = () => {
@@ -32,14 +34,16 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn }) => {
         e.preventDefault();
         setLoginError("");
         try {
-            const success = await invoke('admin_login', { password });
-            if (success) {
-                setIsAdminLoggedIn(true);
+            const response = await invoke('admin_login', { username, password });
+            if (response.success) {
+                setIsAdminLoggedIn(response.account);
                 setView('admin_dashboard');
                 setShowAdminModal(false);
                 setPassword("");
+                setUsername("");
+                setShowPassword(false);
             } else {
-                setLoginError("Invalid passcode.");
+                setLoginError(response.message || "Invalid credentials.");
             }
         } catch (error) {
             console.error(error);
@@ -70,16 +74,22 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn }) => {
                             Administrator Login
                         </button>
                     ) : (
-                        <button
-                            onClick={() => {
-                                setIsAdminLoggedIn(false);
-                                setView('main');
-                            }}
-                            className="text-sm font-medium text-white/80 hover:text-rose-400 transition-colors flex items-center gap-1.5 focus:outline-none"
-                        >
-                            <Lock className="w-4 h-4" />
-                            Logout Admin
-                        </button>
+                        <div className="flex items-center gap-6">
+                            <div className="text-right">
+                                <p className="text-sm font-bold text-white tracking-wide">Welcome, {isAdminLoggedIn.full_name}</p>
+                                <p className="text-xs text-brand-300 font-medium">{isAdminLoggedIn.role}</p>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    setIsAdminLoggedIn(false);
+                                    setView('main');
+                                }}
+                                className="text-sm font-medium text-white/80 hover:text-rose-400 transition-colors flex items-center gap-1.5 focus:outline-none"
+                            >
+                                <Lock className="w-4 h-4" />
+                                Logout
+                            </button>
+                        </div>
                     )}
 
                     {/* Divider */}
@@ -117,18 +127,66 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn }) => {
                         </div>
                         <form onSubmit={handleLogin} className="p-6">
                             <input
-                                type="password"
-                                placeholder="Enter passcode..."
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50 mb-2 text-center tracking-widest"
+                                type="text"
+                                placeholder="Enter username..."
+                                value={username}
+                                onChange={(e) => setUsername(e.target.value)}
+                                className="w-full bg-black/40 border border-white/10 rounded-lg px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50 mb-3 text-center tracking-wide"
                                 autoFocus
                             />
+                            <div className="relative mb-2">
+                                <input
+                                    type={showPassword ? "text" : "password"}
+                                    placeholder="Enter passcode..."
+                                    value={password}
+                                    onChange={(e) => {
+                                        const nextPassword = e.target.value;
+                                        setPassword(nextPassword);
+                                        if (!nextPassword) {
+                                            setShowPassword(false);
+                                        }
+                                    }}
+                                    data-password-toggle="custom"
+                                    className="w-full bg-black/40 border border-white/10 rounded-lg px-11 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50 text-center tracking-wide"
+                                />
+                                {password && (
+                                    <button
+                                        type="button"
+                                        onMouseDown={(e) => {
+                                            e.preventDefault();
+                                            setShowPassword(true);
+                                        }}
+                                        onMouseUp={() => setShowPassword(false)}
+                                        onMouseLeave={() => setShowPassword(false)}
+                                        onTouchStart={() => setShowPassword(true)}
+                                        onTouchEnd={() => setShowPassword(false)}
+                                        onTouchCancel={() => setShowPassword(false)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === " " || e.key === "Enter") {
+                                                setShowPassword(true);
+                                            }
+                                        }}
+                                        onKeyUp={(e) => {
+                                            if (e.key === " " || e.key === "Enter") {
+                                                setShowPassword(false);
+                                            }
+                                        }}
+                                        onBlur={() => setShowPassword(false)}
+                                        className="absolute inset-y-0 right-0 flex items-center px-3 text-white/90 hover:text-white focus:outline-none"
+                                        aria-label={showPassword ? "Hide password" : "Show password"}
+                                    >
+                                        {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                                    </button>
+                                )}
+                            </div>
                             {loginError && <div className="text-rose-400 text-sm text-center mb-4">{loginError}</div>}
                             <div className="flex gap-3 mt-4">
                                 <button
                                     type="button"
-                                    onClick={() => setShowAdminModal(false)}
+                                    onClick={() => {
+                                        setShowAdminModal(false);
+                                        setShowPassword(false);
+                                    }}
                                     className="flex-1 px-4 py-2.5 bg-white/5 border border-white/10 text-white/80 font-medium rounded-lg hover:bg-white/10 hover:text-white transition-all focus:outline-none"
                                 >
                                     Cancel

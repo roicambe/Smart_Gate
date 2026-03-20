@@ -11,7 +11,14 @@ import * as XLSX from 'xlsx';
 import logoUrl from '../../../imgs/plp-logo.png';
 
 export const AccessLogs = () => {
+    const [activeTab, setActiveTab] = useState('gateLogs'); // 'gateLogs' | 'eventLogs'
+    
+    // Gate Logs state
     const [logs, setLogs] = useState([]);
+    
+    // Event Logs state
+    const [eventLogs, setEventLogs] = useState([]);
+
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [roleFilter, setRoleFilter] = useState('All');
@@ -51,25 +58,24 @@ export const AccessLogs = () => {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    // Fetch logs from backend
+    // Fetch logs from backend based on active tab
     const fetchLogs = async () => {
-        // Validation
         if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
             setDateError('Invalid Date Range: End Date must be after Start Date.');
             return;
         }
         setDateError('');
-
         setLoading(true);
         try {
-            const data = await invoke('get_access_logs', {
-                startDate: startDate || null,
-                endDate: endDate || null
-            });
-            console.log("Access Logs:", data);
-            setLogs(data);
+            if (activeTab === 'gateLogs') {
+                const data = await invoke('get_access_logs', { startDate: startDate || null, endDate: endDate || null });
+                setLogs(data);
+            } else {
+                const data = await invoke('get_event_attendance_logs', { startDate: startDate || null, endDate: endDate || null });
+                setEventLogs(data);
+            }
         } catch (error) {
-            console.error("Failed to fetch access logs:", error);
+            console.error("Failed to fetch logs:", error);
         } finally {
             setLoading(false);
         }
@@ -77,19 +83,22 @@ export const AccessLogs = () => {
 
     useEffect(() => {
         fetchLogs();
-    }, []);
+    }, [activeTab]);
 
-    // Filter logs based on search and role
-    const filteredLogs = logs.filter(log => {
+    // Filter logic based on active tab
+    const currentData = activeTab === 'gateLogs' ? logs : eventLogs;
+    
+    const filteredLogs = currentData.filter(log => {
         const matchesSearch = log.person_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            log.school_id_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            log.id_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (activeTab === 'eventLogs' && log.event_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
             log.role.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesRole = roleFilter === 'All' || log.role.toLowerCase() === roleFilter.toLowerCase();
         return matchesSearch && matchesRole;
     });
 
     // Pagination - reset to page 1 when filters change
-    useEffect(() => { setCurrentPage(1); }, [searchTerm, roleFilter, startDate, endDate]);
+    useEffect(() => { setCurrentPage(1); }, [searchTerm, roleFilter, startDate, endDate, activeTab]);
     const totalPages = Math.ceil(filteredLogs.length / ITEMS_PER_PAGE);
     const paginatedLogs = useMemo(() => {
         const start = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -109,14 +118,26 @@ export const AccessLogs = () => {
         setShowExportMenu(false);
 
         try {
-            const exportData = filteredLogs.map(log => ({
-                'Timestamp': formatDate(log.scanned_at),
-                'Name': log.person_name,
-                'ID Number': log.school_id_number,
-                'Role': log.role,
-                'Location': log.scanner_location,
-                'Action': log.scanner_function.toUpperCase()
-            }));
+            const exportData = filteredLogs.map(log => {
+                if (activeTab === 'gateLogs') {
+                    return {
+                        'Timestamp': formatDate(log.scanned_at),
+                        'Name': log.person_name,
+                        'ID Number': log.id_number,
+                        'Role': log.role,
+                        'Location': log.scanner_location,
+                        'Action': log.scanner_function.toUpperCase()
+                    };
+                } else {
+                    return {
+                        'Timestamp': formatDate(log.scanned_at),
+                        'Name': log.person_name,
+                        'ID Number': log.id_number,
+                        'Role': log.role,
+                        'Event Name': log.event_name,
+                    };
+                }
+            });
 
             const ws = XLSX.utils.json_to_sheet(exportData);
             const wb = XLSX.utils.book_new();
@@ -219,18 +240,31 @@ export const AccessLogs = () => {
             drawHeader();
 
             // Table Data
-            const tableColumn = ["Timestamp", "Name", "ID Number", "Role", "Location", "Action"];
+            const tableColumn = activeTab === 'gateLogs' 
+                ? ["Timestamp", "Name", "ID Number", "Role", "Location", "Action"]
+                : ["Timestamp", "Name", "ID Number", "Role", "Event Name"];
+                
             const tableRows = [];
 
             filteredLogs.forEach(log => {
-                tableRows.push([
-                    formatDate(log.scanned_at),
-                    log.person_name,
-                    log.school_id_number,
-                    log.role,
-                    log.scanner_location,
-                    log.scanner_function.toUpperCase()
-                ]);
+                if (activeTab === 'gateLogs') {
+                    tableRows.push([
+                        formatDate(log.scanned_at),
+                        log.person_name,
+                        log.id_number,
+                        log.role,
+                        log.scanner_location,
+                        log.scanner_function.toUpperCase()
+                    ]);
+                } else {
+                    tableRows.push([
+                        formatDate(log.scanned_at),
+                        log.person_name,
+                        log.id_number,
+                        log.role,
+                        log.event_name
+                    ]);
+                }
             });
 
             // Generate Table
@@ -326,63 +360,23 @@ export const AccessLogs = () => {
                 </div>
             )}
 
-            {/* Header Section */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            {/* Header Title Section */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900">
-                        Access Logs
+                        {activeTab === 'gateLogs' ? 'General Gate Logs' : 'Event Attendance'}
                     </h1>
-                    <p className="text-slate-500 mt-1">Real-time entry and exit monitoring.</p>
+                    <p className="text-slate-500 mt-1">
+                        {activeTab === 'gateLogs' ? 'Real-time entry and exit monitoring.' : 'Tracking attendance for events and ceremonies.'}
+                    </p>
                 </div>
-
-                <div className="flex items-center gap-3">
-                    <div className="relative" ref={exportMenuRef}>
-                        <button
-                            onClick={() => setShowExportMenu(!showExportMenu)}
-                            disabled={isExporting}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-lg border shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-slate-500/50 ${isExporting
-                                ? 'bg-slate-700 border-slate-600 text-slate-300 cursor-not-allowed'
-                                : 'bg-slate-800 border-slate-700 text-white hover:bg-slate-700'
-                                }`}
-                        >
-                            {isExporting ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                                <Download className="w-4 h-4" />
-                            )}
-                            <span className="font-semibold text-sm">
-                                {isExporting ? 'Generating...' : 'Export'}
-                            </span>
-                        </button>
-
-                        {showExportMenu && !isExporting && (
-                            <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-50 overflow-hidden">
-                                <button
-                                    onClick={handleExportPDF}
-                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors border-b border-slate-100"
-                                >
-                                    <FileText className="w-4 h-4 text-red-500" />
-                                    Export as PDF
-                                </button>
-                                <button
-                                    onClick={handleExportExcel}
-                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
-                                >
-                                    <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
-                                    Export as Excel
-                                </button>
-                            </div>
-                        )}
-                    </div>
-
-                    <button
-                        onClick={fetchLogs}
-                        className="p-2 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-50 shadow-sm transition-all"
-                        title="Refresh Logs"
-                    >
-                        <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
-                    </button>
-                </div>
+                <button
+                    onClick={fetchLogs}
+                    className="p-2 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-50 shadow-sm transition-all"
+                    title="Refresh Logs"
+                >
+                    <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+                </button>
             </div>
 
             {/* Error Message */}
@@ -393,68 +387,105 @@ export const AccessLogs = () => {
                 </div>
             )}
 
-            {/* Filter Section  */}
-            <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col lg:flex-row gap-4">
-                {/* Search & Role (Upper row on small screens) */}
-                <div className="flex flex-col sm:flex-row gap-4 flex-1">
-                    <div className="relative w-full sm:max-w-xs">
+            {/* Enterprise Control Bar */}
+            <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col lg:flex-row items-center justify-between gap-4 mb-6">
+                
+                {/* Left Section (Navigation) */}
+                <div className="flex p-1 bg-slate-100 rounded-xl space-x-1 w-full lg:w-auto overflow-x-auto shrink-0">
+                    <button
+                        onClick={() => setActiveTab('gateLogs')}
+                        className={`flex-1 lg:flex-none px-6 py-2 rounded-lg font-semibold text-sm transition-all whitespace-nowrap focus:outline-none ${activeTab === 'gateLogs' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}
+                    >
+                        General Gate Logs
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('eventLogs')}
+                        className={`flex-1 lg:flex-none px-6 py-2 rounded-lg font-semibold text-sm transition-all whitespace-nowrap focus:outline-none ${activeTab === 'eventLogs' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}
+                    >
+                        Event Attendance
+                    </button>
+                </div>
+
+                {/* Right Section (Filters & Export) */}
+                <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto flex-wrap lg:justify-end">
+                    
+                    {/* Search Input */}
+                    <div className="relative w-full sm:w-56 shrink-0">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <Search className="h-5 w-5 text-slate-400" />
+                            <Search className="h-4 w-4 text-slate-400" />
                         </div>
                         <input
                             type="text"
-                            className="block w-full pl-10 pr-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 sm:text-sm transition-all"
-                            placeholder="Search by Name or ID..."
+                            className="block w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-slate-500 sm:text-sm transition-all"
+                            placeholder={activeTab === 'gateLogs' ? "Search Name or ID..." : "Search Event or Name..."}
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
                     </div>
-                    {/* Role Filter Dropdown */}
-                    <div className="relative w-full sm:w-48">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <Filter className="h-4 w-4 text-slate-400" />
-                        </div>
-                        <select
-                            value={roleFilter}
-                            onChange={(e) => setRoleFilter(e.target.value)}
-                            className="block w-full pl-9 pr-8 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 sm:text-sm transition-all appearance-none cursor-pointer"
-                        >
-                            <option value="All">All Roles</option>
-                            <option value="student">Student</option>
-                            <option value="professor">Professor</option>
-                            <option value="staff">Staff</option>
-                            <option value="visitor">Visitor</option>
-                        </select>
-                    </div>
-                </div>
 
-                {/* Date Filters (Lower row on small screens) */}
-                <div className="flex flex-col sm:flex-row gap-3 lg:border-l lg:border-slate-200 lg:pl-4">
-                    <div className="flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-slate-400" />
-                        <span className="text-sm text-slate-500 font-medium">From</span>
+                    {/* Date Filters */}
+                    <div className="flex items-center gap-2 border border-slate-200 rounded-lg p-1 bg-slate-50 w-full sm:w-auto shrink-0 flex-wrap sm:flex-nowrap justify-center">
+                        <div className="flex items-center gap-2 px-2">
+                            <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
+                            <input
+                                type="date"
+                                value={startDate}
+                                onChange={(e) => setStartDate(e.target.value)}
+                                className="bg-transparent text-slate-900 focus:outline-none sm:text-sm font-medium w-[110px]"
+                            />
+                        </div>
+                        <span className="text-slate-300">|</span>
+                        <div className="flex items-center gap-2 px-2">
+                            <input
+                                type="date"
+                                value={endDate}
+                                onChange={(e) => setEndDate(e.target.value)}
+                                className="bg-transparent text-slate-900 focus:outline-none sm:text-sm font-medium w-[110px]"
+                            />
+                        </div>
+                        <button
+                            onClick={fetchLogs}
+                            className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition-colors ml-1 focus:outline-none focus:ring-2 focus:ring-slate-400"
+                        >
+                            Apply
+                        </button>
                     </div>
-                    <input
-                        type="date"
-                        value={startDate}
-                        onChange={(e) => setStartDate(e.target.value)}
-                        className="px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/50 sm:text-sm font-medium"
-                    />
-                    <div className="flex items-center gap-2">
-                        <span className="text-sm text-slate-500 font-medium">To</span>
+
+                    {/* Export Dropdown */}
+                    <div className="relative w-full sm:w-auto shrink-0" ref={exportMenuRef}>
+                        <button
+                            onClick={() => setShowExportMenu(!showExportMenu)}
+                            disabled={isExporting}
+                            className={`flex items-center justify-center gap-2 px-4 py-2 w-full sm:w-auto rounded-lg border transition-all focus:outline-none ${isExporting
+                                ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900 shadow-sm'
+                                }`}
+                        >
+                            {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                            <span className="font-semibold text-sm">
+                                {isExporting ? 'Wait' : 'Export'}
+                            </span>
+                        </button>
+
+                        {showExportMenu && !isExporting && (
+                            <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-50 overflow-hidden">
+                                <button
+                                    onClick={handleExportPDF}
+                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors border-b border-slate-100"
+                                >
+                                    <FileText className="w-4 h-4 text-red-500" />
+                                    Export PDF
+                                </button>
+                                <button
+                                    onClick={handleExportExcel}
+                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                                >
+                                    <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
+                                    Export Excel
+                                </button>
+                            </div>
+                        )}
                     </div>
-                    <input
-                        type="date"
-                        value={endDate}
-                        onChange={(e) => setEndDate(e.target.value)}
-                        className="px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/50 sm:text-sm font-medium"
-                    />
-                    <button
-                        onClick={fetchLogs}
-                        className="px-4 py-2 bg-blue-50 text-blue-600 font-medium rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors text-sm whitespace-nowrap"
-                    >
-                        Apply Date
-                    </button>
                 </div>
             </div>
 
@@ -467,14 +498,20 @@ export const AccessLogs = () => {
                                 <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Timestamp</th>
                                 <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">User Info</th>
                                 <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Role</th>
-                                <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Location</th>
-                                <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px] text-center">Action</th>
+                                {activeTab === 'gateLogs' ? (
+                                    <>
+                                        <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Location</th>
+                                        <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px] text-center">Action</th>
+                                    </>
+                                ) : (
+                                    <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Event Name</th>
+                                )}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {paginatedLogs.length > 0 ? (
                                 paginatedLogs.map((log) => (
-                                    <tr key={log.log_id} className="hover:bg-slate-50 even:bg-slate-50/50 transition-colors">
+                                    <tr key={log.log_id || log.attendance_id} className="hover:bg-slate-50 even:bg-slate-50/50 transition-colors">
                                         <td className="px-3 py-1.5 text-slate-600 whitespace-nowrap font-mono text-xs">
                                             {formatDate(log.scanned_at)}
                                         </td>
@@ -484,7 +521,7 @@ export const AccessLogs = () => {
                                                     {log.person_name}
                                                 </span>
                                                 <span className="text-[11px] text-slate-500 font-mono">
-                                                    {log.school_id_number}
+                                                    {log.id_number}
                                                 </span>
                                             </div>
                                         </td>
@@ -497,22 +534,30 @@ export const AccessLogs = () => {
                                                 {log.role}
                                             </span>
                                         </td>
-                                        <td className="px-3 py-1.5 text-slate-600 text-xs">
-                                            {log.scanner_location}
-                                        </td>
-                                        <td className="px-3 py-1.5 text-center">
-                                            <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded shadow-sm text-xs font-bold ${log.scanner_function === 'entrance'
-                                                ? 'bg-blue-600 text-white border-blue-700'
-                                                : 'bg-rose-600 text-white border-rose-700'
-                                                }`}>
-                                                {log.scanner_function === 'entrance' ? (
-                                                    <ArrowDownLeft className="w-3.5 h-3.5" />
-                                                ) : (
-                                                    <ArrowUpRight className="w-3.5 h-3.5" />
-                                                )}
-                                                <span>{log.scanner_function === 'entrance' ? 'ENTRY' : 'EXIT'}</span>
-                                            </div>
-                                        </td>
+                                        {activeTab === 'gateLogs' ? (
+                                            <>
+                                                <td className="px-3 py-1.5 text-slate-600 text-xs">
+                                                    {log.scanner_location}
+                                                </td>
+                                                <td className="px-3 py-1.5 text-center">
+                                                    <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded shadow-sm text-xs font-bold ${log.scanner_function === 'entrance'
+                                                        ? 'bg-blue-600 text-white border-blue-700'
+                                                        : 'bg-rose-600 text-white border-rose-700'
+                                                        }`}>
+                                                        {log.scanner_function === 'entrance' ? (
+                                                            <ArrowDownLeft className="w-3.5 h-3.5" />
+                                                        ) : (
+                                                            <ArrowUpRight className="w-3.5 h-3.5" />
+                                                        )}
+                                                        <span>{log.scanner_function === 'entrance' ? 'ENTRY' : 'EXIT'}</span>
+                                                    </div>
+                                                </td>
+                                            </>
+                                        ) : (
+                                            <td className="px-3 py-1.5 text-slate-600 text-xs font-semibold">
+                                                {log.event_name}
+                                            </td>
+                                        )}
                                     </tr>
                                 ))
                             ) : (
@@ -529,7 +574,7 @@ export const AccessLogs = () => {
                 {/* Footer: counts + pagination (only when records > items per page) */}
                 <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 flex flex-wrap items-center justify-between gap-3 shrink-0">
                     <div>
-                        Showing {paginatedLogs.length > 0 ? (currentPage - 1) * ITEMS_PER_PAGE + 1 : 0}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredLogs.length)} of {filteredLogs.length} (Total: {logs.length})
+                        Showing {paginatedLogs.length > 0 ? (currentPage - 1) * ITEMS_PER_PAGE + 1 : 0}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredLogs.length)} of {filteredLogs.length} (Total: {currentData.length})
                     </div>
                     {showPagination && (
                         <div className="flex items-center gap-1">
