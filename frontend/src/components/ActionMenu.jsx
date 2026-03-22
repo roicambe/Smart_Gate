@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { ArrowLeft, Keyboard, QrCode, ScanFace, Users, LogIn, LogOut, ChevronLeft, ArrowRight, CheckCircle2, AlertCircle } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { QRCodeSVG } from "qrcode.react";
 
 export const ActionMenu = ({ view, setView }) => {
     const isEntrance = view === 'action_entrance';
@@ -13,7 +14,9 @@ export const ActionMenu = ({ view, setView }) => {
 
     const [visitorForm, setVisitorForm] = useState({
         firstName: '',
+        middleName: '',
         lastName: '',
+        email: '',
         contactNumber: '',
         purpose: '',
         personToVisit: ''
@@ -27,16 +30,16 @@ export const ActionMenu = ({ view, setView }) => {
             const randomPart = Math.floor(1000 + Math.random() * 9000).toString().padStart(4, '0');
             const generatedId = `VIS-${yearPart}${randomPart}`;
             
-            await invoke('register_user', {
+            const personId = await invoke('register_user', {
                 role: "visitor",
                 idNumber: generatedId,
                 firstName: visitorForm.firstName,
+                middleName: visitorForm.middleName || null,
                 lastName: visitorForm.lastName,
-                email: null,
+                email: visitorForm.email,
                 contactNumber: visitorForm.contactNumber,
                 purpose: visitorForm.purpose,
                 personToVisit: visitorForm.personToVisit,
-                middleName: null,
                 programId: null,
                 yearLevel: null,
                 departmentId: null,
@@ -50,7 +53,12 @@ export const ActionMenu = ({ view, setView }) => {
             });
             
             if (result.success) {
-                setSuccessVisitor({ id: generatedId, name: `${visitorForm.firstName} ${visitorForm.lastName}` });
+                setSuccessVisitor({ id: generatedId, name: `${visitorForm.firstName} ${visitorForm.lastName}`, email: visitorForm.email });
+                
+                if (visitorForm.email) {
+                    invoke("send_visitor_qr", { idNumber: generatedId })
+                        .catch(qrErr => console.error("Failed to send QR email:", qrErr));
+                }
             } else {
                 setStatus({ type: 'error', message: result.message });
             }
@@ -59,7 +67,7 @@ export const ActionMenu = ({ view, setView }) => {
             setStatus({ type: 'error', message: typeof error === 'string' ? error : "Failed to register visitor." });
         } finally {
             setShowVisitorModal(false);
-            setVisitorForm({ firstName: '', lastName: '', contactNumber: '', purpose: '', personToVisit: '' });
+            setVisitorForm({ firstName: '', middleName: '', lastName: '', email: '', contactNumber: '', purpose: '', personToVisit: '' });
         }
     };
 
@@ -301,10 +309,14 @@ export const ActionMenu = ({ view, setView }) => {
                                 </div>
                             </div>
                             <form onSubmit={handleVisitorSubmit} className="space-y-5">
-                                <div className="grid grid-cols-2 gap-5">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
                                     <div>
                                         <label className="block text-sm font-medium text-white/70 mb-1">First Name <span className="text-rose-500">*</span></label>
                                         <input required type="text" value={visitorForm.firstName} onChange={e => setVisitorForm({...visitorForm, firstName: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="Juan" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-white/70 mb-1">Middle Name</label>
+                                        <input type="text" value={visitorForm.middleName} onChange={e => setVisitorForm({...visitorForm, middleName: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="Optional" />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-white/70 mb-1">Last Name <span className="text-rose-500">*</span></label>
@@ -313,17 +325,23 @@ export const ActionMenu = ({ view, setView }) => {
                                 </div>
                                 <div className="grid grid-cols-2 gap-5">
                                     <div>
-                                        <label className="block text-sm font-medium text-white/70 mb-1">Contact Number <span className="text-rose-500">*</span></label>
-                                        <input required type="text" value={visitorForm.contactNumber} onChange={e => setVisitorForm({...visitorForm, contactNumber: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="09xxxxxxxxx" />
+                                        <label className="block text-sm font-medium text-white/70 mb-1">Email <span className="text-rose-500">*</span></label>
+                                        <input required type="email" value={visitorForm.email} onChange={e => setVisitorForm({...visitorForm, email: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="juan@example.com" />
                                     </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-white/70 mb-1">Contact Number</label>
+                                        <input type="text" value={visitorForm.contactNumber} onChange={e => setVisitorForm({...visitorForm, contactNumber: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="09xxxxxxxxx" />
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-5">
                                     <div>
                                         <label className="block text-sm font-medium text-white/70 mb-1">Person to Visit <span className="text-rose-500">*</span></label>
                                         <input required type="text" value={visitorForm.personToVisit} onChange={e => setVisitorForm({...visitorForm, personToVisit: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="Prof. Smith" />
                                     </div>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-white/70 mb-1">Purpose of Visit <span className="text-rose-500">*</span></label>
-                                    <input required type="text" value={visitorForm.purpose} onChange={e => setVisitorForm({...visitorForm, purpose: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="Meeting / Delivery" />
+                                    <div>
+                                        <label className="block text-sm font-medium text-white/70 mb-1">Purpose of Visit <span className="text-rose-500">*</span></label>
+                                        <input required type="text" value={visitorForm.purpose} onChange={e => setVisitorForm({...visitorForm, purpose: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="Meeting / Delivery" />
+                                    </div>
                                 </div>
                                 
                                 <div className="flex gap-4 pt-6 mt-4 border-t border-white/10">
@@ -357,28 +375,40 @@ export const ActionMenu = ({ view, setView }) => {
             {/* Success Visitor Modal */}
             {successVisitor && (
                 <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-md">
-                    <div className="bg-emerald-950/80 backdrop-blur-2xl border border-emerald-500/30 rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 fade-in duration-200">
+                    <div className="bg-emerald-950/80 backdrop-blur-2xl border border-emerald-500/30 rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 fade-in duration-200">
                         <div className="p-8 text-center flex flex-col items-center">
                             <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center border-4 border-emerald-500/30 mb-6">
                                 <CheckCircle2 className="w-10 h-10 text-emerald-400" />
                             </div>
-                            <h2 className="text-3xl font-bold text-white tracking-wide mb-2">Visitor Registered!</h2>
-                            <p className="text-emerald-100/70 mb-6">Temporary Visitor Registration Successful</p>
+                            <h2 className="text-3xl font-bold text-white tracking-wide mb-2">Registration Successful!</h2>
+                            <p className="text-emerald-100/70 mb-6">Temporary Visitor Registration Complete</p>
                             
-                            <div className="bg-black/50 border border-emerald-500/30 p-6 rounded-2xl w-full mb-6 relative overflow-hidden group">
-                                <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-transparent"></div>
-                                <p className="text-emerald-200/60 text-sm font-semibold uppercase tracking-wider mb-2">Temporary Visitor ID</p>
-                                <p className="text-4xl font-mono font-bold text-white tracking-widest">{successVisitor.id}</p>
-                                <p className="text-white/80 mt-4 text-lg">{successVisitor.name}</p>
+                            <div className="flex gap-6 items-stretch w-full justify-center mb-8">
+                                <div className="bg-white p-4 rounded-xl shadow-[0_0_20px_rgba(255,255,255,0.2)] flex items-center justify-center shrink-0">
+                                    <QRCodeSVG value={successVisitor.id} size={150} />
+                                </div>
+                                <div className="bg-black/50 border border-emerald-500/30 p-6 rounded-2xl flex-1 relative overflow-hidden flex flex-col justify-center text-left">
+                                    <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-transparent"></div>
+                                    <p className="text-emerald-200/60 text-sm font-semibold uppercase tracking-wider mb-2">Temporary Visitor ID</p>
+                                    <p className="text-4xl sm:text-5xl font-mono font-bold text-white tracking-widest relative z-10">{successVisitor.id}</p>
+                                    <p className="text-white/80 mt-4 text-xl relative z-10">{successVisitor.name}</p>
+                                </div>
                             </div>
                             
-                            <p className="text-emerald-200/80 mb-8 font-medium italic">
-                                "Please use this ID for Manual Entry and for logging your Departure (Exit)."
-                            </p>
+                            <div className="w-full text-center space-y-3 mb-8">
+                                {successVisitor.email && (
+                                    <p className="text-emerald-200/90 font-medium text-lg border-b border-emerald-500/20 pb-4">
+                                        A digital copy of this pass has been sent to <span className="text-white font-bold">{successVisitor.email}</span>. You can also take a picture.
+                                    </p>
+                                )}
+                                <p className="text-emerald-200/80 font-medium italic pt-2">
+                                    Please use this ID for logging your Departure (Exit) later.
+                                </p>
+                            </div>
                             
                             <button
                                 onClick={() => setSuccessVisitor(null)}
-                                className="w-full px-6 py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl transition-all shadow-[0_0_20px_rgba(16,185,129,0.2)] focus:outline-none focus:ring-4 focus:ring-emerald-500/30 text-lg"
+                                className="w-full px-6 py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl transition-all shadow-[0_0_20px_rgba(16,185,129,0.2)] hover:shadow-[0_0_30px_rgba(16,185,129,0.4)] focus:outline-none focus:ring-4 focus:ring-emerald-500/30 text-lg"
                             >
                                 Done
                             </button>
