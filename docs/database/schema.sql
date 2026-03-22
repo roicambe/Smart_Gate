@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS persons (
     first_name VARCHAR NOT NULL,
     middle_name VARCHAR NULL,
     last_name VARCHAR NOT NULL,
-    email VARCHAR UNIQUE NULL,        -- Added: Normalized contact data
+    email VARCHAR NULL,               -- Added: Normalized contact data
     contact_number VARCHAR NULL,      -- Added: Normalized contact data
     face_template_path VARCHAR NULL,
     is_active BOOLEAN NOT NULL DEFAULT 1    
@@ -39,7 +39,6 @@ CREATE TABLE IF NOT EXISTS visitors (
     person_id INTEGER PRIMARY KEY,
     purpose_of_visit VARCHAR NOT NULL,
     person_to_visit VARCHAR NOT NULL,
-    id_presented VARCHAR NOT NULL,
     FOREIGN KEY (person_id) REFERENCES persons(person_id)
 );
 

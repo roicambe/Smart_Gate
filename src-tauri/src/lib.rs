@@ -3,9 +3,11 @@ use tauri::Manager;
 pub mod models;
 pub mod db;
 pub mod commands;
+pub mod email;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  dotenvy::dotenv().ok();
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_fs::init())
@@ -61,7 +63,8 @@ pub fn run() {
         commands::add_admin_account,
         commands::update_admin_role,
         commands::reset_admin_password,
-        commands::update_admin_info
+        commands::update_admin_info,
+        email::send_visitor_qr
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

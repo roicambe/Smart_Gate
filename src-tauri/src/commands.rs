@@ -144,7 +144,6 @@ pub fn register_user(
     position_title: Option<String>,
     purpose: Option<String>,
     person_to_visit: Option<String>,
-    id_presented: Option<String>,
 ) -> Result<i64, String> {
     db::register_user(
         &pool,
@@ -161,7 +160,6 @@ pub fn register_user(
         position_title,
         purpose,
         person_to_visit,
-        id_presented,
     )
 }
 
@@ -191,7 +189,6 @@ pub fn update_user(
     position_title: Option<String>,
     purpose: Option<String>,
     person_to_visit: Option<String>,
-    id_presented: Option<String>,
 ) -> Result<(), String> {
     db::update_user(
         &pool,
@@ -209,7 +206,6 @@ pub fn update_user(
         position_title,
         purpose,
         person_to_visit,
-        id_presented,
     )
 }
 

@@ -27,3 +27,4 @@ src-tauri/gen/schemas/
 # Environment Variables
 .env
 .env.*
+src-tauri/.env
