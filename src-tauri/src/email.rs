@@ -4,19 +4,11 @@ use serde_json::json;
 use crate::db::DbPool;
 use rusqlite::params;
 
-#[tauri::command]
+#[command]
 pub async fn send_visitor_qr(
     state: State<'_, DbPool>,
     id_number: String,
 ) -> Result<String, String> {
-    // Load .env if present
-    let _ = dotenvy::dotenv();
-    let api_key = std::env::var("BREVO_API_KEY").unwrap_or_else(|_| "".to_string());
-    
-    if api_key.is_empty() {
-        return Err("BREVO_API_KEY not found in environment or .env file".to_string());
-    }
-
     // 1. Get visitor info from DB (joining persons and visitors)
     let conn = state.get().map_err(|e| format!("DB connection error: {}", e))?;
     
@@ -109,8 +101,13 @@ pub async fn send_visitor_qr(
     });
 
     // 5. Send POST request to Brevo API
+    let api_key = std::env::var("BREVO_API_KEY").unwrap_or_else(|_| "".to_string());
+    if api_key.is_empty() {
+        return Err("BREVO_API_KEY not found in environment variables".to_string());
+    }
+
     let resp = client.post("https://api.brevo.com/v3/smtp/email")
-        .header("api-key", &api_key)
+        .header("api-key", api_key)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
         .json(&payload)
