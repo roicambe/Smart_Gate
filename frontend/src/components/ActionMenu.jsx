@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { ArrowLeft, Keyboard, QrCode, ScanFace, Users, LogIn, LogOut, ChevronLeft, ArrowRight, CheckCircle2, AlertCircle } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { QRCodeSVG } from "qrcode.react";
+import { QRScannerOverlay } from "./QRScannerOverlay";
 
 export const ActionMenu = ({ view, setView }) => {
     const isEntrance = view === 'action_entrance';
@@ -11,6 +12,7 @@ export const ActionMenu = ({ view, setView }) => {
     const [status, setStatus] = useState(null);
     const [successVisitor, setSuccessVisitor] = useState(null);
     const [showHardwareModal, setShowHardwareModal] = useState(false);
+    const [showQRScanner, setShowQRScanner] = useState(false);
 
     const [visitorForm, setVisitorForm] = useState({
         firstName: '',
@@ -158,7 +160,7 @@ export const ActionMenu = ({ view, setView }) => {
 
                     {/* QR Scanner */}
                     <button 
-                        onClick={() => setShowHardwareModal(true)}
+                        onClick={() => setShowQRScanner(true)}
                         className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]">
                         <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
                             <QrCode className="w-12 h-12 drop-shadow-md" />
@@ -220,7 +222,7 @@ export const ActionMenu = ({ view, setView }) => {
                         <div className="flex-1">
                             {/* QR Scanner */}
                             <button 
-                                onClick={() => setShowHardwareModal(true)}
+                                onClick={() => setShowQRScanner(true)}
                                 className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]">
                                 <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
                                     <QrCode className="w-12 h-12 drop-shadow-md" />
@@ -370,6 +372,33 @@ export const ActionMenu = ({ view, setView }) => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* QR Scanner Modal */}
+            {showQRScanner && (
+                <QRScannerOverlay
+                    scannerFunction={isEntrance ? 'entrance' : 'exit'}
+                    onClose={() => setShowQRScanner(false)}
+                    onScan={async (scannedId) => {
+                        setShowQRScanner(false);
+                        setStatus(null);
+                        try {
+                            const result = await invoke('manual_id_entry', {
+                                idNumber: scannedId,
+                                scannerFunction: isEntrance ? 'entrance' : 'exit'
+                            });
+
+                            if (result.success) {
+                                setStatus({ type: 'success', message: `${result.message} - ${result.person_name} (${result.role})` });
+                            } else {
+                                setStatus({ type: 'error', message: result.message });
+                            }
+                        } catch (error) {
+                            console.error(error);
+                            setStatus({ type: 'error', message: "System Error. Failed to process ID." });
+                        }
+                    }}
+                />
             )}
 
             {/* Success Visitor Modal */}
