@@ -65,12 +65,23 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
     }
 
     // Admin RBAC updates and role normalization.
-    let _ = conn.execute("ALTER TABLE accounts ADD COLUMN full_name VARCHAR DEFAULT 'Administrator'", params![]);
+    if !table_has_column(&conn, "accounts", "full_name")? {
+        let _ = conn.execute("ALTER TABLE accounts ADD COLUMN full_name VARCHAR DEFAULT 'Administrator'", params![]);
+    }
+
+    if !table_has_column(&conn, "accounts", "role")? {
+        // If role column is missing, we add it. 
+        // We use 'Gate Supervisor' as default for existing accounts to be safe, 
+        // but 'admin' will be seeded as 'System Administrator' anyway.
+        let _ = conn.execute("ALTER TABLE accounts ADD COLUMN role TEXT DEFAULT 'Gate Supervisor'", params![]);
+    }
+
     conn.execute(
         "UPDATE accounts
          SET full_name = COALESCE(NULLIF(TRIM(full_name), ''), 'Administrator')",
         params![],
     ).map_err(|e| format!("Failed to normalize account names: {}", e))?;
+
     conn.execute(
         "UPDATE accounts
          SET role = CASE
