@@ -94,6 +94,23 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
         ).map_err(|e| format!("Failed to migrate visitor contact numbers: {}", e))?;
     }
 
+    if table_has_column(&conn, "visitors", "id_presented")? {
+        conn.execute_batch("
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE IF NOT EXISTS visitors_new (
+                person_id INTEGER PRIMARY KEY,
+                purpose_of_visit VARCHAR NOT NULL,
+                person_to_visit VARCHAR NOT NULL,
+                FOREIGN KEY (person_id) REFERENCES persons(person_id)
+            );
+            INSERT INTO visitors_new (person_id, purpose_of_visit, person_to_visit)
+            SELECT person_id, purpose_of_visit, person_to_visit FROM visitors;
+            DROP TABLE visitors;
+            ALTER TABLE visitors_new RENAME TO visitors;
+            PRAGMA foreign_keys = ON;
+        ").map_err(|e| format!("Failed to migrate visitors id_presented: {}", e))?;
+    }
+
     // Admin RBAC updates and role normalization.
     if !table_has_column(&conn, "accounts", "full_name")? {
         conn.execute("ALTER TABLE accounts ADD COLUMN full_name VARCHAR DEFAULT 'Administrator'", params![])

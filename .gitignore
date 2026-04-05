@@ -2,19 +2,19 @@
 node_modules/
 dist/
 dist-ssr/
-*.local
+.local
 
 # Tauri / Rust
 src-tauri/target/
 src-tauri/gen/schemas/
 
 # Editor directories and files
-.vscode/*
+.vscode/
 !.vscode/extensions.json
 .idea/
 .DS_Store
 *.suo
-*.ntvs*
+.ntvs
 *.njsproj
 *.sln
 *.sw?
@@ -22,9 +22,9 @@ src-tauri/gen/schemas/
 # Database
 *.db
 *.sqlite
-*.sqlite3
+.sqlite3
 
 # Environment Variables
 .env
-.env.*
+.env.
 src-tauri/.env
