@@ -141,3 +141,13 @@ INSERT OR IGNORE INTO programs (program_id, department_id, program_code, program
 INSERT OR IGNORE INTO scanners (scanner_id, location_name, function) VALUES
     (1, 'Main Entrance', 'entrance'),
     (2, 'Main Exit', 'exit');
+
+-- System Settings
+CREATE TABLE IF NOT EXISTS settings (
+    setting_key VARCHAR PRIMARY KEY,
+    setting_value TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES
+    ('system_name', 'Pamantasan ng Lungsod ni Roi'),
+    ('system_logo', '');

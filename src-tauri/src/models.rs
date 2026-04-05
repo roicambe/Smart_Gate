@@ -210,3 +210,9 @@ pub struct AuditLogDetails {
     pub new_values: Option<String>,
     pub created_at: String,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SystemBranding {
+    pub system_name: String,
+    pub system_logo: String,
+}

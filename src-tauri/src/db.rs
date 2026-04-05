@@ -140,6 +140,13 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
          END",
         params![],
     ).map_err(|e| format!("Failed to normalize account roles: {}", e))?;
+
+    // Migrate system_settings to settings
+    let _ = conn.execute(
+        "INSERT OR IGNORE INTO settings (setting_key, setting_value) SELECT setting_key, setting_value FROM system_settings;",
+        params![]
+    );
+    let _ = conn.execute("DROP TABLE IF EXISTS system_settings", params![]);
     conn.execute(
         "INSERT OR IGNORE INTO accounts (username, password_hash, full_name, role)
          VALUES ('admin', 'admin123', 'Administrator', 'System Administrator')",
@@ -1514,6 +1521,118 @@ pub fn log_event_attendance(pool: &DbPool, event_id: i64, id_number: &str) -> Re
             role: None,
         })
     }
+}
+
+pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    
+    let mut system_name = "Pamantasan ng Lungsod ni Roi".to_string();
+    let mut system_logo = "".to_string();
+
+    let mut stmt = conn.prepare("SELECT setting_key, setting_value FROM settings").map_err(|e| e.to_string())?;
+    
+    let iter = stmt.query_map([], |row| {
+        let key: String = row.get(0)?;
+        let value: String = row.get(1)?;
+        Ok((key, value))
+    }).map_err(|e| e.to_string())?;
+
+    for item in iter {
+        if let Ok((key, value)) = item {
+            match key.as_str() {
+                "system_name" => system_name = value,
+                "system_logo" => system_logo = value,
+                _ => {}
+            }
+        }
+    }
+
+    Ok(SystemBranding {
+        system_name,
+        system_logo,
+    })
+}
+
+pub fn update_system_branding(pool: &DbPool, admin_id: i64, name: &str, logo_base64: &str) -> Result<(), String> {
+    let mut conn = pool.get().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    // Get old values for audit logging
+    let mut old_system_name = "Pamantasan ng Lungsod ni Roi".to_string();
+    let mut old_system_logo = "".to_string();
+
+    {
+        let mut stmt = tx.prepare("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('system_name', 'system_logo')")
+            .map_err(|e| e.to_string())?;
+        
+        let iter = stmt.query_map([], |row| {
+            let key: String = row.get(0)?;
+            let value: String = row.get(1)?;
+            Ok((key, value))
+        }).map_err(|e| e.to_string())?;
+
+        for item in iter {
+            if let Ok((key, value)) = item {
+                match key.as_str() {
+                    "system_name" => old_system_name = value,
+                    "system_logo" => old_system_logo = value,
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // Insert or update system_name
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('system_name', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![name],
+    ).map_err(|e| e.to_string())?;
+
+    // Log audit for system_name change if it changed
+    if old_system_name != name {
+        let old_values = format!(r#"{{"system_name":"{}"}}"#, old_system_name.replace("\"", "\\\""));
+        let new_values = format!(r#"{{"system_name":"{}"}}"#, name.replace("\"", "\\\""));
+        
+        tx.execute(
+            "INSERT INTO audit_logs (admin_id, action_type, target_table, target_id, old_values, new_values) 
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![admin_id, "UPDATE", "settings", 1_i64, old_values, new_values],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    // Insert or update system_logo
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('system_logo', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![logo_base64],
+    ).map_err(|e| e.to_string())?;
+
+    // Log audit for system_logo change if it changed
+    if old_system_logo != logo_base64 {
+        let old_logo_preview = if old_system_logo.len() > 100 { 
+            format!("{}...", &old_system_logo[..100]) 
+        } else { 
+            old_system_logo.clone() 
+        };
+        let new_logo_preview = if logo_base64.len() > 100 { 
+            format!("{}...", &logo_base64[..100]) 
+        } else { 
+            logo_base64.to_string() 
+        };
+        
+        let old_values = format!(r#"{{"system_logo":"{}"}}"#, old_logo_preview.replace("\"", "\\\""));
+        let new_values = format!(r#"{{"system_logo":"{}"}}"#, new_logo_preview.replace("\"", "\\\""));
+        
+        tx.execute(
+            "INSERT INTO audit_logs (admin_id, action_type, target_table, target_id, old_values, new_values) 
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![admin_id, "UPDATE", "settings", 2_i64, old_values, new_values],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -64,6 +64,8 @@ pub fn run() {
         commands::update_admin_role,
         commands::reset_admin_password,
         commands::update_admin_info,
+        commands::get_system_branding,
+        commands::update_system_branding,
         email::send_visitor_qr
     ])
     .run(tauri::generate_context!())
