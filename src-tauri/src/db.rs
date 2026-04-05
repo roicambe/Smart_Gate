@@ -48,8 +48,38 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
         conn.execute("ALTER TABLE persons RENAME COLUMN school_id_number TO id_number", params![])
             .map_err(|e| format!("Failed to migrate persons.id_number: {}", e))?;
     }
-    let _ = conn.execute("ALTER TABLE persons ADD COLUMN email VARCHAR UNIQUE NULL", params![]);
+
+    let _ = conn.execute("ALTER TABLE persons ADD COLUMN email VARCHAR NULL", params![]);
     let _ = conn.execute("ALTER TABLE persons ADD COLUMN contact_number VARCHAR NULL", params![]);
+
+    // Drop the UNIQUE constraint on email by recreating the table if it exists
+    let persons_sql: String = conn.query_row(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='persons'",
+        [],
+        |row| row.get(0),
+    ).unwrap_or_default();
+
+    if persons_sql.contains("email VARCHAR UNIQUE") {
+        conn.execute_batch("
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE IF NOT EXISTS persons_new (
+                person_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id_number VARCHAR UNIQUE NOT NULL,
+                role TEXT CHECK(role IN ('student', 'professor', 'staff', 'visitor')) NOT NULL,
+                first_name VARCHAR NOT NULL,
+                middle_name VARCHAR NULL,
+                last_name VARCHAR NOT NULL,
+                email VARCHAR NULL,
+                contact_number VARCHAR NULL,
+                face_template_path VARCHAR NULL,
+                is_active BOOLEAN NOT NULL DEFAULT 1    
+            );
+            INSERT INTO persons_new SELECT * FROM persons;
+            DROP TABLE persons;
+            ALTER TABLE persons_new RENAME TO persons;
+            PRAGMA foreign_keys = ON;
+        ").map_err(|e| format!("Failed to migrate un-unique email: {}", e))?;
+    }
 
     // Fix Visitor Schema (dynamically add person_to_visit if missing) and move legacy contact data into persons.
     let _ = conn.execute("ALTER TABLE visitors ADD COLUMN person_to_visit TEXT DEFAULT ''", params![]);
@@ -401,7 +431,6 @@ pub fn register_user(
     position_title: Option<String>,
     purpose: Option<String>,
     person_to_visit: Option<String>,
-    id_presented: Option<String>,
 ) -> Result<i64, String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -429,8 +458,8 @@ pub fn register_user(
         },
         "visitor" => {
             tx.execute(
-                "INSERT INTO visitors (person_id, purpose_of_visit, person_to_visit, id_presented) VALUES (?1, ?2, ?3, ?4)",
-                params![person_id, purpose.unwrap_or_default(), person_to_visit.unwrap_or_default(), id_presented.unwrap_or_default()],
+                "INSERT INTO visitors (person_id, purpose_of_visit, person_to_visit) VALUES (?1, ?2, ?3)",
+                params![person_id, purpose.unwrap_or_default(), person_to_visit.unwrap_or_default()],
             ).map_err(|e| e.to_string())?;
         },
         _ => return Err("Invalid role specified".to_string()),
@@ -456,7 +485,6 @@ pub fn update_user(
     position_title: Option<String>,
     purpose: Option<String>,
     person_to_visit: Option<String>,
-    id_presented: Option<String>,
 ) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -483,8 +511,8 @@ pub fn update_user(
         },
         "visitor" => {
             tx.execute(
-                "UPDATE visitors SET purpose_of_visit = ?1, person_to_visit = ?2, id_presented = ?3 WHERE person_id = ?4",
-                params![purpose.unwrap_or_default(), person_to_visit.unwrap_or_default(), id_presented.unwrap_or_default(), person_id],
+                "UPDATE visitors SET purpose_of_visit = ?1, person_to_visit = ?2 WHERE person_id = ?3",
+                params![purpose.unwrap_or_default(), person_to_visit.unwrap_or_default(), person_id],
             ).map_err(|e| e.to_string())?;
         },
         _ => return Err("Invalid role specified".to_string()),
@@ -559,7 +587,7 @@ pub fn get_visitors(pool: &DbPool) -> Result<Vec<VisitorDetails>, String> {
     
     // Simplistic approach: get the first entry today as time_in, and the last exit today as time_out
     let mut stmt = conn.prepare(
-        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.email, p.contact_number, v.purpose_of_visit, v.person_to_visit, v.id_presented,
+        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.email, p.contact_number, v.purpose_of_visit, v.person_to_visit,
             (SELECT MIN(e.scanned_at) FROM entry_logs e JOIN scanners s ON e.scanner_id = s.scanner_id WHERE e.person_id = p.person_id AND s.function = 'entrance') as time_in,
             (SELECT MAX(e.scanned_at) FROM entry_logs e JOIN scanners s ON e.scanner_id = s.scanner_id WHERE e.person_id = p.person_id AND s.function = 'exit') as time_out
          FROM persons p
@@ -578,9 +606,8 @@ pub fn get_visitors(pool: &DbPool) -> Result<Vec<VisitorDetails>, String> {
             contact_number: row.get(6).unwrap_or(None),
             purpose_of_visit: row.get(7)?,
             person_to_visit: row.get(8)?,
-            id_presented: row.get(9)?,
-            time_in: row.get(10).unwrap_or(None),
-            time_out: row.get(11).unwrap_or(None),
+            time_in: row.get(9).unwrap_or(None),
+            time_out: row.get(10).unwrap_or(None),
         })
     }).map_err(|e| e.to_string())?;
 

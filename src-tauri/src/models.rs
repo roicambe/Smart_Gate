@@ -123,7 +123,6 @@ pub struct VisitorDetails {
     pub email: Option<String>,
     pub purpose_of_visit: String,
     pub person_to_visit: String,
-    pub id_presented: String,
     pub contact_number: Option<String>,
     pub time_in: Option<String>,
     pub time_out: Option<String>,
