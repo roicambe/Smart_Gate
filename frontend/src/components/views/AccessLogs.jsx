@@ -10,7 +10,7 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import logoUrl from '../../../imgs/plp-logo.png';
 
-export const AccessLogs = () => {
+export const AccessLogs = ({ branding }) => {
     const [activeTab, setActiveTab] = useState('gateLogs'); // 'gateLogs' | 'eventLogs'
     
     // Gate Logs state
@@ -185,7 +185,7 @@ export const AccessLogs = () => {
 
             // Load logo image as base64 or draw directly
             const img = new Image();
-            img.src = logoUrl;
+            img.src = (branding && branding.system_logo && branding.system_logo !== "") ? branding.system_logo : logoUrl;
 
             // We use a promise to ensure image loads before drawing it
             await new Promise((resolve, reject) => {
@@ -210,7 +210,7 @@ export const AccessLogs = () => {
                 doc.setFont("helvetica", "bold");
                 doc.setFontSize(18);
                 doc.setTextColor(15, 23, 42); // slate-900
-                const uniName = "Pamantasan ng Lungsod ng Pasig";
+                const uniName = (branding && branding.system_name) ? branding.system_name : "Pamantasan ng Lungsod ni Roi";
                 doc.text(uniName, pageWidth / 2, 18, { align: "center" });
 
                 // System Name

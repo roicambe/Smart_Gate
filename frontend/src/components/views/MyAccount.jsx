@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { KeyRound, AlertCircle, CheckCircle2, Save } from 'lucide-react';
 
-export const MyAccount = ({ adminSession, setIsAdminLoggedIn, setView }) => {
+export const MyAccount = ({ adminSession, setIsAdminLoggedIn, setView, showToast }) => {
     const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [status, setStatus] = useState(null);
@@ -17,7 +17,7 @@ export const MyAccount = ({ adminSession, setIsAdminLoggedIn, setView }) => {
                 newPassword
             });
             if (success) {
-                setStatus({ type: 'success', message: 'Credentials updated. Please log in again.' });
+                showToast('Credentials updated. Please log in again.');
                 setTimeout(() => {
                     setIsAdminLoggedIn(false);
                     setView('main');
@@ -64,7 +64,7 @@ export const MyAccount = ({ adminSession, setIsAdminLoggedIn, setView }) => {
                     />
                 </div>
 
-                {status && (
+                {status && status.type === 'error' && (
                     <div className={`p-4 rounded-xl flex items-center gap-3 animate-in fade-in duration-300 ${status.type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
                         {status.type === 'success' ? <CheckCircle2 className="w-5 h-5 text-emerald-600" /> : <AlertCircle className="w-5 h-5 text-rose-600" />}
                         <span className="text-sm font-medium">{status.message}</span>

@@ -6,7 +6,7 @@ import logoImage from "../../imgs/plp-logo.png";
 
 const appWindow = getCurrentWindow();
 
-const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn }) => {
+const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding }) => {
     const [showCloseModal, setShowCloseModal] = useState(false);
     const [showAdminModal, setShowAdminModal] = useState(false);
     const [username, setUsername] = useState("");
@@ -51,6 +51,9 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn }) => {
         }
     };
 
+    const logoSrc = (branding && branding.system_logo && branding.system_logo !== "") ? branding.system_logo : logoImage;
+    const systemName = (branding && branding.system_name) ? branding.system_name : "Pamantasan ng Lungsod ni Roi";
+
     return (
         <>
             {/* Glassmorphic Header */}
@@ -59,8 +62,8 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn }) => {
             >
                 {/* Top-Left: High-resolution University Logo */}
                 <div className="flex items-center gap-4 pointer-events-none">
-                    <img src={logoImage} alt="University Logo" className="w-12 h-12 object-contain drop-shadow-md" />
-                    <span className="font-bold tracking-wide text-xl drop-shadow-sm">Pamantasan ng Lungsod ni Roi</span>
+                    <img src={logoSrc} alt="System Logo" className="w-12 h-12 object-cover rounded-full drop-shadow-md border-2 border-white/20" />
+                    <span className="font-bold tracking-wide text-xl drop-shadow-sm">{systemName}</span>
                 </div>
 
                 {/* Top-Right: Admin Login & Window Controls */}
