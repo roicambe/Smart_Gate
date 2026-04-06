@@ -70,7 +70,10 @@ CREATE TABLE IF NOT EXISTS entry_logs (
 CREATE TABLE IF NOT EXISTS events (
     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_name VARCHAR UNIQUE NOT NULL,
-    event_date DATE NOT NULL,
+    schedule_type VARCHAR NULL DEFAULT 'weekly',
+    event_date VARCHAR NOT NULL,
+    start_date VARCHAR NULL,
+    end_date VARCHAR NULL,
     start_time TIME NOT NULL,
     end_time TIME NOT NULL,
     required_role TEXT CHECK(required_role IN ('all', 'student', 'staff', 'professor')) NOT NULL,

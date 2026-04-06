@@ -3,12 +3,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { Upload, X, Save, Image as ImageIcon } from 'lucide-react';
 import plpLogo from '../../../imgs/plp-logo.png';
 
-export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession }) => {
+export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, showToast }) => {
     const isSystemAdministrator = adminSession?.role === 'System Administrator';
     const [name, setName] = useState('');
     const [logoPreview, setLogoPreview] = useState('');
     const [isSaving, setIsSaving] = useState(false);
-    const [message, setMessage] = useState('');
     const [error, setError] = useState('');
 
     useEffect(() => {
@@ -53,7 +52,6 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession }) =
         }
 
         setIsSaving(true);
-        setMessage('');
         setError('');
 
         try {
@@ -63,8 +61,7 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession }) =
                 logoBase64: logoPreview 
             });
             await fetchBranding();
-            setMessage('System branding updated successfully!');
-            setTimeout(() => setMessage(''), 3000);
+            showToast('System Branding updated successfully.');
         } catch (err) {
             setError(typeof err === 'string' ? err : 'Operation failed.');
         } finally {
@@ -87,11 +84,6 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession }) =
              {error && (
                 <div className="mb-6 p-4 bg-rose-50 text-rose-700 border border-rose-200 rounded-xl">
                     {error}
-                </div>
-             )}
-             {message && (
-                <div className="mb-6 p-4 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl">
-                    {message}
                 </div>
              )}
 

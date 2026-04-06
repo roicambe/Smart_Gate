@@ -112,6 +112,19 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
     }
 
     // Admin RBAC updates and role normalization.
+    if !table_has_column(&conn, "events", "schedule_type")? {
+        conn.execute("ALTER TABLE events ADD COLUMN schedule_type VARCHAR NULL DEFAULT 'weekly'", params![])
+            .map_err(|e| format!("Failed to add schedule_type col to events: {}", e))?;
+    }
+    if !table_has_column(&conn, "events", "start_date")? {
+        conn.execute("ALTER TABLE events ADD COLUMN start_date VARCHAR NULL", params![])
+            .map_err(|e| format!("Failed to add start_date col to events: {}", e))?;
+    }
+    if !table_has_column(&conn, "events", "end_date")? {
+        conn.execute("ALTER TABLE events ADD COLUMN end_date VARCHAR NULL", params![])
+            .map_err(|e| format!("Failed to add end_date col to events: {}", e))?;
+    }
+
     if !table_has_column(&conn, "accounts", "full_name")? {
         conn.execute("ALTER TABLE accounts ADD COLUMN full_name VARCHAR DEFAULT 'Administrator'", params![])
             .map_err(|e| format!("Failed to add full_name column to accounts: {}", e))?;
@@ -830,11 +843,14 @@ pub fn add_event(pool: &DbPool, event: Event) -> Result<i64, String> {
     let is_enabled = if event.is_enabled { 1 } else { 0 };
     
     conn.execute(
-        "INSERT INTO events (event_name, event_date, start_time, end_time, required_role, is_enabled)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO events (event_name, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             event.event_name,
+            event.schedule_type,
             event.event_date,
+            event.start_date,
+            event.end_date,
             event.start_time,
             event.end_time,
             event.required_role,
@@ -848,18 +864,21 @@ pub fn add_event(pool: &DbPool, event: Event) -> Result<i64, String> {
 pub fn get_events(pool: &DbPool) -> Result<Vec<Event>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     
-    let mut stmt = conn.prepare("SELECT event_id, event_name, event_date, start_time, end_time, required_role, is_enabled FROM events")
+    let mut stmt = conn.prepare("SELECT event_id, event_name, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled FROM events")
         .map_err(|e| e.to_string())?;
         
     let iter = stmt.query_map([], |row| {
         Ok(Event {
             event_id: row.get(0)?,
             event_name: row.get(1)?,
-            event_date: row.get(2)?,
-            start_time: row.get(3)?,
-            end_time: row.get(4)?,
-            required_role: row.get(5)?,
-            is_enabled: row.get::<_, i32>(6)? == 1,
+            schedule_type: row.get(2)?,
+            event_date: row.get(3)?,
+            start_date: row.get(4)?,
+            end_date: row.get(5)?,
+            start_time: row.get(6)?,
+            end_time: row.get(7)?,
+            required_role: row.get(8)?,
+            is_enabled: row.get::<_, i32>(9)? == 1,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -877,10 +896,13 @@ pub fn update_event(pool: &DbPool, event_id: i64, event: Event) -> Result<(), St
     let is_enabled = if event.is_enabled { 1 } else { 0 };
     
     conn.execute(
-        "UPDATE events SET event_name = ?1, event_date = ?2, start_time = ?3, end_time = ?4, required_role = ?5, is_enabled = ?6 WHERE event_id = ?7",
+        "UPDATE events SET event_name = ?1, schedule_type = ?2, event_date = ?3, start_date = ?4, end_date = ?5, start_time = ?6, end_time = ?7, required_role = ?8, is_enabled = ?9 WHERE event_id = ?10",
         params![
             event.event_name,
+            event.schedule_type,
             event.event_date,
+            event.start_date,
+            event.end_date,
             event.start_time,
             event.end_time,
             event.required_role,
@@ -1402,17 +1424,20 @@ pub fn log_event_attendance(pool: &DbPool, event_id: i64, id_number: &str) -> Re
 
     // 1. Fetch Event and Validate Date/Time
     let event: Event = conn.query_row(
-        "SELECT event_id, event_name, event_date, start_time, end_time, required_role, is_enabled FROM events WHERE event_id = ?1",
+        "SELECT event_id, event_name, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled FROM events WHERE event_id = ?1",
         params![event_id],
         |row| {
             Ok(Event {
                 event_id: row.get(0)?,
                 event_name: row.get(1)?,
-                event_date: row.get(2)?,
-                start_time: row.get(3)?,
-                end_time: row.get(4)?,
-                required_role: row.get(5)?,
-                is_enabled: row.get::<_, i32>(6)? == 1,
+                schedule_type: row.get(2)?,
+                event_date: row.get(3)?,
+                start_date: row.get(4)?,
+                end_date: row.get(5)?,
+                start_time: row.get(6)?,
+                end_time: row.get(7)?,
+                required_role: row.get(8)?,
+                is_enabled: row.get::<_, i32>(9)? == 1,
             })
         }
     ).map_err(|_| "Event not found.")?;
@@ -1431,10 +1456,23 @@ pub fn log_event_attendance(pool: &DbPool, event_id: i64, id_number: &str) -> Re
     let current_date = now.format("%Y-%m-%d").to_string(); // e.g. "2026-03-18"
     let current_time = now.format("%H:%M").to_string(); // e.g. "14:53"
 
-    let is_valid_day = event.event_date == current_date || 
-                       event.event_date.to_lowercase() == current_day.to_lowercase() ||
-                       event.event_date.to_lowercase() == format!("every {}", current_day.to_lowercase()) ||
-                       event.event_date.to_lowercase() == "everyday";
+    let is_valid_day = if event.schedule_type.as_deref().unwrap_or("weekly") == "date_range" {
+        let event_start = event.start_date.clone().unwrap_or_default();
+        let event_end = event.end_date.clone().unwrap_or_default();
+        current_date >= event_start && current_date <= event_end
+    } else {
+        let days: Vec<&str> = event.event_date.split(',').map(|s| s.trim()).collect();
+        let current_day_lower = current_day.to_lowercase();
+        let current_date_lower = current_date.to_lowercase();
+        
+        days.iter().any(|d| {
+            let d_lower = d.to_lowercase();
+            d_lower == current_date_lower || 
+            d_lower == current_day_lower ||
+            d_lower == format!("every {}", current_day_lower) ||
+            d_lower == "everyday"
+        })
+    };
 
     let is_valid_time = current_time >= event.start_time && current_time <= event.end_time;
 

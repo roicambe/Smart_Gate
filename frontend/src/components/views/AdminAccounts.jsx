@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { ShieldCheck, UserPlus, KeyRound, Edit2, X, AlertCircle, CheckCircle2 } from 'lucide-react';
 
-export const AdminAccounts = ({ adminSession }) => {
+export const AdminAccounts = ({ adminSession, showToast }) => {
     const ROLE_OPTIONS = ['System Administrator', 'Gate Supervisor'];
     const [accounts, setAccounts] = useState([]);
     const [status, setStatus] = useState(null);
@@ -41,7 +41,7 @@ export const AdminAccounts = ({ adminSession }) => {
                 role: addForm.role,
                 activeAdminId: adminSession.account_id
             });
-            setStatus({ type: 'success', message: 'Administrator account created successfully.' });
+            showToast('Administrator account created successfully.');
             setShowAddModal(false);
             setAddForm({ username: '', password: '', full_name: '', role: 'System Administrator' });
             fetchAccounts();
@@ -61,7 +61,7 @@ export const AdminAccounts = ({ adminSession }) => {
                 newRole,
                 activeAdminId: adminSession.account_id
             });
-            setStatus({ type: 'success', message: 'Role updated successfully.' });
+            showToast('Role updated successfully.');
             fetchAccounts();
         } catch (e) {
             setStatus({ type: 'error', message: 'Failed to update role.' });
@@ -76,7 +76,7 @@ export const AdminAccounts = ({ adminSession }) => {
                 newPassword: resetPass,
                 activeAdminId: adminSession.account_id
             });
-            setStatus({ type: 'success', message: `Password reset for ${selectedAccount.username}.` });
+            showToast(`Password reset for ${selectedAccount.username}.`);
             setShowResetModal(false);
             setResetPass('');
         } catch (e) {
@@ -93,7 +93,7 @@ export const AdminAccounts = ({ adminSession }) => {
                 fullName: editForm.full_name,
                 activeAdminId: adminSession.account_id
             });
-            setStatus({ type: 'success', message: `Account updated for ${editForm.username}.` });
+            showToast(`Account updated for ${editForm.username}.`);
             setShowEditModal(false);
             fetchAccounts();
         } catch (e) {
@@ -103,7 +103,7 @@ export const AdminAccounts = ({ adminSession }) => {
 
     return (
         <div className="w-full space-y-6 relative flex flex-col min-h-0 bg-white border border-slate-200 shadow-sm rounded-2xl p-6">
-            {status && (
+            {status && status.type === 'error' && (
                 <div className="absolute top-2 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-md px-4 pointer-events-none">
                     <div className={`pointer-events-auto p-4 rounded-xl flex items-center justify-between gap-4 shadow-lg border ${status.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'}`}>
                         <div className="flex items-center gap-3">
