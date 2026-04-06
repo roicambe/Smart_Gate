@@ -218,3 +218,13 @@ pub fn delete_user(pool: State<'_, DbPool>, person_id: i64, role: String) -> Res
 pub fn log_event_attendance(pool: State<'_, DbPool>, event_id: i64, id_number: String) -> Result<ScanResult, String> {
     db::log_event_attendance(&pool, event_id, &id_number)
 }
+
+#[tauri::command]
+pub fn get_system_branding(pool: State<'_, DbPool>) -> Result<SystemBranding, String> {
+    db::get_system_branding(&pool)
+}
+
+#[tauri::command]
+pub fn update_system_branding(pool: State<'_, DbPool>, admin_id: i64, name: String, logo_base64: String) -> Result<(), String> {
+    db::update_system_branding(&pool, admin_id, &name, &logo_base64)
+}

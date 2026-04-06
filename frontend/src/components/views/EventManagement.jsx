@@ -15,7 +15,10 @@ export const EventManagement = () => {
 
     const [formData, setFormData] = useState({
         event_name: '',
+        schedule_type: 'weekly',
         event_date: '',
+        start_date: '',
+        end_date: '',
         start_time: '',
         end_time: '',
         required_role: 'all',
@@ -50,7 +53,7 @@ export const EventManagement = () => {
             });
             setStatus({ type: 'success', message: 'Event added successfully!' });
             setShowRegisterModal(false);
-            setFormData({ event_name: '', event_date: '', start_time: '', end_time: '', required_role: 'all', is_enabled: true });
+            setFormData({ event_name: '', schedule_type: 'weekly', event_date: '', start_date: '', end_date: '', start_time: '', end_time: '', required_role: 'all', is_enabled: true });
             fetchEvents();
         } catch (error) {
             console.error(error);
@@ -61,11 +64,14 @@ export const EventManagement = () => {
     const handleEditClick = (event) => {
         setSelectedEvent(event);
         setFormData({
-            event_name: event.event_name,
-            event_date: event.event_date,
-            start_time: event.start_time,
-            end_time: event.end_time,
-            required_role: event.required_role,
+            event_name: event.event_name || '',
+            schedule_type: event.schedule_type || 'weekly',
+            event_date: event.event_date || '',
+            start_date: event.start_date || '',
+            end_date: event.end_date || '',
+            start_time: event.start_time || '',
+            end_time: event.end_time || '',
+            required_role: event.required_role || 'all',
             is_enabled: event.is_enabled
         });
         setShowEditModal(true);
@@ -108,7 +114,7 @@ export const EventManagement = () => {
     };
 
     const handleRegisterClick = () => {
-        setFormData({ event_name: '', event_date: '', start_time: '', end_time: '', required_role: 'all', is_enabled: true });
+        setFormData({ event_name: '', schedule_type: 'weekly', event_date: '', start_date: '', end_date: '', start_time: '', end_time: '', required_role: 'all', is_enabled: true });
         setStatus(null);
         setShowRegisterModal(true);
     };
@@ -187,7 +193,7 @@ export const EventManagement = () => {
                                 filteredEvents.map((event) => (
                                     <tr key={event.event_id} className="hover:bg-slate-50 even:bg-slate-50/50 transition-colors group">
                                         <td className="px-6 py-4 font-medium text-slate-900">{event.event_name}</td>
-                                        <td className="px-6 py-4 text-slate-600">{event.event_date} | {event.start_time} - {event.end_time}</td>
+                                        <td className="px-6 py-4 text-slate-600">{event.schedule_type === 'date_range' ? `${event.start_date} to ${event.end_date}` : (event.event_date || 'N/A')} | {event.start_time} - {event.end_time}</td>
                                         <td className="px-6 py-4 text-slate-600 capitalize">{event.required_role}</td>
                                         <td className="px-6 py-4">
                                             <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${event.is_enabled ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-rose-100 text-rose-700 border border-rose-200'}`}>
@@ -232,21 +238,49 @@ export const EventManagement = () => {
                                     <input required type="text" value={formData.event_name} onChange={e => setFormData({ ...formData, event_name: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:ring-2 focus:ring-white/20 focus:outline-none" placeholder="e.g. Flag Ceremony" />
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-xs text-white/60 mb-1 font-medium">Event Day / Date <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                        <select required value={formData.event_date} onChange={e => setFormData({ ...formData, event_date: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none appearance-none">
-                                            <option value="" className="bg-slate-900" disabled>Select Day</option>
-                                            <option value="Monday" className="bg-slate-900">Every Monday</option>
-                                            <option value="Tuesday" className="bg-slate-900">Every Tuesday</option>
-                                            <option value="Wednesday" className="bg-slate-900">Every Wednesday</option>
-                                            <option value="Thursday" className="bg-slate-900">Every Thursday</option>
-                                            <option value="Friday" className="bg-slate-900">Every Friday</option>
-                                            <option value="Saturday" className="bg-slate-900">Every Saturday</option>
-                                            <option value="Sunday" className="bg-slate-900">Every Sunday</option>
-                                            <option value="Everyday" className="bg-slate-900">Everyday</option>
-                                        </select>
+                                    <div className="col-span-2 flex gap-4 p-1 bg-white/5 rounded-xl border border-white/10 w-fit">
+                                        <button type="button" onClick={() => setFormData({ ...formData, schedule_type: 'weekly' })} className={`px-4 py-2 rounded-lg font-medium transition-all text-sm ${formData.schedule_type === 'weekly' ? 'bg-white text-black shadow-sm' : 'text-white/60 hover:text-white hover:bg-white/10'}`}>Weekly Recurrence</button>
+                                        <button type="button" onClick={() => setFormData({ ...formData, schedule_type: 'date_range' })} className={`px-4 py-2 rounded-lg font-medium transition-all text-sm ${formData.schedule_type === 'date_range' ? 'bg-white text-black shadow-sm' : 'text-white/60 hover:text-white hover:bg-white/10'}`}>Date Range</button>
                                     </div>
-                                    <div>
+
+                                    {formData.schedule_type === 'weekly' ? (
+                                        <div className="col-span-2">
+                                            <label className="block text-xs text-white/60 mb-2 font-medium">Select Days <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                            <div className="flex flex-wrap gap-3 p-4 bg-black/40 border border-white/10 rounded-xl">
+                                                {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => {
+                                                    const currentDays = formData.event_date ? formData.event_date.split(',').map(d => d.trim()) : [];
+                                                    const isChecked = currentDays.includes(day);
+                                                    return (
+                                                        <label key={day} className={`flex items-center gap-2 px-4 py-2 rounded-lg border cursor-pointer transition-all ${isChecked ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-100' : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10 hover:text-white'}`}>
+                                                            <input type="checkbox" className="hidden" checked={isChecked} onChange={(e) => {
+                                                                let newDays = [...currentDays];
+                                                                if (e.target.checked && !newDays.includes(day)) {
+                                                                    newDays.push(day);
+                                                                } else if (!e.target.checked) {
+                                                                    newDays = newDays.filter(d => d !== day);
+                                                                }
+                                                                setFormData({ ...formData, event_date: newDays.join(', ') });
+                                                            }} />
+                                                            <span className="text-sm font-semibold">{day.substr(0, 3)}</span>
+                                                        </label>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div>
+                                                <label className="block text-xs text-white/60 mb-1 font-medium">Start Date <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                                <input required={formData.schedule_type === 'date_range'} type="date" value={formData.start_date || ''} onChange={e => setFormData({ ...formData, start_date: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" style={{ colorScheme: 'dark' }} />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-white/60 mb-1 font-medium">End Date <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                                <input required={formData.schedule_type === 'date_range'} type="date" value={formData.end_date || ''} onChange={e => setFormData({ ...formData, end_date: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" style={{ colorScheme: 'dark' }} />
+                                            </div>
+                                        </>
+                                    )}
+
+                                    <div className="col-span-2">
                                         <label className="block text-xs text-white/60 mb-1 font-medium">Required Role <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
                                         <select required value={formData.required_role} onChange={e => setFormData({ ...formData, required_role: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none appearance-none">
                                             <option value="all" className="bg-slate-900">All</option>

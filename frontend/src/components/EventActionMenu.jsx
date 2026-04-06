@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { ArrowLeft, Keyboard, QrCode, ScanFace, ChevronLeft, ArrowRight, CheckCircle2, AlertCircle, Calendar } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { QRScannerOverlay } from "./QRScannerOverlay";
 
 export const EventActionMenu = ({ setView }) => {
     const [showManualModal, setShowManualModal] = useState(false);
+    const [showQrScanner, setShowQrScanner] = useState(false);
     const [manualId, setManualId] = useState("");
     const [status, setStatus] = useState(null);
     const [events, setEvents] = useState([]);
@@ -22,12 +24,18 @@ export const EventActionMenu = ({ setView }) => {
 
                 const activeEvents = data.filter(e => {
                     if (!e.is_enabled) return false;
-                    const eventDateLower = e.event_date.toLowerCase();
-                    const isCorrectDay = 
-                        e.event_date === currentDate ||
-                        eventDateLower === currentDay.toLowerCase() ||
-                        eventDateLower === `every ${currentDay.toLowerCase()}` ||
-                        eventDateLower === 'everyday';
+                    
+                    let isCorrectDay = false;
+                    if (e.schedule_type === 'date_range') {
+                        isCorrectDay = currentDate >= (e.start_date || '') && currentDate <= (e.end_date || '');
+                    } else {
+                        const days = e.event_date ? e.event_date.split(',').map(d => d.trim().toLowerCase()) : [];
+                        isCorrectDay = 
+                            days.includes(currentDate.toLowerCase()) ||
+                            days.includes(currentDay.toLowerCase()) ||
+                            days.includes(`every ${currentDay.toLowerCase()}`) ||
+                            days.includes('everyday');
+                    }
                     
                     const isCorrectTime = currentTime >= e.start_time && currentTime <= e.end_time;
                     return isCorrectDay && isCorrectTime;
@@ -73,6 +81,31 @@ export const EventActionMenu = ({ setView }) => {
         } finally {
             setShowManualModal(false);
             setManualId("");
+        }
+    };
+
+    const handleQrScan = async (scannedId) => {
+        if (!selectedEventId) {
+            setStatus({ type: 'error', message: "No active event selected." });
+            setShowQrScanner(false);
+            return;
+        }
+
+        try {
+            const result = await invoke('log_event_attendance', {
+                eventId: parseInt(selectedEventId, 10),
+                idNumber: scannedId
+            });
+
+            if (result.success) {
+                const eventName = events.find(e => e.event_id === parseInt(selectedEventId, 10))?.event_name || 'Event';
+                setStatus({ type: 'success', message: `Attendance recorded for ${eventName} - ${result.person_name} (${result.role})` });
+            } else {
+                setStatus({ type: 'error', message: result.message });
+            }
+        } catch (error) {
+            console.error(error);
+            setStatus({ type: 'error', message: "System Error. Failed to process ID." });
         }
     };
 
@@ -153,7 +186,7 @@ export const EventActionMenu = ({ setView }) => {
                     <p className="text-white/70 text-base">Type in ID</p>
                 </button>
 
-                <button className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]">
+                <button onClick={() => { setStatus(null); setShowQrScanner(true); }} className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]">
                     <div className="h-20 w-20 bg-white/10 text-white rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:bg-white/20 transition-all duration-300 shadow-lg border border-white/20">
                         <QrCode className="w-10 h-10 drop-shadow-md" />
                     </div>
@@ -161,7 +194,7 @@ export const EventActionMenu = ({ setView }) => {
                     <p className="text-white/70 text-base">Scan Digital ID</p>
                 </button>
 
-                <button className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]">
+                <button onClick={() => setStatus({ type: 'error', message: "Hardware Integration Pending: Face Recognition is currently unavailable for Event Attendance." })} className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]">
                     <div className="h-20 w-20 bg-white/10 text-white rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:bg-white/20 transition-all duration-300 shadow-lg border border-white/20">
                         <ScanFace className="w-10 h-10 drop-shadow-md" />
                     </div>
@@ -202,6 +235,14 @@ export const EventActionMenu = ({ setView }) => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {showQrScanner && (
+                <QRScannerOverlay 
+                    onScan={handleQrScan} 
+                    onClose={() => setShowQrScanner(false)} 
+                    scannerFunction="event" 
+                />
             )}
         </div>
     );

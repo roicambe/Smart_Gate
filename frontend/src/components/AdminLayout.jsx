@@ -9,7 +9,7 @@ import { AcademicStructure } from './views/AcademicStructure';
 import { EventManagement } from './views/EventManagement';
 import { AuditTrail } from './views/AuditTrail';
 
-export const AdminLayout = ({ view, setView, setIsAdminLoggedIn, adminSession }) => {
+export const AdminLayout = ({ view, setView, setIsAdminLoggedIn, adminSession, branding, fetchBranding }) => {
     const isSystemAdministrator = adminSession?.role === 'System Administrator';
 
     const rawNavItems = [
@@ -27,14 +27,14 @@ export const AdminLayout = ({ view, setView, setIsAdminLoggedIn, adminSession })
 
     const renderView = () => {
         switch (view) {
-            case 'admin_dashboard': return <AdminDashboard />;
-            case 'admin_access_logs': return <AccessLogs />;
-            case 'admin_settings': return <SystemSettings setIsAdminLoggedIn={setIsAdminLoggedIn} setView={setView} adminSession={adminSession} />;
+            case 'admin_dashboard': return <AdminDashboard branding={branding} />;
+            case 'admin_access_logs': return <AccessLogs branding={branding} />;
+            case 'admin_settings': return <SystemSettings setIsAdminLoggedIn={setIsAdminLoggedIn} setView={setView} adminSession={adminSession} branding={branding} fetchBranding={fetchBranding} />;
             case 'admin_users': return <UserManagement adminSession={adminSession} />;
 
-            case 'admin_academic': return <AcademicStructure />;
-            case 'admin_events': return <EventManagement />;
-            case 'admin_audit': return <AuditTrail />;
+            case 'admin_academic': return <AcademicStructure branding={branding} />;
+            case 'admin_events': return <EventManagement branding={branding} />;
+            case 'admin_audit': return <AuditTrail branding={branding} />;
             default:
                 return (
                     <div className="flex-1 flex items-center justify-center p-8">

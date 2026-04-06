@@ -70,7 +70,10 @@ CREATE TABLE IF NOT EXISTS entry_logs (
 CREATE TABLE IF NOT EXISTS events (
     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_name VARCHAR UNIQUE NOT NULL,
-    event_date DATE NOT NULL,
+    schedule_type VARCHAR NULL DEFAULT 'weekly',
+    event_date VARCHAR NOT NULL,
+    start_date VARCHAR NULL,
+    end_date VARCHAR NULL,
     start_time TIME NOT NULL,
     end_time TIME NOT NULL,
     required_role TEXT CHECK(required_role IN ('all', 'student', 'staff', 'professor')) NOT NULL,
@@ -141,3 +144,13 @@ INSERT OR IGNORE INTO programs (program_id, department_id, program_code, program
 INSERT OR IGNORE INTO scanners (scanner_id, location_name, function) VALUES
     (1, 'Main Entrance', 'entrance'),
     (2, 'Main Exit', 'exit');
+
+-- System Settings
+CREATE TABLE IF NOT EXISTS settings (
+    setting_key VARCHAR PRIMARY KEY,
+    setting_value TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES
+    ('system_name', 'Pamantasan ng Lungsod ni Roi'),
+    ('system_logo', '');
