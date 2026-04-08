@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
 import { X, Camera } from 'lucide-react';
+import { extractScanId } from '../utils/patternHunter';
 
 export const QRScannerOverlay = ({ onScan, onClose, scannerFunction }) => {
     const [status, setStatus] = useState("Initializing camera...");
@@ -70,12 +71,8 @@ export const QRScannerOverlay = ({ onScan, onClose, scannerFunction }) => {
                 (decodedText) => {
                     if (lockedRef.current) return;
 
-                    // Regex Extraction Logic
-                    const students = decodedText.match(/\b\d{2}-\d{5}\b/);
-                    const employees = decodedText.match(/\b\d{7}\b/);
-                    const visitors = decodedText.match(/\bVIS-\d{6}\b/);
-
-                    const extractedId = students?.[0] || employees?.[0] || visitors?.[0];
+                    // Regex Extraction Logic through Pattern Hunter
+                    const extractedId = extractScanId(decodedText);
 
                     if (extractedId) {
                         lockedRef.current = true;
@@ -88,6 +85,12 @@ export const QRScannerOverlay = ({ onScan, onClose, scannerFunction }) => {
                             }
                             setIsSuccess(false);
                         }, 500);
+                    } else {
+                        // Invalid match
+                        lockedRef.current = true;
+                        if (onScanRef.current) {
+                            onScanRef.current(null, "Invalid ID Format: No University ID detected.");
+                        }
                     }
                 },
                 (errorMessage) => {

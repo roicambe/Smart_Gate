@@ -154,12 +154,23 @@ pub struct AdminAccount {
     pub account_id: i64,
     pub username: String,
     pub full_name: String,
+    pub email: Option<String>,
     pub role: String,
+    pub is_first_login: bool,
     pub created_at: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AdminLoginResponse {
+    pub success: bool,
+    pub message: String,
+    pub requires_activation: bool,
+    pub masked_email: Option<String>,
+    pub account: Option<AdminAccount>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AdminActivationResponse {
     pub success: bool,
     pub message: String,
     pub account: Option<AdminAccount>,

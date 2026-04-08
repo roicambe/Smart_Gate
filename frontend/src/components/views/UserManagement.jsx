@@ -403,6 +403,7 @@ export const UserManagement = ({ adminSession }) => {
                                         <th className="px-6 py-4 font-semibold tracking-wider">Person to Visit</th>
                                         <th className="px-6 py-4 font-semibold tracking-wider">Registration Date</th>
                                         <th className="px-6 py-4 font-semibold tracking-wider">Registration Time</th>
+                                        <th className="px-6 py-4 font-semibold tracking-wider">Status</th>
                                     </>
                                 ) : (
                                     <>
@@ -443,6 +444,11 @@ export const UserManagement = ({ adminSession }) => {
                                                 </td>
                                                 <td className="px-6 py-4 text-slate-600">
                                                     {user.time_in ? new Date(user.time_in).toLocaleTimeString([], { timeStyle: 'short' }) : 'N/A'}
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${(user.time_out || (user.time_in && new Date(user.time_in).toDateString() !== new Date().toDateString())) ? 'bg-slate-100 text-slate-600 border border-slate-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
+                                                        {(user.time_out || (user.time_in && new Date(user.time_in).toDateString() !== new Date().toDateString())) ? 'Expired' : 'Active'}
+                                                    </span>
                                                 </td>
                                             </>
                                         ) : (

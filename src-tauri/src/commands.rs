@@ -1,6 +1,7 @@
-use tauri::State;
 use crate::db::{self, DbPool};
+use crate::email;
 use crate::models::*;
+use tauri::State;
 
 #[tauri::command]
 pub fn get_persons(pool: State<'_, DbPool>) -> Result<Vec<Person>, String> {
@@ -35,32 +36,111 @@ pub fn add_person(
     db::add_person(&pool, person)
 }
 
-#[tauri::command] pub fn get_departments(pool: State<'_, DbPool>) -> Result<Vec<Department>, String> { db::get_departments(&pool) }
-#[tauri::command] pub fn add_department(pool: State<'_, DbPool>, department: Department) -> Result<i64, String> { db::add_department(&pool, department) }
-#[tauri::command] pub fn update_department(pool: State<'_, DbPool>, department_id: i64, department_name: String, department_code: String) -> Result<(), String> { db::update_department(&pool, department_id, &department_name, &department_code) }
-#[tauri::command] pub fn delete_department(pool: State<'_, DbPool>, department_id: i64) -> Result<(), String> { db::delete_department(&pool, department_id) }
-
-#[tauri::command] pub fn get_programs(pool: State<'_, DbPool>) -> Result<Vec<Program>, String> { db::get_programs(&pool) }
-#[tauri::command] pub fn add_program(pool: State<'_, DbPool>, program: Program) -> Result<i64, String> { db::add_program(&pool, program) }
-#[tauri::command] pub fn update_program(pool: State<'_, DbPool>, program_id: i64, department_id: i64, program_name: String, program_code: String) -> Result<(), String> { db::update_program(&pool, program_id, department_id, &program_name, &program_code) }
-#[tauri::command] pub fn delete_program(pool: State<'_, DbPool>, program_id: i64) -> Result<(), String> { db::delete_program(&pool, program_id) }
-
-#[tauri::command] pub fn get_students(pool: State<'_, DbPool>) -> Result<Vec<StudentDetails>, String> { db::get_students(&pool) }
-#[tauri::command] pub fn add_student(pool: State<'_, DbPool>, student: Student) -> Result<(), String> { db::add_student(&pool, student) }
-
-#[tauri::command] pub fn get_employees(pool: State<'_, DbPool>) -> Result<Vec<EmployeeDetails>, String> { db::get_employees(&pool) }
-#[tauri::command] pub fn add_employee(pool: State<'_, DbPool>, employee: Employee) -> Result<(), String> { db::add_employee(&pool, employee) }
-
-#[tauri::command] pub fn update_person_status(pool: State<'_, DbPool>, person_id: i64, is_active: bool) -> Result<(), String> { db::update_person_status(&pool, person_id, is_active) }
-
-#[tauri::command] pub fn get_scanners(pool: State<'_, DbPool>) -> Result<Vec<Scanner>, String> { db::get_scanners(&pool) }
-#[tauri::command] pub fn add_scanner(pool: State<'_, DbPool>, scanner: Scanner) -> Result<i64, String> { db::add_scanner(&pool, scanner) }
-#[tauri::command] pub fn get_access_logs(
+#[tauri::command]
+pub fn get_departments(pool: State<'_, DbPool>) -> Result<Vec<Department>, String> {
+    db::get_departments(&pool)
+}
+#[tauri::command]
+pub fn add_department(pool: State<'_, DbPool>, department: Department) -> Result<i64, String> {
+    db::add_department(&pool, department)
+}
+#[tauri::command]
+pub fn update_department(
     pool: State<'_, DbPool>,
+    department_id: i64,
+    department_name: String,
+    department_code: String,
+) -> Result<(), String> {
+    db::update_department(&pool, department_id, &department_name, &department_code)
+}
+#[tauri::command]
+pub fn delete_department(pool: State<'_, DbPool>, department_id: i64) -> Result<(), String> {
+    db::delete_department(&pool, department_id)
+}
+
+#[tauri::command]
+pub fn get_programs(pool: State<'_, DbPool>) -> Result<Vec<Program>, String> {
+    db::get_programs(&pool)
+}
+#[tauri::command]
+pub fn add_program(pool: State<'_, DbPool>, program: Program) -> Result<i64, String> {
+    db::add_program(&pool, program)
+}
+#[tauri::command]
+pub fn update_program(
+    pool: State<'_, DbPool>,
+    program_id: i64,
+    department_id: i64,
+    program_name: String,
+    program_code: String,
+) -> Result<(), String> {
+    db::update_program(
+        &pool,
+        program_id,
+        department_id,
+        &program_name,
+        &program_code,
+    )
+}
+#[tauri::command]
+pub fn delete_program(pool: State<'_, DbPool>, program_id: i64) -> Result<(), String> {
+    db::delete_program(&pool, program_id)
+}
+
+#[tauri::command]
+pub fn get_students(pool: State<'_, DbPool>) -> Result<Vec<StudentDetails>, String> {
+    db::get_students(&pool)
+}
+#[tauri::command]
+pub fn add_student(pool: State<'_, DbPool>, student: Student) -> Result<(), String> {
+    db::add_student(&pool, student)
+}
+
+#[tauri::command]
+pub fn get_employees(pool: State<'_, DbPool>) -> Result<Vec<EmployeeDetails>, String> {
+    db::get_employees(&pool)
+}
+#[tauri::command]
+pub fn add_employee(pool: State<'_, DbPool>, employee: Employee) -> Result<(), String> {
+    db::add_employee(&pool, employee)
+}
+
+#[tauri::command]
+pub fn update_person_status(
+    pool: State<'_, DbPool>,
+    person_id: i64,
+    is_active: bool,
+) -> Result<(), String> {
+    db::update_person_status(&pool, person_id, is_active)
+}
+
+#[tauri::command]
+pub fn get_scanners(pool: State<'_, DbPool>) -> Result<Vec<Scanner>, String> {
+    db::get_scanners(&pool)
+}
+#[tauri::command]
+pub fn add_scanner(pool: State<'_, DbPool>, scanner: Scanner) -> Result<i64, String> {
+    db::add_scanner(&pool, scanner)
+}
+#[tauri::command]
+pub fn get_access_logs(
+    pool: State<'_, DbPool>,
+    role_filter: Option<String>,
+    action_type: Option<String>,
+    location_name: Option<String>,
+    search_term: Option<String>,
     start_date: Option<String>,
     end_date: Option<String>,
 ) -> Result<Vec<AccessLogDetails>, String> {
-    db::get_access_logs(&pool, start_date, end_date)
+    db::get_access_logs(
+        &pool,
+        role_filter,
+        action_type,
+        location_name,
+        search_term,
+        start_date,
+        end_date,
+    )
 }
 
 #[tauri::command]
@@ -72,24 +152,98 @@ pub fn get_event_attendance_logs(
     db::get_event_attendance_logs(&pool, start_date, end_date)
 }
 
-#[tauri::command] pub fn get_events(pool: State<'_, DbPool>) -> Result<Vec<Event>, String> { db::get_events(&pool) }
-#[tauri::command] pub fn add_event(pool: State<'_, DbPool>, event: Event) -> Result<i64, String> { db::add_event(&pool, event) }
-#[tauri::command] pub fn update_event(pool: State<'_, DbPool>, event_id: i64, event: Event) -> Result<(), String> { db::update_event(&pool, event_id, event) }
-#[tauri::command] pub fn delete_event(pool: State<'_, DbPool>, event_id: i64) -> Result<(), String> { db::delete_event(&pool, event_id) }
-
-#[tauri::command] pub fn log_entry(pool: State<'_, DbPool>, scanner_id: i64, person_id: i64) -> Result<ScanResult, String> { db::log_entry(&pool, scanner_id, person_id) }
-#[tauri::command] pub fn log_audit_action(pool: State<'_, DbPool>, admin_id: i64, action_type: String, target_table: String, target_id: i64) -> Result<(), String> { db::log_audit_action(&pool, admin_id, &action_type, &target_table, target_id) }
-
 #[tauri::command]
-pub fn get_audit_logs(pool: State<'_, DbPool>, start_date: Option<String>, end_date: Option<String>) -> Result<Vec<AuditLogDetails>, String> {
-    db::get_audit_logs(&pool, start_date, end_date)
-}#[tauri::command]
-pub fn admin_login(pool: State<'_, DbPool>, username: String, password: String) -> Result<AdminLoginResponse, String> {
-    db::admin_login(&pool, &username, &password)
+pub fn get_events(pool: State<'_, DbPool>) -> Result<Vec<Event>, String> {
+    db::get_events(&pool)
+}
+#[tauri::command]
+pub fn add_event(pool: State<'_, DbPool>, event: Event) -> Result<i64, String> {
+    db::add_event(&pool, event)
+}
+#[tauri::command]
+pub fn update_event(pool: State<'_, DbPool>, event_id: i64, event: Event) -> Result<(), String> {
+    db::update_event(&pool, event_id, event)
+}
+#[tauri::command]
+pub fn delete_event(pool: State<'_, DbPool>, event_id: i64) -> Result<(), String> {
+    db::delete_event(&pool, event_id)
 }
 
 #[tauri::command]
-pub fn update_admin_credentials(pool: State<'_, DbPool>, account_id: i64, current_password: String, new_password: String) -> Result<bool, String> {
+pub fn log_entry(
+    pool: State<'_, DbPool>,
+    scanner_id: i64,
+    person_id: i64,
+) -> Result<ScanResult, String> {
+    db::log_entry(&pool, scanner_id, person_id)
+}
+#[tauri::command]
+pub fn log_audit_action(
+    pool: State<'_, DbPool>,
+    admin_id: i64,
+    action_type: String,
+    target_table: String,
+    target_id: i64,
+) -> Result<(), String> {
+    db::log_audit_action(&pool, admin_id, &action_type, &target_table, target_id)
+}
+
+#[tauri::command]
+pub fn get_audit_logs(
+    pool: State<'_, DbPool>,
+    start_date: Option<String>,
+    end_date: Option<String>,
+) -> Result<Vec<AuditLogDetails>, String> {
+    db::get_audit_logs(&pool, start_date, end_date)
+}
+
+#[tauri::command]
+pub async fn admin_login(
+    pool: State<'_, DbPool>,
+    username: String,
+    password: String,
+) -> Result<AdminLoginResponse, String> {
+    let mut response = db::admin_login(&pool, &username, &password)?;
+
+    if response.success && response.requires_activation {
+        let account_id = response
+            .account
+            .as_ref()
+            .map(|account| account.account_id)
+            .ok_or_else(|| "The account session could not be prepared.".to_string())?;
+
+        let challenge = db::create_first_login_challenge(&pool, account_id)?;
+        if let Err(err) = email::send_verification_otp_email(
+            &challenge.email,
+            &challenge.account.full_name,
+            &challenge.otp_code,
+        )
+        .await
+        {
+            return Ok(AdminLoginResponse {
+                success: false,
+                message: format!(
+                    "Credentials verified, but the verification code could not be sent. {}",
+                    err
+                ),
+                requires_activation: false,
+                masked_email: None,
+                account: None,
+            });
+        }
+        response.masked_email = Some(challenge.masked_email);
+    }
+
+    Ok(response)
+}
+
+#[tauri::command]
+pub fn update_admin_credentials(
+    pool: State<'_, DbPool>,
+    account_id: i64,
+    current_password: String,
+    new_password: String,
+) -> Result<bool, String> {
     db::update_admin_credentials(&pool, account_id, &current_password, &new_password)
 }
 
@@ -99,23 +253,110 @@ pub fn get_admin_accounts(pool: State<'_, DbPool>) -> Result<Vec<AdminAccount>, 
 }
 
 #[tauri::command]
-pub fn add_admin_account(pool: State<'_, DbPool>, username: String, password: String, full_name: String, role: String, active_admin_id: i64) -> Result<i64, String> {
-    db::add_admin_account(&pool, &username, &password, &full_name, &role, active_admin_id)
+pub fn add_admin_account(
+    pool: State<'_, DbPool>,
+    username: String,
+    password: String,
+    full_name: String,
+    email: String,
+    role: String,
+    active_admin_id: i64,
+) -> Result<i64, String> {
+    db::add_admin_account(
+        &pool,
+        &username,
+        &password,
+        &full_name,
+        &email,
+        &role,
+        active_admin_id,
+    )
 }
 
 #[tauri::command]
-pub fn update_admin_role(pool: State<'_, DbPool>, account_id: i64, new_role: String, active_admin_id: i64) -> Result<(), String> {
+pub fn create_admin_account(
+    pool: State<'_, DbPool>,
+    username: String,
+    password: String,
+    full_name: String,
+    email: String,
+    role: String,
+    active_admin_id: i64,
+) -> Result<i64, String> {
+    db::add_admin_account(
+        &pool,
+        &username,
+        &password,
+        &full_name,
+        &email,
+        &role,
+        active_admin_id,
+    )
+}
+
+#[tauri::command]
+pub fn update_admin_role(
+    pool: State<'_, DbPool>,
+    account_id: i64,
+    new_role: String,
+    active_admin_id: i64,
+) -> Result<(), String> {
     db::update_admin_role(&pool, account_id, &new_role, active_admin_id)
 }
 
 #[tauri::command]
-pub fn reset_admin_password(pool: State<'_, DbPool>, account_id: i64, new_password: String, active_admin_id: i64) -> Result<(), String> {
+pub fn reset_admin_password(
+    pool: State<'_, DbPool>,
+    account_id: i64,
+    new_password: String,
+    active_admin_id: i64,
+) -> Result<(), String> {
     db::reset_admin_password(&pool, account_id, &new_password, active_admin_id)
 }
 
 #[tauri::command]
-pub fn update_admin_info(pool: State<'_, DbPool>, account_id: i64, username: String, full_name: String, active_admin_id: i64) -> Result<(), String> {
-    db::update_admin_info(&pool, account_id, &username, &full_name, active_admin_id)
+pub fn update_admin_info(
+    pool: State<'_, DbPool>,
+    account_id: i64,
+    username: String,
+    full_name: String,
+    email: String,
+    active_admin_id: i64,
+) -> Result<(), String> {
+    db::update_admin_info(
+        &pool,
+        account_id,
+        &username,
+        &full_name,
+        &email,
+        active_admin_id,
+    )
+}
+
+#[tauri::command]
+pub fn delete_admin_account(
+    pool: State<'_, DbPool>,
+    account_id: i64,
+    active_admin_id: i64,
+) -> Result<(), String> {
+    db::delete_admin_account(&pool, account_id, active_admin_id)
+}
+
+#[tauri::command]
+pub fn activate_admin_first_login(
+    pool: State<'_, DbPool>,
+    account_id: i64,
+    otp_code: String,
+    new_password: String,
+    confirm_password: String,
+) -> Result<AdminActivationResponse, String> {
+    db::activate_admin_first_login(
+        &pool,
+        account_id,
+        &otp_code,
+        &new_password,
+        &confirm_password,
+    )
 }
 
 #[tauri::command]
@@ -215,7 +456,11 @@ pub fn delete_user(pool: State<'_, DbPool>, person_id: i64, role: String) -> Res
 }
 
 #[tauri::command]
-pub fn log_event_attendance(pool: State<'_, DbPool>, event_id: i64, id_number: String) -> Result<ScanResult, String> {
+pub fn log_event_attendance(
+    pool: State<'_, DbPool>,
+    event_id: i64,
+    id_number: String,
+) -> Result<ScanResult, String> {
     db::log_event_attendance(&pool, event_id, &id_number)
 }
 
@@ -225,6 +470,11 @@ pub fn get_system_branding(pool: State<'_, DbPool>) -> Result<SystemBranding, St
 }
 
 #[tauri::command]
-pub fn update_system_branding(pool: State<'_, DbPool>, admin_id: i64, name: String, logo_base64: String) -> Result<(), String> {
+pub fn update_system_branding(
+    pool: State<'_, DbPool>,
+    admin_id: i64,
+    name: String,
+    logo_base64: String,
+) -> Result<(), String> {
     db::update_system_branding(&pool, admin_id, &name, &logo_base64)
 }
