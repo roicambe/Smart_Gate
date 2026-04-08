@@ -3,6 +3,7 @@ import { ArrowLeft, Keyboard, QrCode, ScanFace, Users, LogIn, LogOut, ChevronLef
 import { invoke } from "@tauri-apps/api/core";
 import { QRCodeSVG } from "qrcode.react";
 import { QRScannerOverlay } from "./QRScannerOverlay";
+import { extractScanId } from "../utils/patternHunter";
 
 export const ActionMenu = ({ view, setView }) => {
     const isEntrance = view === 'action_entrance';
@@ -13,6 +14,7 @@ export const ActionMenu = ({ view, setView }) => {
     const [successVisitor, setSuccessVisitor] = useState(null);
     const [showHardwareModal, setShowHardwareModal] = useState(false);
     const [showQRScanner, setShowQRScanner] = useState(false);
+    const [isProcessingScanner, setIsProcessingScanner] = useState(false);
 
     const [visitorForm, setVisitorForm] = useState({
         firstName: '',
@@ -96,6 +98,107 @@ export const ActionMenu = ({ view, setView }) => {
             setManualId("");
         }
     };
+
+    const isModalOpen = showManualModal || showVisitorModal || showHardwareModal || showQRScanner || !!successVisitor;
+
+    // --- Keyboard Wedge Listener Logic ---
+    React.useEffect(() => {
+        let buffer = "";
+        let lastKeyTime = Date.now();
+        let timeoutId = null;
+
+        const handleFocusIn = () => {
+            buffer = "";
+        };
+        window.addEventListener("focusin", handleFocusIn);
+
+        const processWedgeInput = async (rawString) => {
+            const scannedId = extractScanId(rawString);
+
+            if (!scannedId) {
+                setStatus({ type: 'error', message: "Invalid ID Format: No University ID detected." });
+                return; // Ignore if it doesn't match ID patterns
+            }
+
+            // At this point, we know it's a valid ID pattern from the scanner
+            setIsProcessingScanner(true);
+            setStatus(null);
+            
+            // Clean up any stray input in case the manual modal was open
+            setManualId("");
+            setShowManualModal(false);
+
+            try {
+                const scannerFunction = isEntrance ? 'entrance' : 'exit';
+                const result = await invoke('manual_id_entry', {
+                    idNumber: scannedId,
+                    scannerFunction
+                });
+
+                if (result.success) {
+                    setStatus({ type: 'success', message: `${result.message} - ${result.person_name} (${result.role})` });
+                } else {
+                    setStatus({ type: 'error', message: result.message });
+                }
+            } catch (error) {
+                console.error(error);
+                setStatus({ type: 'error', message: "System Error. Failed to process ID." });
+            } finally {
+                setTimeout(() => {
+                    setIsProcessingScanner(false);
+                }, 500); // brief processing display 
+            }
+        };
+
+        const handleKeyDown = (e) => {
+            if (isProcessingScanner) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+
+            const activeEl = document.activeElement;
+            const isInputActive = activeEl && ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeEl.tagName);
+
+            if (isModalOpen || isInputActive) {
+                buffer = "";
+                return;
+            }
+
+            const currentTime = Date.now();
+            const timeDiff = currentTime - lastKeyTime;
+            lastKeyTime = currentTime;
+
+            // Reset buffer if someone is typing slowly (human speed)
+            if (timeDiff > 30 && buffer.length > 0) {
+                buffer = "";
+            }
+
+            if (e.key === "Enter") {
+                if (buffer.length >= 5) { 
+                    // Process wedge input. If no pattern matches, processWedgeInput will show the error toast.
+                    e.preventDefault();
+                    e.stopPropagation();
+                    processWedgeInput(buffer);
+                }
+                buffer = "";
+            } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                buffer += e.key;
+
+                clearTimeout(timeoutId);
+                timeoutId = setTimeout(() => {
+                    buffer = "";
+                }, 500);
+            }
+        };
+
+        window.addEventListener("keydown", handleKeyDown, { capture: true });
+        return () => {
+            window.removeEventListener("keydown", handleKeyDown, { capture: true });
+            window.removeEventListener("focusin", handleFocusIn);
+            clearTimeout(timeoutId);
+        };
+    }, [isProcessingScanner, isEntrance, isModalOpen]);
 
     return (
         <div className="flex-1 flex flex-col w-full h-full p-8 max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -379,9 +482,15 @@ export const ActionMenu = ({ view, setView }) => {
                 <QRScannerOverlay
                     scannerFunction={isEntrance ? 'entrance' : 'exit'}
                     onClose={() => setShowQRScanner(false)}
-                    onScan={async (scannedId) => {
+                    onScan={async (scannedId, error) => {
                         setShowQRScanner(false);
                         setStatus(null);
+                        
+                        if (error || !scannedId) {
+                            setStatus({ type: 'error', message: error || "Invalid scan target." });
+                            return;
+                        }
+
                         try {
                             const result = await invoke('manual_id_entry', {
                                 idNumber: scannedId,
@@ -421,13 +530,14 @@ export const ActionMenu = ({ view, setView }) => {
                                     <p className="text-emerald-200/60 text-sm font-semibold uppercase tracking-wider mb-2">Temporary Visitor ID</p>
                                     <p className="text-4xl sm:text-5xl font-mono font-bold text-white tracking-widest relative z-10">{successVisitor.id}</p>
                                     <p className="text-white/80 mt-4 text-xl relative z-10">{successVisitor.name}</p>
+                                    <p className="text-rose-400/90 font-bold mt-2 text-sm relative z-10">Valid Until: Today, 11:59 PM</p>
                                 </div>
                             </div>
                             
                             <div className="w-full text-center space-y-3 mb-8">
                                 {successVisitor.email && (
                                     <p className="text-emerald-200/90 font-medium text-lg border-b border-emerald-500/20 pb-4">
-                                        A digital copy of this pass has been sent to <span className="text-white font-bold">{successVisitor.email}</span>. You can also take a picture.
+                                        A digital copy of this pass has been sent to <span className="text-white font-bold">{successVisitor.email}</span>. This pass expires at the end of the day.
                                     </p>
                                 )}
                                 <p className="text-emerald-200/80 font-medium italic pt-2">
@@ -442,6 +552,17 @@ export const ActionMenu = ({ view, setView }) => {
                                 Done
                             </button>
                         </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Processing Scanner Overlay */}
+            {isProcessingScanner && (
+                <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
+                    <div className="bg-black/80 backdrop-blur-2xl border border-white/20 rounded-3xl shadow-2xl p-10 flex flex-col items-center">
+                        <div className="w-16 h-16 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mb-6"></div>
+                        <h2 className="text-2xl font-bold text-white tracking-wide animate-pulse">Processing ID...</h2>
+                        <p className="text-white/60 mt-2">Checking with Anti-Passback System</p>
                     </div>
                 </div>
             )}

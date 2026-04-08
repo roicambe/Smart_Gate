@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { ArrowLeft, Keyboard, QrCode, ScanFace, ChevronLeft, ArrowRight, CheckCircle2, AlertCircle, Calendar } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { QRScannerOverlay } from "./QRScannerOverlay";
+import { extractScanId } from "../utils/patternHunter";
 
 export const EventActionMenu = ({ setView }) => {
     const [showManualModal, setShowManualModal] = useState(false);
@@ -10,6 +11,27 @@ export const EventActionMenu = ({ setView }) => {
     const [status, setStatus] = useState(null);
     const [events, setEvents] = useState([]);
     const [selectedEventId, setSelectedEventId] = useState(null);
+    const [isProcessingScanner, setIsProcessingScanner] = useState(false);
+    const [flashGreen, setFlashGreen] = useState(false);
+
+    const isModalOpen = showManualModal || showQrScanner;
+
+    const playSuccessBeep = () => {
+        try {
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.1);
+            gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.1);
+        } catch(e) { console.error("Audio beep failed", e); }
+    };
 
     useEffect(() => {
         const fetchEvents = async () => {
@@ -87,7 +109,6 @@ export const EventActionMenu = ({ setView }) => {
     const handleQrScan = async (scannedId) => {
         if (!selectedEventId) {
             setStatus({ type: 'error', message: "No active event selected." });
-            setShowQrScanner(false);
             return;
         }
 
@@ -100,6 +121,10 @@ export const EventActionMenu = ({ setView }) => {
             if (result.success) {
                 const eventName = events.find(e => e.event_id === parseInt(selectedEventId, 10))?.event_name || 'Event';
                 setStatus({ type: 'success', message: `Attendance recorded for ${eventName} - ${result.person_name} (${result.role})` });
+                
+                playSuccessBeep();
+                setFlashGreen(true);
+                setTimeout(() => setFlashGreen(false), 300);
             } else {
                 setStatus({ type: 'error', message: result.message });
             }
@@ -109,8 +134,97 @@ export const EventActionMenu = ({ setView }) => {
         }
     };
 
+    // --- Keyboard Wedge Listener Logic ---
+    useEffect(() => {
+        let buffer = "";
+        let lastKeyTime = Date.now();
+        let timeoutId = null;
+
+        const handleFocusIn = () => {
+            buffer = "";
+        };
+        window.addEventListener("focusin", handleFocusIn);
+
+        const processWedgeInput = async (rawString) => {
+            const scannedId = extractScanId(rawString);
+
+            if (!scannedId) {
+                setStatus({ type: 'error', message: "Invalid ID Format: No University ID detected." });
+                return;
+            }
+
+            if (!selectedEventId) {
+                setStatus({ type: 'error', message: "Please select an event first." });
+                return;
+            }
+
+            setIsProcessingScanner(true);
+            setStatus(null);
+            
+            // Clean up any stray input in case the manual modal was open
+            setManualId("");
+            setShowManualModal(false);
+
+            await handleQrScan(scannedId);
+
+            setTimeout(() => setIsProcessingScanner(false), 500); 
+        };
+
+        const handleKeyDown = (e) => {
+            if (isProcessingScanner) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
+
+            const activeEl = document.activeElement;
+            const isInputActive = activeEl && ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeEl.tagName);
+
+            if (isModalOpen || isInputActive) {
+                buffer = "";
+                return;
+            }
+
+            const currentTime = Date.now();
+            const timeDiff = currentTime - lastKeyTime;
+            lastKeyTime = currentTime;
+
+            if (timeDiff > 30 && buffer.length > 0) {
+                buffer = "";
+            }
+
+            if (e.key === "Enter") {
+                if (buffer.length >= 5) { 
+                    e.preventDefault();
+                    e.stopPropagation();
+                    processWedgeInput(buffer);
+                }
+                buffer = "";
+            } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                buffer += e.key;
+                clearTimeout(timeoutId);
+                timeoutId = setTimeout(() => {
+                    buffer = "";
+                }, 500);
+            }
+        };
+
+        window.addEventListener("keydown", handleKeyDown, { capture: true });
+        return () => {
+            window.removeEventListener("keydown", handleKeyDown, { capture: true });
+            window.removeEventListener("focusin", handleFocusIn);
+            clearTimeout(timeoutId);
+        };
+    }, [isProcessingScanner, isModalOpen, selectedEventId, events]);
+
     return (
-        <div className="flex-1 flex flex-col w-full h-full p-8 max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="flex-1 flex flex-col w-full h-full p-8 max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
+            
+            {/* Green Flash Overlay */}
+            {flashGreen && (
+                <div className="absolute inset-0 z-[200] bg-emerald-500/30 pointer-events-none animate-in fade-in duration-75 fade-out duration-300"></div>
+            )}
+
             {/* Top Navigation */}
             <div className="flex flex-col items-center justify-center mb-12 relative w-full pt-4">
                 <button
@@ -239,10 +353,28 @@ export const EventActionMenu = ({ setView }) => {
 
             {showQrScanner && (
                 <QRScannerOverlay 
-                    onScan={handleQrScan} 
+                    onScan={(scannedId, error) => {
+                        setShowQrScanner(false);
+                        if (error || !scannedId) {
+                            setStatus({ type: 'error', message: error || "Invalid scan target." });
+                            return;
+                        }
+                        handleQrScan(scannedId);
+                    }} 
                     onClose={() => setShowQrScanner(false)} 
                     scannerFunction="event" 
                 />
+            )}
+
+            {/* Processing Scanner Overlay */}
+            {isProcessingScanner && (
+                <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
+                    <div className="bg-black/80 backdrop-blur-2xl border border-white/20 rounded-3xl shadow-2xl p-10 flex flex-col items-center">
+                        <div className="w-16 h-16 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mb-6"></div>
+                        <h2 className="text-2xl font-bold text-white tracking-wide animate-pulse">Processing ID...</h2>
+                        <p className="text-white/60 mt-2">Checking Event Registration Database</p>
+                    </div>
+                </div>
             )}
         </div>
     );

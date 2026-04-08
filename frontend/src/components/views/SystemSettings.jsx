@@ -15,7 +15,7 @@ export const SystemSettings = ({ setIsAdminLoggedIn, setView, adminSession, bran
     };
 
     return (
-        <div className="max-w-5xl mx-auto w-full space-y-6 animate-in slide-in-from-bottom-4 duration-500 flex flex-col h-full py-4">
+        <div className="mx-auto flex h-full w-full max-w-7xl flex-col space-y-6 py-4 animate-in slide-in-from-bottom-4 duration-500">
             
             {toastMessage && (
                 <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 flex items-center justify-between gap-4 px-5 py-3 pr-4 bg-[#ecfdf5] text-[#065f46] border border-[#a7f3d0] shadow-xl rounded-2xl min-w-[350px] animate-in slide-in-from-top-6 duration-300">
