@@ -8,7 +8,6 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
     const [name, setName] = useState('');
     const [logoPreview, setLogoPreview] = useState('');
     const [isSaving, setIsSaving] = useState(false);
-    const [error, setError] = useState('');
 
     useEffect(() => {
         if (branding) {
@@ -23,17 +22,16 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
 
         // Ensure it's an image
         if (!file.type.startsWith('image/')) {
-            setError('Please upload a valid image file (PNG, JPG).');
+            showToast('Please upload a valid image file (PNG, JPG).', 'error');
             return;
         }
 
         // Check size (Optional cap at 2MB to keep DB clean)
         if (file.size > 2 * 1024 * 1024) {
-             setError('File is too large. Please upload an image smaller than 2MB.');
-             return;
+            showToast('File is too large. Please upload an image smaller than 2MB.', 'warning');
+            return;
         }
 
-        setError('');
         const reader = new FileReader();
         reader.onloadend = () => {
             setLogoPreview(reader.result);
@@ -47,12 +45,11 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
 
     const handleSave = async () => {
         if (!name.trim()) {
-            setError('System Name cannot be empty.');
+            showToast('System Name cannot be empty.', 'error');
             return;
         }
 
         setIsSaving(true);
-        setError('');
 
         try {
             await invoke('update_system_branding', { 
@@ -61,9 +58,9 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                 logoBase64: logoPreview 
             });
             await fetchBranding();
-            showToast('System Branding updated successfully.');
+            showToast('Settings Updated: System Branding saved.', 'success');
         } catch (err) {
-            setError(typeof err === 'string' ? err : 'Operation failed.');
+            showToast(typeof err === 'string' ? err : 'Operation failed.', 'error');
         } finally {
             setIsSaving(false);
         }
@@ -80,12 +77,6 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
     return (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 w-full">
              <h2 className="text-2xl font-bold text-slate-800 mb-6">System Identity & Branding</h2>
-             
-             {error && (
-                <div className="mb-6 p-4 bg-rose-50 text-rose-700 border border-rose-200 rounded-xl">
-                    {error}
-                </div>
-             )}
 
              <div className="space-y-8 flex flex-col">
                  <div>

@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { X, Minus, AlertTriangle, Lock, Eye, EyeOff, CheckCircle2, ShieldCheck, RotateCcw } from "lucide-react";
+import { X, Minus, AlertTriangle, Lock, Eye, EyeOff, ShieldCheck, RotateCcw } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import logoImage from "../../imgs/plp-logo.png";
+import { useToast } from "./toast/ToastProvider";
 
 const appWindow = getCurrentWindow();
 
@@ -12,7 +13,7 @@ const initialActivationForm = {
     otpCode: ""
 };
 
-const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding }) => {
+const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onAdminOverlayChange }) => {
     const [showCloseModal, setShowCloseModal] = useState(false);
     const [showAdminModal, setShowAdminModal] = useState(false);
     const [username, setUsername] = useState("");
@@ -27,16 +28,21 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding }) =
     const [isResendingOtp, setIsResendingOtp] = useState(false);
     const [showActivationPassword, setShowActivationPassword] = useState(false);
     const [showActivationConfirmPassword, setShowActivationConfirmPassword] = useState(false);
-    const [toastMessage, setToastMessage] = useState("");
+    const { showSuccess } = useToast();
 
     useEffect(() => {
-        if (!toastMessage) {
+        if (typeof onAdminOverlayChange !== "function") {
             return undefined;
         }
 
-        const timer = window.setTimeout(() => setToastMessage(""), 3000);
-        return () => window.clearTimeout(timer);
-    }, [toastMessage]);
+        onAdminOverlayChange(showAdminModal || Boolean(pendingActivation));
+    }, [showAdminModal, pendingActivation, onAdminOverlayChange]);
+
+    useEffect(() => () => {
+        if (typeof onAdminOverlayChange === "function") {
+            onAdminOverlayChange(false);
+        }
+    }, [onAdminOverlayChange]);
 
     const handleMinimize = () => {
         appWindow.minimize();
@@ -152,7 +158,7 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding }) =
 
             resetActivationState();
             setIsAdminLoggedIn(response.account);
-            setToastMessage("Account fully activated. Welcome to Smart Gate!");
+            showSuccess("Account fully activated. Welcome to Smart Gate!");
             setView('admin_dashboard');
         } catch (error) {
             console.error(error);
@@ -188,15 +194,6 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding }) =
 
     return (
         <>
-            {toastMessage && (
-                <div className="fixed left-1/2 top-6 z-[120] flex min-w-[360px] -translate-x-1/2 items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-emerald-800 shadow-xl animate-in slide-in-from-top-6 duration-300">
-                    <div className="flex h-6 w-6 items-center justify-center rounded-full border border-emerald-300 bg-white">
-                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                    </div>
-                    <span className="text-sm font-semibold">{toastMessage}</span>
-                </div>
-            )}
-
             <div className="flex h-16 w-full select-none items-center justify-between border-b border-white/10 bg-black/20 px-6 text-white backdrop-blur-md">
                 <div className="pointer-events-none flex items-center gap-4">
                     <img src={logoSrc} alt="System Logo" className="h-12 w-12 rounded-full border-2 border-white/20 object-cover drop-shadow-md" />

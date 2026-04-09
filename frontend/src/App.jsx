@@ -10,6 +10,7 @@ import bgImage from "../imgs/plp-background.jpg";
 function App() {
     const [view, setView] = useState("main"); // 'main', 'action_entrance', 'action_exit', 'admin_dashboard', etc.
     const [adminSession, setAdminSession] = useState(null); // stores { account_id, username, full_name, role }
+    const [isAdminOverlayOpen, setIsAdminOverlayOpen] = useState(false);
     
     // System Branding State
     const [branding, setBranding] = useState({
@@ -48,13 +49,18 @@ function App() {
                     isAdminLoggedIn={adminSession} 
                     setIsAdminLoggedIn={setAdminSession}
                     branding={branding}
+                    onAdminOverlayChange={setIsAdminOverlayOpen}
                 />
 
                 {/* Main Content Area - min-h-0 ensures flex child can shrink for scroll containment */}
                 <main className="flex-1 min-h-0 w-full overflow-hidden">
                     {view === "main" && <MainMenu setView={setView} branding={branding} />}
                     {(view === "action_entrance" || view === "action_exit") && (
-                        <ActionMenu view={view} setView={setView} />
+                        <ActionMenu
+                            view={view}
+                            setView={setView}
+                            isGhostScannerDisabled={isAdminOverlayOpen}
+                        />
                     )}
                     {view === "action_event" && <EventActionMenu setView={setView} />}
                     {view.startsWith("admin_") && adminSession && (

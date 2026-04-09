@@ -69,6 +69,8 @@ pub fn run() {
             commands::activate_admin_first_login,
             commands::get_system_branding,
             commands::update_system_branding,
+            commands::get_available_printers,
+            commands::print_receipt_image_silent,
             email::send_visitor_qr,
             email::send_verification_otp
         ])

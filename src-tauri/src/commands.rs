@@ -1,6 +1,8 @@
 use crate::db::{self, DbPool};
 use crate::email;
 use crate::models::*;
+use serde::Serialize;
+use std::process::Command;
 use tauri::State;
 
 #[tauri::command]
@@ -477,4 +479,258 @@ pub fn update_system_branding(
     logo_base64: String,
 ) -> Result<(), String> {
     db::update_system_branding(&pool, admin_id, &name, &logo_base64)
+}
+
+#[derive(Serialize)]
+pub struct PrinterInfo {
+    pub name: String,
+    pub is_default: bool,
+}
+
+#[cfg(target_os = "windows")]
+fn run_powershell_inline(script: &str) -> Result<String, String> {
+    let output = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .output()
+        .map_err(|err| format!("Failed to run PowerShell command: {err}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "PowerShell command failed.".to_string()
+        } else {
+            stderr
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn run_powershell_script_file(script: &str, params: &[(&str, String)]) -> Result<String, String> {
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| format!("Clock error: {err}"))?
+        .as_millis();
+
+    let script_path = std::env::temp_dir().join(format!("smart_gate_print_{timestamp}.ps1"));
+    fs::write(&script_path, script).map_err(|err| format!("Failed to write temp script: {err}"))?;
+
+    let mut cmd = Command::new("powershell.exe");
+    cmd.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+    ]);
+    cmd.arg(&script_path);
+
+    for (key, value) in params {
+        cmd.arg(format!("-{key}"));
+        cmd.arg(value);
+    }
+
+    let output = cmd
+        .output()
+        .map_err(|err| format!("Failed to execute print script: {err}"));
+
+    let _ = fs::remove_file(&script_path);
+
+    let output = output?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Silent print script failed.".to_string()
+        } else {
+            stderr
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[tauri::command]
+pub fn get_available_printers() -> Result<Vec<PrinterInfo>, String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        return Err("Printer selection is currently available on Windows only.".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let raw = run_powershell_inline(
+            "$ErrorActionPreference='Stop'; Get-Printer | Select-Object Name,Default | ConvertTo-Json -Compress",
+        )?;
+
+        if raw.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let json: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|err| format!("Failed to parse printer list: {err}"))?;
+
+        let mut printers = Vec::new();
+        match json {
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    if let Some(name) = item.get("Name").and_then(|value| value.as_str()) {
+                        let is_default = item
+                            .get("Default")
+                            .and_then(|value| value.as_bool())
+                            .unwrap_or(false);
+                        printers.push(PrinterInfo {
+                            name: name.to_string(),
+                            is_default,
+                        });
+                    }
+                }
+            }
+            serde_json::Value::Object(item) => {
+                if let Some(name) = item.get("Name").and_then(|value| value.as_str()) {
+                    let is_default = item
+                        .get("Default")
+                        .and_then(|value| value.as_bool())
+                        .unwrap_or(false);
+                    printers.push(PrinterInfo {
+                        name: name.to_string(),
+                        is_default,
+                    });
+                }
+            }
+            _ => {}
+        }
+
+        Ok(printers)
+    }
+}
+
+#[tauri::command]
+pub fn print_receipt_image_silent(
+    printer_name: String,
+    receipt_image_data_url: String,
+) -> Result<String, String> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        return Err("Silent printing is currently available on Windows only.".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|err| format!("Clock error: {err}"))?
+            .as_millis();
+        let data_path = std::env::temp_dir().join(format!("smart_gate_receipt_{timestamp}.txt"));
+        fs::write(&data_path, &receipt_image_data_url)
+            .map_err(|err| format!("Failed to write receipt image data: {err}"))?;
+
+        let script = r#"
+param(
+    [string]$PrinterName,
+    [string]$ReceiptImageDataUrlFile
+)
+
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
+
+if ([string]::IsNullOrWhiteSpace($PrinterName)) {
+    $PrinterName = (Get-Printer | Where-Object { $_.Default } | Select-Object -First 1 -ExpandProperty Name)
+}
+
+if ([string]::IsNullOrWhiteSpace($PrinterName)) {
+    throw 'No printer selected and no default printer found.'
+}
+
+if ([string]::IsNullOrWhiteSpace($ReceiptImageDataUrlFile) -or -not (Test-Path $ReceiptImageDataUrlFile)) {
+    throw 'Receipt image data file is missing.'
+}
+
+$ReceiptImageDataUrl = Get-Content -Raw -Path $ReceiptImageDataUrlFile
+
+if ([string]::IsNullOrWhiteSpace($ReceiptImageDataUrl) -or -not $ReceiptImageDataUrl.Contains(',')) {
+    throw 'Receipt image data is missing or invalid.'
+}
+
+$base64 = $ReceiptImageDataUrl.Split(',')[1]
+$bytes = [Convert]::FromBase64String($base64)
+$memoryStream = New-Object System.IO.MemoryStream(, $bytes)
+$tempImage = [System.Drawing.Image]::FromStream($memoryStream)
+$receiptBitmap = New-Object System.Drawing.Bitmap($tempImage)
+$tempImage.Dispose()
+$memoryStream.Dispose()
+
+$doc = New-Object System.Drawing.Printing.PrintDocument
+$doc.PrinterSettings.PrinterName = $PrinterName
+
+if (-not $doc.PrinterSettings.IsValid) {
+    throw "Selected printer is not available: $PrinterName"
+}
+
+$doc.PrintController = New-Object System.Drawing.Printing.StandardPrintController
+$doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
+
+$paperWidth = 228
+$renderScale = 0.84
+$targetWidth = [int][Math]::Round($paperWidth * $renderScale)
+$targetHeight = [int][Math]::Ceiling(($targetWidth * $receiptBitmap.Height) / $receiptBitmap.Width)
+$paperHeight = [int][Math]::Max($targetHeight + 28, 140)
+$doc.DefaultPageSettings.PaperSize = New-Object System.Drawing.Printing.PaperSize('SmartGate58mm', $paperWidth, $paperHeight)
+
+$doc.add_PrintPage({
+    param($sender, $e)
+    $graphics = $e.Graphics
+    $graphics.Clear([System.Drawing.Color]::White)
+    $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+    $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+
+    $pageWidth = [int]$doc.DefaultPageSettings.PaperSize.Width
+    $printWidth = [int][Math]::Round($pageWidth * $renderScale)
+    $printHeight = [int][Math]::Ceiling(($printWidth * $receiptBitmap.Height) / $receiptBitmap.Width)
+
+    $x = [int][Math]::Round(($pageWidth - $printWidth) / 2)
+    $hardMarginX = [int][Math]::Round($doc.DefaultPageSettings.HardMarginX)
+    $hardMarginY = [int][Math]::Round($doc.DefaultPageSettings.HardMarginY)
+    $horizontalNudge = -17
+    $topNudge = -8
+
+    # Compensate hardware hard margins so image is visually centered on thermal paper.
+    $drawX = $x - $hardMarginX + $horizontalNudge
+    $drawY = 0 - $hardMarginY + $topNudge
+
+    $graphics.DrawImage($receiptBitmap, $drawX, $drawY, $printWidth, $printHeight)
+    $e.HasMorePages = $false
+})
+
+$doc.Print()
+
+$receiptBitmap.Dispose()
+$doc.Dispose()
+
+Write-Output "Printed successfully to $PrinterName"
+"#;
+
+        let result = run_powershell_script_file(
+            script,
+            &[
+                ("PrinterName", printer_name),
+                (
+                    "ReceiptImageDataUrlFile",
+                    data_path.to_string_lossy().to_string(),
+                ),
+            ],
+        );
+
+        let _ = fs::remove_file(&data_path);
+        result
+    }
 }

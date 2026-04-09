@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Building, Plus, Search, Edit2, Trash2, X, AlertCircle, CheckCircle2, Check, AlertTriangle, BookOpen, Filter } from 'lucide-react';
+import { Building, Plus, Search, Edit2, Trash2, X, Check, AlertTriangle, BookOpen, Filter } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { useToast } from '../toast/ToastProvider';
 
 export const AcademicStructure = () => {
     const [activeTab, setActiveTab] = useState('department'); // 'department', 'program'
@@ -16,6 +17,7 @@ export const AcademicStructure = () => {
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [selectedItem, setSelectedItem] = useState(null);
     const [status, setStatus] = useState(null);
+    const { showSuccess, showError } = useToast();
 
     // Form State
     const [formData, setFormData] = useState({
@@ -50,6 +52,19 @@ export const AcademicStructure = () => {
     useEffect(() => {
         fetchData();
     }, [activeTab]);
+
+    useEffect(() => {
+        if (!status) {
+            return;
+        }
+
+        if (status.type === 'success') {
+            showSuccess(status.message);
+        } else {
+            showError(status.message);
+        }
+        setStatus(null);
+    }, [status, showSuccess, showError]);
 
     const handleRegisterSubmit = async (e) => {
         e.preventDefault();
@@ -172,19 +187,6 @@ export const AcademicStructure = () => {
 
     return (
         <div className="w-full h-full min-h-0 space-y-6 animate-in slide-in-from-bottom-4 duration-500 relative flex flex-col">
-            {/* Status Toast */}
-            {status && (
-                <div className="absolute top-0 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-md px-4">
-                    <div className={`p-4 rounded-xl flex items-center justify-between gap-4 shadow-lg border ${status.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'}`}>
-                        <div className="flex items-center gap-3">
-                            {status.type === 'success' ? <CheckCircle2 className="w-5 h-5 text-emerald-600" /> : <AlertCircle className="w-5 h-5 text-rose-600" />}
-                            <span className="font-medium text-sm">{status.message}</span>
-                        </div>
-                        <button onClick={() => setStatus(null)}><X className="w-5 h-5 hover:text-slate-500" /></button>
-                    </div>
-                </div>
-            )}
-
             <div className="flex justify-between items-center">
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900 mb-2">Academic Structure</h1>

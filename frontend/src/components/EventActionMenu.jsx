@@ -1,18 +1,19 @@
 import React, { useState, useEffect } from "react";
-import { ArrowLeft, Keyboard, QrCode, ScanFace, ChevronLeft, ArrowRight, CheckCircle2, AlertCircle, Calendar } from "lucide-react";
+import { Keyboard, QrCode, ScanFace, ChevronLeft, ArrowRight, Calendar } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { QRScannerOverlay } from "./QRScannerOverlay";
 import { extractScanId } from "../utils/patternHunter";
+import { useToast } from "./toast/ToastProvider";
 
 export const EventActionMenu = ({ setView }) => {
     const [showManualModal, setShowManualModal] = useState(false);
     const [showQrScanner, setShowQrScanner] = useState(false);
     const [manualId, setManualId] = useState("");
-    const [status, setStatus] = useState(null);
     const [events, setEvents] = useState([]);
     const [selectedEventId, setSelectedEventId] = useState(null);
     const [isProcessingScanner, setIsProcessingScanner] = useState(false);
     const [flashGreen, setFlashGreen] = useState(false);
+    const { showSuccess, showError, showWarning, showProcessing } = useToast();
 
     const isModalOpen = showManualModal || showQrScanner;
 
@@ -79,10 +80,9 @@ export const EventActionMenu = ({ setView }) => {
 
     const handleManualSubmit = async (e) => {
         e.preventDefault();
-        setStatus(null);
 
         if (!selectedEventId) {
-            setStatus({ type: 'error', message: "No active event selected." });
+            showWarning("No active event selected.");
             return;
         }
 
@@ -93,13 +93,13 @@ export const EventActionMenu = ({ setView }) => {
             });
 
             if (result.success) {
-                setStatus({ type: 'success', message: `${result.message} - ${result.person_name} (${result.role})` });
+                showSuccess(`Attendance Recorded: ${result.message} - ${result.person_name} (${result.role})`);
             } else {
-                setStatus({ type: 'error', message: result.message });
+                showError(result.message);
             }
         } catch (error) {
             console.error(error);
-            setStatus({ type: 'error', message: "System Error. Failed to process ID." });
+            showError("System Error. Failed to process ID.");
         } finally {
             setShowManualModal(false);
             setManualId("");
@@ -108,7 +108,7 @@ export const EventActionMenu = ({ setView }) => {
 
     const handleQrScan = async (scannedId) => {
         if (!selectedEventId) {
-            setStatus({ type: 'error', message: "No active event selected." });
+            showWarning("No active event selected.");
             return;
         }
 
@@ -120,17 +120,17 @@ export const EventActionMenu = ({ setView }) => {
 
             if (result.success) {
                 const eventName = events.find(e => e.event_id === parseInt(selectedEventId, 10))?.event_name || 'Event';
-                setStatus({ type: 'success', message: `Attendance recorded for ${eventName} - ${result.person_name} (${result.role})` });
+                showSuccess(`Attendance Recorded: ${eventName} - ${result.person_name} (${result.role})`);
                 
                 playSuccessBeep();
                 setFlashGreen(true);
                 setTimeout(() => setFlashGreen(false), 300);
             } else {
-                setStatus({ type: 'error', message: result.message });
+                showError(result.message);
             }
         } catch (error) {
             console.error(error);
-            setStatus({ type: 'error', message: "System Error. Failed to process ID." });
+            showError("System Error. Failed to process ID.");
         }
     };
 
@@ -149,17 +149,17 @@ export const EventActionMenu = ({ setView }) => {
             const scannedId = extractScanId(rawString);
 
             if (!scannedId) {
-                setStatus({ type: 'error', message: "Invalid ID Format: No University ID detected." });
+                showError("Invalid ID Format: No University ID detected.");
                 return;
             }
 
             if (!selectedEventId) {
-                setStatus({ type: 'error', message: "Please select an event first." });
+                showWarning("Please select an event first.");
                 return;
             }
 
             setIsProcessingScanner(true);
-            setStatus(null);
+            showProcessing("Processing event scan...");
             
             // Clean up any stray input in case the manual modal was open
             setManualId("");
@@ -272,25 +272,10 @@ export const EventActionMenu = ({ setView }) => {
                 </div>
             )}
 
-            {/* Status Toast */}
-            {status && (
-                <div className="absolute top-24 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-lg px-4 animate-in slide-in-from-top-4 fade-in duration-300">
-                    <div className={`p-4 rounded-xl flex items-center justify-between gap-4 backdrop-blur-xl border shadow-2xl ${status.type === 'success' ? 'bg-emerald-500/20 text-emerald-100 border-emerald-500/30' : 'bg-rose-500/20 text-rose-100 border-rose-500/30'}`}>
-                        <div className="flex items-center gap-3">
-                            {status.type === 'success' ? <CheckCircle2 className="w-6 h-6 text-emerald-400" /> : <AlertCircle className="w-6 h-6 text-rose-400" />}
-                            <span className="font-medium text-lg text-white drop-shadow-sm">{status.message}</span>
-                        </div>
-                        <button onClick={() => setStatus(null)} className="p-1 hover:bg-white/10 rounded-lg transition-colors">
-                            <ArrowLeft className="w-5 h-5 text-white/50 hover:text-white" />
-                        </button>
-                    </div>
-                </div>
-            )}
-
             {/* Actions Grid */}
             <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-8 flex-1 place-content-center items-center ${events.length === 0 ? 'opacity-50 pointer-events-none' : ''}`}>
                 <button
-                    onClick={() => { setStatus(null); setShowManualModal(true); }}
+                    onClick={() => { setShowManualModal(true); }}
                     className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]"
                 >
                     <div className="h-20 w-20 bg-white/10 text-white rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:bg-white/20 transition-all duration-300 shadow-lg border border-white/20">
@@ -300,7 +285,7 @@ export const EventActionMenu = ({ setView }) => {
                     <p className="text-white/70 text-base">Type in ID</p>
                 </button>
 
-                <button onClick={() => { setStatus(null); setShowQrScanner(true); }} className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]">
+                <button onClick={() => { setShowQrScanner(true); }} className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]">
                     <div className="h-20 w-20 bg-white/10 text-white rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:bg-white/20 transition-all duration-300 shadow-lg border border-white/20">
                         <QrCode className="w-10 h-10 drop-shadow-md" />
                     </div>
@@ -308,7 +293,7 @@ export const EventActionMenu = ({ setView }) => {
                     <p className="text-white/70 text-base">Scan Digital ID</p>
                 </button>
 
-                <button onClick={() => setStatus({ type: 'error', message: "Hardware Integration Pending: Face Recognition is currently unavailable for Event Attendance." })} className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]">
+                <button onClick={() => showWarning("Hardware Integration Pending: Face Recognition is currently unavailable for Event Attendance.")} className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]">
                     <div className="h-20 w-20 bg-white/10 text-white rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:bg-white/20 transition-all duration-300 shadow-lg border border-white/20">
                         <ScanFace className="w-10 h-10 drop-shadow-md" />
                     </div>
@@ -356,7 +341,7 @@ export const EventActionMenu = ({ setView }) => {
                     onScan={(scannedId, error) => {
                         setShowQrScanner(false);
                         if (error || !scannedId) {
-                            setStatus({ type: 'error', message: error || "Invalid scan target." });
+                            showError(error || "Invalid scan target.");
                             return;
                         }
                         handleQrScan(scannedId);
@@ -364,17 +349,6 @@ export const EventActionMenu = ({ setView }) => {
                     onClose={() => setShowQrScanner(false)} 
                     scannerFunction="event" 
                 />
-            )}
-
-            {/* Processing Scanner Overlay */}
-            {isProcessingScanner && (
-                <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-md animate-in fade-in duration-200">
-                    <div className="bg-black/80 backdrop-blur-2xl border border-white/20 rounded-3xl shadow-2xl p-10 flex flex-col items-center">
-                        <div className="w-16 h-16 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mb-6"></div>
-                        <h2 className="text-2xl font-bold text-white tracking-wide animate-pulse">Processing ID...</h2>
-                        <p className="text-white/60 mt-2">Checking Event Registration Database</p>
-                    </div>
-                </div>
             )}
         </div>
     );
