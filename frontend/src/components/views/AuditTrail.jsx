@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { FileText, Search, RefreshCw, Filter, Calendar, Download, FileSpreadsheet, AlertTriangle, CheckCircle, XCircle, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { FileText, Search, RefreshCw, Filter, Calendar, Download, FileSpreadsheet, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import logoUrl from '../../../imgs/plp-logo.png';
+import { useToast } from '../toast/ToastProvider';
 
 export const AuditTrail = ({ branding }) => {
     const [logs, setLogs] = useState([]);
@@ -17,7 +18,6 @@ export const AuditTrail = ({ branding }) => {
     // Date Filtering State
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
-    const [dateError, setDateError] = useState('');
 
     // Pagination
     const ITEMS_PER_PAGE = 15;
@@ -26,17 +26,8 @@ export const AuditTrail = ({ branding }) => {
     // Export State & UX
     const [showExportMenu, setShowExportMenu] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
-    const [toastMessage, setToastMessage] = useState(null);
-    const [toastType, setToastType] = useState('success'); // 'success' or 'error'
     const exportMenuRef = useRef(null);
-
-    // Auto-hide toast after 3 seconds
-    useEffect(() => {
-        if (toastMessage) {
-            const timer = setTimeout(() => setToastMessage(null), 3000);
-            return () => clearTimeout(timer);
-        }
-    }, [toastMessage]);
+    const { showSuccess, showError, showWarning, showProcessing } = useToast();
 
     // Close export menu when clicking outside
     useEffect(() => {
@@ -52,10 +43,9 @@ export const AuditTrail = ({ branding }) => {
     const fetchLogs = async () => {
         // Validation
         if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
-            setDateError('Invalid Date Range: End Date must be after Start Date.');
+            showWarning('Invalid Date Range: End Date must be after Start Date.');
             return;
         }
-        setDateError('');
 
         setLoading(true);
         try {
@@ -103,6 +93,7 @@ export const AuditTrail = ({ branding }) => {
         if (filteredLogs.length === 0) return;
         setIsExporting(true);
         setShowExportMenu(false);
+        showProcessing("Preparing Excel export...");
 
         try {
             const exportData = filteredLogs.map(log => ({
@@ -129,9 +120,7 @@ export const AuditTrail = ({ branding }) => {
             });
 
             if (!filePath) {
-                // User cancelled the dialog
-                setToastType('error');
-                setToastMessage("Export cancelled.");
+                showWarning("Export cancelled.");
                 return;
             }
 
@@ -139,12 +128,10 @@ export const AuditTrail = ({ branding }) => {
             const excelBuffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
             await writeFile(filePath, new Uint8Array(excelBuffer));
 
-            setToastType('success');
-            setToastMessage(`Success: Report saved to ${filePath}`);
+            showSuccess(`Success: Report saved to ${filePath}`);
         } catch (error) {
             console.error("Excel export failed", error);
-            setToastType('error');
-            setToastMessage("An error occurred during export.");
+            showError("An error occurred during export.");
         } finally {
             setIsExporting(false);
         }
@@ -154,6 +141,7 @@ export const AuditTrail = ({ branding }) => {
         if (filteredLogs.length === 0) return;
         setIsExporting(true);
         setShowExportMenu(false);
+        showProcessing("Preparing PDF export...");
 
         try {
             const doc = new jsPDF('landscape'); // Use landscape for more columns
@@ -282,20 +270,17 @@ export const AuditTrail = ({ branding }) => {
             });
 
             if (!filePath) {
-                setToastType('error');
-                setToastMessage("Export cancelled.");
+                showWarning("Export cancelled.");
                 return;
             }
 
             // Write File via Tauri
             await writeFile(filePath, new Uint8Array(pdfBuffer));
 
-            setToastType('success');
-            setToastMessage(`Success: Report saved to ${filePath}`);
+            showSuccess(`Success: Report saved to ${filePath}`);
         } catch (error) {
             console.error("PDF export failed", error);
-            setToastType('error');
-            setToastMessage("An error occurred during export.");
+            showError("An error occurred during export.");
         } finally {
             setIsExporting(false);
         }
@@ -303,36 +288,6 @@ export const AuditTrail = ({ branding }) => {
 
     return (
         <div className="flex flex-col h-full min-h-0 gap-6 animate-in slide-in-from-bottom-4 duration-500 relative">
-
-            {/* Loading Overlay */}
-            {isExporting && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white p-6 rounded-2xl shadow-xl flex flex-col items-center gap-4 max-w-sm w-full mx-4">
-                        <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
-                        <div className="text-center">
-                            <h3 className="text-lg font-bold text-slate-900">Preparing Document</h3>
-                            <p className="text-sm text-slate-500 mt-1">Please wait while we generate your report...</p>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Toast Notification */}
-            {toastMessage && (
-                <div className="absolute top-0 right-4 z-50 animate-in fade-in slide-in-from-top-4 duration-300">
-                    <div className={`px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 border ${toastType === 'success'
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                        : 'bg-rose-50 border-rose-200 text-rose-700'
-                        }`}>
-                        {toastType === 'success' ? (
-                            <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0" />
-                        ) : (
-                            <XCircle className="w-5 h-5 text-rose-500 shrink-0" />
-                        )}
-                        <p className="text-sm font-medium">{toastMessage}</p>
-                    </div>
-                </div>
-            )}
 
             {/* Header Section */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -393,14 +348,6 @@ export const AuditTrail = ({ branding }) => {
                     </button>
                 </div>
             </div>
-
-            {/* Error Message */}
-            {dateError && (
-                <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-4 rounded-md flex items-center gap-3">
-                    <AlertTriangle className="w-5 h-5 text-red-500" />
-                    <p className="text-red-700 text-sm font-medium">{dateError}</p>
-                </div>
-            )}
 
             {/* Filter Section  */}
             <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col lg:flex-row gap-4">

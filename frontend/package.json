@@ -27,6 +27,7 @@
     "@tauri-apps/plugin-dialog": "^2.6.0",
     "@tauri-apps/plugin-fs": "^2.4.5",
     "core-js": "^3.48.0",
+    "html2canvas": "^1.4.1",
     "html5-qrcode": "^2.3.8",
     "jspdf": "^4.2.0",
     "jspdf-autotable": "^5.0.7",

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { AlertCircle, CheckCircle2, Edit2, KeyRound, ShieldCheck, Trash2, UserPlus, X } from 'lucide-react';
+import { CheckCircle2, Edit2, KeyRound, ShieldCheck, Trash2, UserPlus, X } from 'lucide-react';
 
 const ROLE_OPTIONS = ['System Administrator', 'Gate Supervisor'];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -24,7 +24,6 @@ const getSuggestedPassword = (fullName, role) => (
 
 export const AdminAccounts = ({ adminSession, showToast }) => {
     const [accounts, setAccounts] = useState([]);
-    const [status, setStatus] = useState(null);
 
     const [showAddModal, setShowAddModal] = useState(false);
     const [showResetModal, setShowResetModal] = useState(false);
@@ -52,7 +51,7 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
             const data = await invoke('get_admin_accounts');
             setAccounts(data);
         } catch (error) {
-            setStatus({ type: 'error', message: 'Failed to fetch accounts.' });
+            showToast('Failed to fetch accounts.', 'error');
         }
     };
 
@@ -75,7 +74,7 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
         event.preventDefault();
 
         if (!validateEmail(addForm.email)) {
-            setStatus({ type: 'error', message: 'Enter a valid contact/notification email address.' });
+            showToast('Enter a valid contact/notification email address.', 'error');
             return;
         }
 
@@ -88,7 +87,7 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                 role: addForm.role,
                 activeAdminId: adminSession.account_id,
             });
-            showToast('Administrator account created successfully.');
+            showToast('Admin Created: Administrator account created successfully.', 'success');
             setShowAddModal(false);
             setAddForm({
                 username: '',
@@ -98,16 +97,15 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                 role: 'System Administrator',
             });
             setHasCustomizedPassword(false);
-            setStatus(null);
             fetchAccounts();
         } catch (error) {
-            setStatus({ type: 'error', message: typeof error === 'string' ? error : 'Failed to create account.' });
+            showToast(typeof error === 'string' ? error : 'Failed to create account.', 'error');
         }
     };
 
     const handleUpdateRole = async (accountId, newRole) => {
         if (accountId === adminSession.account_id) {
-            setStatus({ type: 'error', message: 'Cannot change your own role.' });
+            showToast('Cannot change your own role.', 'warning');
             return;
         }
 
@@ -117,10 +115,10 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                 newRole,
                 activeAdminId: adminSession.account_id,
             });
-            showToast('Role updated successfully.');
+            showToast('Settings Updated: Role updated successfully.', 'success');
             fetchAccounts();
         } catch (error) {
-            setStatus({ type: 'error', message: 'Failed to update role.' });
+            showToast('Failed to update role.', 'error');
         }
     };
 
@@ -133,12 +131,12 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                 newPassword: resetPass,
                 activeAdminId: adminSession.account_id,
             });
-            showToast(`Temporary password reset for ${selectedAccount.username}. First login will require OTP verification.`);
+            showToast(`Password Changed: Temporary password reset for ${selectedAccount.username}.`, 'success');
             setShowResetModal(false);
             setResetPass('');
             fetchAccounts();
         } catch (error) {
-            setStatus({ type: 'error', message: typeof error === 'string' ? error : 'Failed to reset password.' });
+            showToast(typeof error === 'string' ? error : 'Failed to reset password.', 'error');
         }
     };
 
@@ -146,7 +144,7 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
         event.preventDefault();
 
         if (!validateEmail(editForm.email)) {
-            setStatus({ type: 'error', message: 'Enter a valid contact/notification email address.' });
+            showToast('Enter a valid contact/notification email address.', 'error');
             return;
         }
 
@@ -158,12 +156,11 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                 email: editForm.email.trim(),
                 activeAdminId: adminSession.account_id,
             });
-            showToast(`Account updated for ${editForm.username.trim()}.`);
+            showToast(`Settings Updated: Account updated for ${editForm.username.trim()}.`, 'success');
             setShowEditModal(false);
-            setStatus(null);
             fetchAccounts();
         } catch (error) {
-            setStatus({ type: 'error', message: typeof error === 'string' ? error : 'Failed to update account.' });
+            showToast(typeof error === 'string' ? error : 'Failed to update account.', 'error');
         }
     };
 
@@ -180,30 +177,15 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
             showToast(`Administrator account deleted for ${selectedAccount.username}.`);
             setShowDeleteModal(false);
             setSelectedAccount(null);
-            setStatus(null);
             fetchAccounts();
         } catch (error) {
-            setStatus({ type: 'error', message: typeof error === 'string' ? error : 'Failed to delete account.' });
+            showToast(typeof error === 'string' ? error : 'Failed to delete account.', 'error');
             setShowDeleteModal(false);
         }
     };
 
     return (
         <div className="relative flex min-h-0 w-full flex-col space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            {status?.type === 'error' && (
-                <div className="absolute left-1/2 top-2 z-50 w-full max-w-md -translate-x-1/2 px-4 pointer-events-none">
-                    <div className="pointer-events-auto flex items-center justify-between gap-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-rose-800 shadow-lg">
-                        <div className="flex items-center gap-3">
-                            <AlertCircle className="h-5 w-5 text-rose-600" />
-                            <span className="text-sm font-medium">{status.message}</span>
-                        </div>
-                        <button onClick={() => setStatus(null)} className="rounded-lg p-1 hover:bg-rose-100">
-                            <X className="h-5 w-5" />
-                        </button>
-                    </div>
-                </div>
-            )}
-
             <div className="mb-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                     <div className="mb-1 flex h-10 w-10 items-center justify-center rounded-lg border border-indigo-100 bg-indigo-50 text-indigo-600">

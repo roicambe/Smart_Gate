@@ -1,15 +1,13 @@
 import React, { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { KeyRound, AlertCircle, CheckCircle2, Save } from 'lucide-react';
+import { KeyRound, Save } from 'lucide-react';
 
 export const MyAccount = ({ adminSession, setIsAdminLoggedIn, setView, showToast }) => {
     const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
-    const [status, setStatus] = useState(null);
 
     const handleUpdateCredentials = async (e) => {
         e.preventDefault();
-        setStatus(null);
         try {
             const success = await invoke('update_admin_credentials', {
                 accountId: adminSession.account_id,
@@ -17,16 +15,16 @@ export const MyAccount = ({ adminSession, setIsAdminLoggedIn, setView, showToast
                 newPassword
             });
             if (success) {
-                showToast('Credentials updated. Please log in again.');
+                showToast('Password changed. Please log in again.', 'success');
                 setTimeout(() => {
                     setIsAdminLoggedIn(false);
                     setView('main');
                 }, 2000);
             } else {
-                setStatus({ type: 'error', message: 'Current password incorrect.' });
+                showToast('Current password incorrect.', 'error');
             }
         } catch (err) {
-            setStatus({ type: 'error', message: typeof err === 'string' ? err : 'Failed to update credentials.' });
+            showToast(typeof err === 'string' ? err : 'Failed to update credentials.', 'error');
         }
     };
 
@@ -63,13 +61,6 @@ export const MyAccount = ({ adminSession, setIsAdminLoggedIn, setView, showToast
                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm transition-all font-medium"
                     />
                 </div>
-
-                {status && status.type === 'error' && (
-                    <div className={`p-4 rounded-xl flex items-center gap-3 animate-in fade-in duration-300 ${status.type === 'success' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'}`}>
-                        {status.type === 'success' ? <CheckCircle2 className="w-5 h-5 text-emerald-600" /> : <AlertCircle className="w-5 h-5 text-rose-600" />}
-                        <span className="text-sm font-medium">{status.message}</span>
-                    </div>
-                )}
 
                 <div className="pt-2">
                     <button

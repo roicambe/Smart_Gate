@@ -29,3 +29,18 @@
         display: none;
     }
 }
+
+/* Thermal receipt print optimization (58mm) */
+@media print {
+    body {
+        margin: 0 !important;
+        padding: 0 !important;
+        background: #FFFFFF !important;
+        overflow: visible !important;
+    }
+
+    /* Hide everything except the print frame content */
+    body > *:not(iframe) {
+        display: none !important;
+    }
+}
