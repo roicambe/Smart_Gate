@@ -11,7 +11,7 @@ import * as XLSX from 'xlsx';
 import logoUrl from '../../../imgs/plp-logo.png';
 import { useToast } from '../toast/ToastProvider';
 
-export const AccessLogs = ({ branding }) => {
+export const AccessLogs = ({ branding, adminSession }) => {
     const [activeTab, setActiveTab] = useState('gateLogs'); // 'gateLogs' | 'eventLogs'
     
     // Gate Logs state
@@ -190,6 +190,15 @@ export const AccessLogs = ({ branding }) => {
             const excelBuffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
             await writeFile(filePath, new Uint8Array(excelBuffer));
 
+            await invoke('log_frontend_action', {
+                adminId: adminSession?.account_id,
+                actionType: 'EXPORT',
+                targetTable: activeTab === 'gateLogs' ? 'entry_logs' : 'event_attendance',
+                targetId: null,
+                oldValues: null,
+                newValues: JSON.stringify({ format: 'Excel', filename, record_count: filteredLogs.length })
+            }).catch(e => console.error("Audit log failed for export", e));
+
             showSuccess(`Success: Report saved to ${filePath}`);
         } catch (error) {
             console.error("Excel export failed", error);
@@ -340,6 +349,15 @@ export const AccessLogs = ({ branding }) => {
             // Write File via Tauri
             await writeFile(filePath, new Uint8Array(pdfBuffer));
 
+            await invoke('log_frontend_action', {
+                adminId: adminSession?.account_id,
+                actionType: 'EXPORT',
+                targetTable: activeTab === 'gateLogs' ? 'entry_logs' : 'event_attendance',
+                targetId: null,
+                oldValues: null,
+                newValues: JSON.stringify({ format: 'PDF', filename, record_count: filteredLogs.length })
+            }).catch(e => console.error("Audit log failed for PDF export", e));
+
             showSuccess(`Success: Report saved to ${filePath}`);
         } catch (error) {
             console.error("PDF export failed", error);
@@ -407,7 +425,7 @@ export const AccessLogs = ({ branding }) => {
             </div>
 
             {/* Filter Bar (Action Bar) Cleanup */}
-            <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col lg:flex-row items-center justify-between gap-4 mb-6">
+            <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col lg:flex-row items-center justify-between gap-4">
                 
                 {/* Sub-Tab Navigation inside Filter Bar */}
                 <div className="flex gap-2 p-1 bg-slate-100 rounded-xl w-full lg:w-auto overflow-x-auto shrink-0">

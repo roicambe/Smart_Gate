@@ -27,14 +27,14 @@ export const AdminLayout = ({ view, setView, setIsAdminLoggedIn, adminSession, b
 
     const renderView = () => {
         switch (view) {
-            case 'admin_dashboard': return <AdminDashboard branding={branding} />;
-            case 'admin_access_logs': return <AccessLogs branding={branding} />;
+            case 'admin_dashboard': return <AdminDashboard branding={branding} adminSession={adminSession} />;
+            case 'admin_access_logs': return <AccessLogs branding={branding} adminSession={adminSession} />;
             case 'admin_settings': return <SystemSettings setIsAdminLoggedIn={setIsAdminLoggedIn} setView={setView} adminSession={adminSession} branding={branding} fetchBranding={fetchBranding} />;
             case 'admin_users': return <UserManagement adminSession={adminSession} />;
 
-            case 'admin_academic': return <AcademicStructure branding={branding} />;
-            case 'admin_events': return <EventManagement branding={branding} />;
-            case 'admin_audit': return <AuditTrail branding={branding} />;
+            case 'admin_academic': return <AcademicStructure branding={branding} adminSession={adminSession} />;
+            case 'admin_events': return <EventManagement branding={branding} adminSession={adminSession} />;
+            case 'admin_audit': return <AuditTrail branding={branding} adminSession={adminSession} />;
             default:
                 return (
                     <div className="flex-1 flex items-center justify-center p-8">

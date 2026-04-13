@@ -196,7 +196,7 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
         <>
             <div className="flex h-16 w-full select-none items-center justify-between border-b border-white/10 bg-black/20 px-6 text-white backdrop-blur-md">
                 <div className="pointer-events-none flex items-center gap-4">
-                    <img src={logoSrc} alt="System Logo" className="h-12 w-12 rounded-full border-2 border-white/20 object-cover drop-shadow-md" />
+                    <img src={logoSrc} alt="System Logo" className="h-12 w-12 rounded-full object-cover drop-shadow-md" />
                     <span className="text-xl font-bold tracking-wide drop-shadow-sm">{systemName}</span>
                 </div>
 

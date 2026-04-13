@@ -101,7 +101,7 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                     </label>
                     <div className="flex flex-col sm:flex-row items-center sm:items-start gap-6 mt-2">
                         <div className="relative group shrink-0">
-                            <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-slate-100 shadow-sm bg-slate-50 flex items-center justify-center">
+                            <div className="w-32 h-32 rounded-full overflow-hidden shadow-sm bg-slate-50 flex items-center justify-center">
                                 {logoPreview ? (
                                     <img src={logoPreview} alt="System Logo Outline" className="w-full h-full object-cover" />
                                 ) : (
