@@ -1,4 +1,5 @@
 use crate::models::*;
+use serde_json::json;
 use chrono::{Duration, Local, NaiveDateTime};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -390,7 +391,7 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
 
 // ------ Academic Structure CRUD Operations ------
 
-pub fn add_department(pool: &DbPool, department: Department) -> Result<i64, String> {
+pub fn add_department(pool: &DbPool, department: Department, active_admin_id: i64) -> Result<i64, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     conn.execute(
@@ -400,7 +401,22 @@ pub fn add_department(pool: &DbPool, department: Department) -> Result<i64, Stri
     )
     .map_err(|e| e.to_string())?;
 
-    Ok(conn.last_insert_rowid())
+    let target_id = conn.last_insert_rowid();
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "INSERT",
+        "departments",
+        target_id,
+        None,
+        Some(json!({
+            "department_code": department.department_code,
+            "department_name": department.department_name
+        }).to_string()),
+    );
+
+    Ok(target_id)
 }
 
 pub fn get_departments(pool: &DbPool) -> Result<Vec<Department>, String> {
@@ -433,18 +449,41 @@ pub fn update_department(
     department_id: i64,
     new_name: &str,
     new_code: &str,
+    active_admin_id: i64,
 ) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let (old_code, old_name): (String, String) = conn.query_row(
+        "SELECT department_code, department_name FROM departments WHERE department_id = ?1",
+        params![department_id],
+        |row| Ok((row.get(0)?, row.get(1)?))
+    ).unwrap_or_default();
 
     conn.execute(
         "UPDATE departments SET department_name = ?1, department_code = ?2 WHERE department_id = ?3",
         params![new_name, new_code, department_id],
     ).map_err(|e| e.to_string())?;
 
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "UPDATE",
+        "departments",
+        department_id,
+        Some(json!({
+            "department_code": old_code,
+            "department_name": old_name
+        }).to_string()),
+        Some(json!({
+            "department_code": new_code,
+            "department_name": new_name
+        }).to_string()),
+    );
+
     Ok(())
 }
 
-pub fn delete_department(pool: &DbPool, department_id: i64) -> Result<(), String> {
+pub fn delete_department(pool: &DbPool, department_id: i64, active_admin_id: i64) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     // Check if there are programs associated
@@ -460,16 +499,32 @@ pub fn delete_department(pool: &DbPool, department_id: i64) -> Result<(), String
         return Err("Cannot delete department because it has associated programs. Please delete the programs first.".to_string());
     }
 
+    let (deleted_code, deleted_name): (String, String) = conn.query_row(
+        "SELECT department_code, department_name FROM departments WHERE department_id = ?1",
+        params![department_id],
+        |row| Ok((row.get(0)?, row.get(1)?))
+    ).unwrap_or_default();
+
     conn.execute(
         "DELETE FROM departments WHERE department_id = ?1",
         params![department_id],
     )
     .map_err(|e| e.to_string())?;
 
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "DELETE",
+        "departments",
+        department_id,
+        Some(json!({ "department_code": deleted_code, "department_name": deleted_name }).to_string()),
+        None,
+    );
+
     Ok(())
 }
 
-pub fn add_program(pool: &DbPool, program: Program) -> Result<i64, String> {
+pub fn add_program(pool: &DbPool, program: Program, active_admin_id: i64) -> Result<i64, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     conn.execute(
@@ -483,7 +538,23 @@ pub fn add_program(pool: &DbPool, program: Program) -> Result<i64, String> {
     )
     .map_err(|e| e.to_string())?;
 
-    Ok(conn.last_insert_rowid())
+    let target_id = conn.last_insert_rowid();
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "INSERT",
+        "programs",
+        target_id,
+        None,
+        Some(json!({
+            "department_id": program.department_id,
+            "program_code": program.program_code,
+            "program_name": program.program_name
+        }).to_string()),
+    );
+
+    Ok(target_id)
 }
 
 pub fn get_programs(pool: &DbPool) -> Result<Vec<Program>, String> {
@@ -518,18 +589,43 @@ pub fn update_program(
     department_id: i64,
     new_name: &str,
     new_code: &str,
+    active_admin_id: i64,
 ) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let (old_dept_id, old_code, old_name): (i64, String, String) = conn.query_row(
+        "SELECT department_id, program_code, program_name FROM programs WHERE program_id = ?1",
+        params![program_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    ).unwrap_or_default();
 
     conn.execute(
         "UPDATE programs SET department_id = ?1, program_name = ?2, program_code = ?3 WHERE program_id = ?4",
         params![department_id, new_name, new_code, program_id],
     ).map_err(|e| e.to_string())?;
 
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "UPDATE",
+        "programs",
+        program_id,
+        Some(json!({
+            "department_id": old_dept_id,
+            "program_code": old_code,
+            "program_name": old_name
+        }).to_string()),
+        Some(json!({
+            "department_id": department_id,
+            "program_code": new_code,
+            "program_name": new_name
+        }).to_string()),
+    );
+
     Ok(())
 }
 
-pub fn delete_program(pool: &DbPool, program_id: i64) -> Result<(), String> {
+pub fn delete_program(pool: &DbPool, program_id: i64, active_admin_id: i64) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     // Check if there are students associated
@@ -545,11 +641,27 @@ pub fn delete_program(pool: &DbPool, program_id: i64) -> Result<(), String> {
         return Err("Cannot delete program because it has associated students.".to_string());
     }
 
+    let (deleted_dept_id, deleted_code, deleted_name): (i64, String, String) = conn.query_row(
+        "SELECT department_id, program_code, program_name FROM programs WHERE program_id = ?1",
+        params![program_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    ).unwrap_or_default();
+
     conn.execute(
         "DELETE FROM programs WHERE program_id = ?1",
         params![program_id],
     )
     .map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "DELETE",
+        "programs",
+        program_id,
+        Some(json!({ "department_id": deleted_dept_id, "program_code": deleted_code, "program_name": deleted_name }).to_string()),
+        None,
+    );
 
     Ok(())
 }
@@ -611,7 +723,7 @@ pub fn get_persons(pool: &DbPool) -> Result<Vec<Person>, String> {
     Ok(persons)
 }
 
-pub fn update_person_status(pool: &DbPool, person_id: i64, is_active: bool) -> Result<(), String> {
+pub fn update_person_status(pool: &DbPool, person_id: i64, is_active: bool, active_admin_id: i64) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     let active_int = if is_active { 1 } else { 0 };
 
@@ -620,6 +732,16 @@ pub fn update_person_status(pool: &DbPool, person_id: i64, is_active: bool) -> R
         params![active_int, person_id],
     )
     .map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "UPDATE",
+        "persons",
+        person_id,
+        None,
+        Some(json!({ "is_active": is_active }).to_string()),
+    );
 
     Ok(())
 }
@@ -698,6 +820,7 @@ pub fn register_user(
     position_title: Option<String>,
     purpose: Option<String>,
     person_to_visit: Option<String>,
+    active_admin_id: i64,
 ) -> Result<i64, String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -734,6 +857,22 @@ pub fn register_user(
     }
 
     tx.commit().map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "INSERT",
+        "persons",
+        person_id,
+        None,
+        Some(json!({
+            "id_number": id_number,
+            "role": role,
+            "first_name": first_name,
+            "last_name": last_name
+        }).to_string()),
+    );
+
     Ok(person_id)
 }
 
@@ -753,9 +892,27 @@ pub fn update_user(
     position_title: Option<String>,
     purpose: Option<String>,
     person_to_visit: Option<String>,
+    active_admin_id: i64,
 ) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let old_data: Option<serde_json::Value> = tx.query_row(
+        "SELECT id_number, first_name, middle_name, last_name, email, contact_number, role
+         FROM persons WHERE person_id = ?1",
+        params![person_id],
+        |row| {
+           Ok(json!({
+               "id_number": row.get::<_, String>(0)?,
+               "first_name": row.get::<_, String>(1)?,
+               "middle_name": row.get::<_, Option<String>>(2)?,
+               "last_name": row.get::<_, String>(3)?,
+               "email": row.get::<_, Option<String>>(4)?,
+               "contact_number": row.get::<_, Option<String>>(5)?,
+               "role": row.get::<_, String>(6)?
+           }))
+        }
+    ).ok();
 
     tx.execute(
         "UPDATE persons
@@ -793,12 +950,50 @@ pub fn update_user(
     }
 
     tx.commit().map_err(|e| e.to_string())?;
+
+    let new_data = json!({
+        "id_number": id_number,
+        "first_name": first_name,
+        "middle_name": middle_name,
+        "last_name": last_name,
+        "email": email,
+        "contact_number": contact_number,
+        "role": role
+    });
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "UPDATE",
+        "persons",
+        person_id,
+        old_data.map(|v| v.to_string()),
+        Some(new_data.to_string()),
+    );
+
     Ok(())
 }
 
-pub fn delete_user(pool: &DbPool, person_id: i64, role: &str) -> Result<(), String> {
+pub fn delete_user(pool: &DbPool, person_id: i64, role: &str, active_admin_id: i64) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let old_data: Option<serde_json::Value> = tx.query_row(
+        "SELECT id_number, first_name, middle_name, last_name, email, contact_number, role
+         FROM persons WHERE person_id = ?1",
+        params![person_id],
+        |row| {
+           Ok(json!({
+               "id_number": row.get::<_, String>(0)?,
+               "first_name": row.get::<_, String>(1)?,
+               "middle_name": row.get::<_, Option<String>>(2)?,
+               "last_name": row.get::<_, String>(3)?,
+               "email": row.get::<_, Option<String>>(4)?,
+               "contact_number": row.get::<_, Option<String>>(5)?,
+               "role": row.get::<_, String>(6)?
+           }))
+        }
+    ).ok();
 
     match role {
         "student" => {
@@ -840,6 +1035,17 @@ pub fn delete_user(pool: &DbPool, person_id: i64, role: &str) -> Result<(), Stri
     .map_err(|e| e.to_string())?;
 
     tx.commit().map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "DELETE",
+        "persons",
+        person_id,
+        old_data.map(|v| v.to_string()),
+        None,
+    );
+
     Ok(())
 }
 
@@ -918,7 +1124,7 @@ pub fn get_visitors(pool: &DbPool) -> Result<Vec<VisitorDetails>, String> {
 
 // ------ Hardware & Events CRUD Operations ------
 
-pub fn add_scanner(pool: &DbPool, scanner: Scanner) -> Result<i64, String> {
+pub fn add_scanner(pool: &DbPool, scanner: Scanner, active_admin_id: i64) -> Result<i64, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     conn.execute(
@@ -928,7 +1134,22 @@ pub fn add_scanner(pool: &DbPool, scanner: Scanner) -> Result<i64, String> {
     )
     .map_err(|e| e.to_string())?;
 
-    Ok(conn.last_insert_rowid())
+    let target_id = conn.last_insert_rowid();
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "INSERT",
+        "scanners",
+        target_id,
+        None,
+        Some(json!({
+            "location_name": scanner.location_name,
+            "function": scanner.function
+        }).to_string()),
+    );
+
+    Ok(target_id)
 }
 
 pub fn get_scanners(pool: &DbPool) -> Result<Vec<Scanner>, String> {
@@ -1105,7 +1326,7 @@ pub fn get_event_attendance_logs(
     Ok(list)
 }
 
-pub fn add_event(pool: &DbPool, event: Event) -> Result<i64, String> {
+pub fn add_event(pool: &DbPool, event: Event, active_admin_id: i64) -> Result<i64, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let is_enabled = if event.is_enabled { 1 } else { 0 };
@@ -1126,7 +1347,22 @@ pub fn add_event(pool: &DbPool, event: Event) -> Result<i64, String> {
         ],
     ).map_err(|e| e.to_string())?;
 
-    Ok(conn.last_insert_rowid())
+    let target_id = conn.last_insert_rowid();
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "INSERT",
+        "events",
+        target_id,
+        None,
+        Some(json!({
+            "event_name": event.event_name,
+            "event_date": event.event_date
+        }).to_string()),
+    );
+
+    Ok(target_id)
 }
 
 pub fn get_events(pool: &DbPool) -> Result<Vec<Event>, String> {
@@ -1160,8 +1396,26 @@ pub fn get_events(pool: &DbPool) -> Result<Vec<Event>, String> {
     Ok(list)
 }
 
-pub fn update_event(pool: &DbPool, event_id: i64, event: Event) -> Result<(), String> {
+pub fn update_event(pool: &DbPool, event_id: i64, event: Event, active_admin_id: i64) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let old_data: Option<serde_json::Value> = conn.query_row(
+        "SELECT event_name, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled FROM events WHERE event_id = ?1",
+        params![event_id],
+        |row| {
+           Ok(json!({
+               "event_name": row.get::<_, String>(0)?,
+               "schedule_type": row.get::<_, String>(1)?,
+               "event_date": row.get::<_, Option<String>>(2)?,
+               "start_date": row.get::<_, Option<String>>(3)?,
+               "end_date": row.get::<_, Option<String>>(4)?,
+               "start_time": row.get::<_, String>(5)?,
+               "end_time": row.get::<_, String>(6)?,
+               "required_role": row.get::<_, String>(7)?,
+               "is_enabled": row.get::<_, i32>(8)? == 1
+           }))
+        }
+    ).ok();
 
     let is_enabled = if event.is_enabled { 1 } else { 0 };
 
@@ -1181,14 +1435,64 @@ pub fn update_event(pool: &DbPool, event_id: i64, event: Event) -> Result<(), St
         ],
     ).map_err(|e| e.to_string())?;
 
+    let new_data = json!({
+        "event_name": event.event_name,
+        "schedule_type": event.schedule_type,
+        "event_date": event.event_date,
+        "start_date": event.start_date,
+        "end_date": event.end_date,
+        "start_time": event.start_time,
+        "end_time": event.end_time,
+        "required_role": event.required_role,
+        "is_enabled": event.is_enabled
+    });
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "UPDATE",
+        "events",
+        event_id,
+        old_data.map(|v| v.to_string()),
+        Some(new_data.to_string()),
+    );
+
     Ok(())
 }
 
-pub fn delete_event(pool: &DbPool, event_id: i64) -> Result<(), String> {
+pub fn delete_event(pool: &DbPool, event_id: i64, active_admin_id: i64) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let old_data: Option<serde_json::Value> = conn.query_row(
+        "SELECT event_name, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled FROM events WHERE event_id = ?1",
+        params![event_id],
+        |row| {
+           Ok(json!({
+               "event_name": row.get::<_, String>(0)?,
+               "schedule_type": row.get::<_, String>(1)?,
+               "event_date": row.get::<_, Option<String>>(2)?,
+               "start_date": row.get::<_, Option<String>>(3)?,
+               "end_date": row.get::<_, Option<String>>(4)?,
+               "start_time": row.get::<_, String>(5)?,
+               "end_time": row.get::<_, String>(6)?,
+               "required_role": row.get::<_, String>(7)?,
+               "is_enabled": row.get::<_, i32>(8)? == 1
+           }))
+        }
+    ).ok();
 
     conn.execute("DELETE FROM events WHERE event_id = ?1", params![event_id])
         .map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "DELETE",
+        "events",
+        event_id,
+        old_data.map(|v| v.to_string()),
+        None,
+    );
 
     Ok(())
 }
@@ -1471,12 +1775,36 @@ pub fn log_audit_action(
     action_type: &str,
     target_table: &str,
     target_id: i64,
+    old_values: Option<String>,
+    new_values: Option<String>,
 ) -> Result<(), String> {
+    if action_type == "UPDATE" {
+        if let (Some(old_str), Some(new_str)) = (&old_values, &new_values) {
+            if let (Ok(old_val), Ok(new_val)) = (
+                serde_json::from_str::<serde_json::Value>(old_str),
+                serde_json::from_str::<serde_json::Value>(new_str),
+            ) {
+                if let (Some(old_obj), Some(new_obj)) = (old_val.as_object(), new_val.as_object()) {
+                    let mut has_changes = false;
+                    for (k, v) in new_obj.iter() {
+                        if old_obj.get(k) != Some(v) {
+                            has_changes = true;
+                            break;
+                        }
+                    }
+                    if !has_changes {
+                        return Ok(()); // Skip logging empty changes
+                    }
+                }
+            }
+        }
+    }
+
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     conn.execute(
-        "INSERT INTO audit_logs (admin_id, action_type, target_table, target_id) VALUES (?1, ?2, ?3, ?4)",
-        params![admin_id, action_type, target_table, target_id],
+        "INSERT INTO audit_logs (admin_id, action_type, target_table, target_id, old_values, new_values) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![admin_id, action_type, target_table, target_id, old_values, new_values],
     ).map_err(|e| e.to_string())?;
 
     Ok(())
@@ -1490,7 +1818,7 @@ pub fn get_audit_logs(
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let mut base_query = "
-        SELECT a.audit_id, acc.username, a.action_type, a.target_table, a.target_id, a.old_values, a.new_values, a.created_at 
+        SELECT a.audit_id, a.admin_id, acc.username, acc.full_name, a.action_type, a.target_table, a.target_id, a.old_values, a.new_values, a.created_at 
         FROM audit_logs a
         LEFT JOIN accounts acc ON a.admin_id = acc.account_id
     ".to_string();
@@ -1509,22 +1837,28 @@ pub fn get_audit_logs(
 
     let mut logs = Vec::new();
 
+    let map_row = |row: &rusqlite::Row| -> rusqlite::Result<AuditLogDetails> {
+        Ok(AuditLogDetails {
+            audit_id: row.get(0)?,
+            admin_id: row.get(1)?,
+            admin_username: row
+                .get::<_, Option<String>>(2)?
+                .unwrap_or_else(|| "Unknown".to_string()),
+            admin_full_name: row
+                .get::<_, Option<String>>(3)?
+                .unwrap_or_else(|| "Unknown Administrator".to_string()),
+            action_type: row.get(4)?,
+            target_table: row.get(5)?,
+            target_id: row.get(6)?,
+            old_values: row.get(7)?,
+            new_values: row.get(8)?,
+            created_at: row.get(9)?,
+        })
+    };
+
     if let (Some(start), Some(end)) = (&start_date, &end_date) {
         let iter = stmt
-            .query_map(params![start, end], |row| {
-                Ok(AuditLogDetails {
-                    audit_id: row.get(0)?,
-                    admin_username: row
-                        .get::<_, Option<String>>(1)?
-                        .unwrap_or_else(|| "Unknown".to_string()),
-                    action_type: row.get(2)?,
-                    target_table: row.get(3)?,
-                    target_id: row.get(4)?,
-                    old_values: row.get(5)?,
-                    new_values: row.get(6)?,
-                    created_at: row.get(7)?,
-                })
-            })
+            .query_map(params![start, end], map_row)
             .map_err(|e| e.to_string())?;
         for log in iter {
             if let Ok(l) = log {
@@ -1533,20 +1867,7 @@ pub fn get_audit_logs(
         }
     } else if let Some(date) = start_date.or(end_date) {
         let iter = stmt
-            .query_map(params![date], |row| {
-                Ok(AuditLogDetails {
-                    audit_id: row.get(0)?,
-                    admin_username: row
-                        .get::<_, Option<String>>(1)?
-                        .unwrap_or_else(|| "Unknown".to_string()),
-                    action_type: row.get(2)?,
-                    target_table: row.get(3)?,
-                    target_id: row.get(4)?,
-                    old_values: row.get(5)?,
-                    new_values: row.get(6)?,
-                    created_at: row.get(7)?,
-                })
-            })
+            .query_map(params![date], map_row)
             .map_err(|e| e.to_string())?;
         for log in iter {
             if let Ok(l) = log {
@@ -1555,20 +1876,7 @@ pub fn get_audit_logs(
         }
     } else {
         let iter = stmt
-            .query_map([], |row| {
-                Ok(AuditLogDetails {
-                    audit_id: row.get(0)?,
-                    admin_username: row
-                        .get::<_, Option<String>>(1)?
-                        .unwrap_or_else(|| "Unknown".to_string()),
-                    action_type: row.get(2)?,
-                    target_table: row.get(3)?,
-                    target_id: row.get(4)?,
-                    old_values: row.get(5)?,
-                    new_values: row.get(6)?,
-                    created_at: row.get(7)?,
-                })
-            })
+            .query_map([], map_row)
             .map_err(|e| e.to_string())?;
         for log in iter {
             if let Ok(l) = log {
@@ -1578,6 +1886,7 @@ pub fn get_audit_logs(
     }
 
     Ok(logs)
+
 }
 
 // ------ Admin Dashboard & Auth ------
@@ -1734,7 +2043,20 @@ pub fn add_admin_account(
     ).map_err(|e| e.to_string())?;
     let target_id = conn.last_insert_rowid();
 
-    let _ = log_audit_action(pool, active_admin_id, "INSERT", "accounts", target_id);
+    let _ = log_audit_action(
+        pool, 
+        active_admin_id, 
+        "INSERT", 
+        "accounts", 
+        target_id, 
+        None, 
+        Some(json!({
+            "username": username,
+            "full_name": full_name,
+            "email": email,
+            "role": role
+        }).to_string())
+    );
     Ok(target_id)
 }
 
@@ -1745,13 +2067,28 @@ pub fn update_admin_role(
     active_admin_id: i64,
 ) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let old_role: String = conn.query_row(
+        "SELECT role FROM accounts WHERE account_id = ?1", 
+        params![account_id], 
+        |row| row.get(0)
+    ).unwrap_or_else(|_| "Unknown".to_string());
+
     conn.execute(
         "UPDATE accounts SET role = ?1 WHERE account_id = ?2",
         params![new_role, account_id],
     )
     .map_err(|e| e.to_string())?;
 
-    let _ = log_audit_action(pool, active_admin_id, "UPDATE", "accounts", account_id);
+    let _ = log_audit_action(
+        pool, 
+        active_admin_id, 
+        "UPDATE", 
+        "accounts", 
+        account_id, 
+        Some(json!({"role": old_role}).to_string()), 
+        Some(json!({"role": new_role}).to_string())
+    );
     Ok(())
 }
 
@@ -1773,7 +2110,15 @@ pub fn reset_admin_password(
     )
     .map_err(|e| e.to_string())?;
 
-    let _ = log_audit_action(pool, active_admin_id, "UPDATE", "accounts", account_id);
+    let _ = log_audit_action(
+        pool, 
+        active_admin_id, 
+        "UPDATE", 
+        "accounts", 
+        account_id, 
+        Some(json!({"password_hash": "(old)"}).to_string()), 
+        Some(json!({"password_hash": "(new)"}).to_string())
+    );
     Ok(())
 }
 
@@ -1798,13 +2143,36 @@ pub fn update_admin_info(
     }
 
     let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let (old_username, old_full_name, old_email): (String, String, Option<String>) = conn.query_row(
+        "SELECT username, full_name, email FROM accounts WHERE account_id = ?1",
+        params![account_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).unwrap_or_default();
+
     conn.execute(
         "UPDATE accounts SET username = ?1, full_name = ?2, email = ?3 WHERE account_id = ?4",
         params![username, full_name, email, account_id],
     )
     .map_err(|e| e.to_string())?;
 
-    let _ = log_audit_action(pool, active_admin_id, "UPDATE", "accounts", account_id);
+    let _ = log_audit_action(
+        pool, 
+        active_admin_id, 
+        "UPDATE", 
+        "accounts", 
+        account_id, 
+        Some(json!({
+            "username": old_username,
+            "full_name": old_full_name,
+            "email": old_email
+        }).to_string()), 
+        Some(json!({
+            "username": username,
+            "full_name": full_name,
+            "email": email
+        }).to_string())
+    );
     Ok(())
 }
 
@@ -1859,13 +2227,27 @@ pub fn delete_admin_account(
         }
     }
 
+    let deleted_username: String = conn.query_row(
+        "SELECT username FROM accounts WHERE account_id = ?1", 
+        params![account_id], 
+        |row| row.get(0)
+    ).unwrap_or_else(|_| "Unknown".to_string());
+
     conn.execute(
         "DELETE FROM accounts WHERE account_id = ?1",
         params![account_id],
     )
     .map_err(|e| e.to_string())?;
 
-    let _ = log_audit_action(pool, active_admin_id, "DELETE", "accounts", account_id);
+    let _ = log_audit_action(
+        pool, 
+        active_admin_id, 
+        "DELETE", 
+        "accounts", 
+        account_id, 
+        Some(json!({ "username": deleted_username }).to_string()), 
+        None
+    );
     Ok(())
 }
 

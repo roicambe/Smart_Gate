@@ -3,7 +3,7 @@ import { Calendar, Plus, Search, Edit2, Trash2, X, Check, AlertTriangle } from '
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from '../toast/ToastProvider';
 
-export const EventManagement = () => {
+export const EventManagement = ({ branding, adminSession }) => {
     const [events, setEvents] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [isLoading, setIsLoading] = useState(true);
@@ -50,7 +50,8 @@ export const EventManagement = () => {
                 event: {
                     event_id: 0,
                     ...formData
-                }
+                },
+                activeAdminId: adminSession?.account_id
             });
             showSuccess('Event Created: Event added successfully!');
             setShowRegisterModal(false);
@@ -86,7 +87,8 @@ export const EventManagement = () => {
                 event: {
                     event_id: selectedEvent.event_id,
                     ...formData
-                }
+                },
+                activeAdminId: adminSession?.account_id
             });
             showSuccess('Settings Updated: Event updated successfully!');
             setShowEditModal(false);
@@ -104,7 +106,7 @@ export const EventManagement = () => {
 
     const confirmDelete = async () => {
         try {
-            await invoke('delete_event', { eventId: selectedEvent.event_id });
+            await invoke('delete_event', { eventId: selectedEvent.event_id, activeAdminId: adminSession?.account_id });
             showSuccess('Event deleted successfully!');
             setShowDeleteModal(false);
             fetchEvents();

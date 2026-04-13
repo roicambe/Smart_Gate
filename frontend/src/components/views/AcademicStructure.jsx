@@ -3,7 +3,7 @@ import { Building, Plus, Search, Edit2, Trash2, X, Check, AlertTriangle, BookOpe
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from '../toast/ToastProvider';
 
-export const AcademicStructure = () => {
+export const AcademicStructure = ({ branding, adminSession }) => {
     const [activeTab, setActiveTab] = useState('department'); // 'department', 'program'
     const [searchQuery, setSearchQuery] = useState('');
     const [departmentFilter, setDepartmentFilter] = useState(''); // '' = All Departments
@@ -75,7 +75,8 @@ export const AcademicStructure = () => {
                         department_id: 0,
                         department_name: formData.department_name,
                         department_code: formData.department_code
-                    }
+                    },
+                    activeAdminId: adminSession?.account_id
                 });
                 setStatus({ type: 'success', message: 'Department added successfully!' });
             } else {
@@ -85,7 +86,8 @@ export const AcademicStructure = () => {
                         department_id: parseInt(formData.department_id),
                         program_name: formData.program_name,
                         program_code: formData.program_code
-                    }
+                    },
+                    activeAdminId: adminSession?.account_id
                 });
                 setStatus({ type: 'success', message: 'Program added successfully!' });
             }
@@ -124,7 +126,8 @@ export const AcademicStructure = () => {
                 await invoke('update_department', {
                     departmentId: selectedItem.department_id,
                     departmentName: formData.department_name,
-                    departmentCode: formData.department_code
+                    departmentCode: formData.department_code,
+                    activeAdminId: adminSession?.account_id
                 });
                 setStatus({ type: 'success', message: 'Department updated successfully!' });
             } else {
@@ -132,7 +135,8 @@ export const AcademicStructure = () => {
                     programId: selectedItem.program_id,
                     departmentId: parseInt(formData.department_id),
                     programName: formData.program_name,
-                    programCode: formData.program_code
+                    programCode: formData.program_code,
+                    activeAdminId: adminSession?.account_id
                 });
                 setStatus({ type: 'success', message: 'Program updated successfully!' });
             }
@@ -152,9 +156,9 @@ export const AcademicStructure = () => {
     const confirmDelete = async () => {
         try {
             if (activeTab === 'department') {
-                await invoke('delete_department', { departmentId: selectedItem.department_id });
+                await invoke('delete_department', { departmentId: selectedItem.department_id, activeAdminId: adminSession?.account_id });
             } else {
-                await invoke('delete_program', { programId: selectedItem.program_id });
+                await invoke('delete_program', { programId: selectedItem.program_id, activeAdminId: adminSession?.account_id });
             }
             setStatus({ type: 'success', message: `${activeTab} deleted successfully!` });
             setShowDeleteModal(false);

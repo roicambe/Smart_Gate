@@ -43,8 +43,8 @@ pub fn get_departments(pool: State<'_, DbPool>) -> Result<Vec<Department>, Strin
     db::get_departments(&pool)
 }
 #[tauri::command]
-pub fn add_department(pool: State<'_, DbPool>, department: Department) -> Result<i64, String> {
-    db::add_department(&pool, department)
+pub fn add_department(pool: State<'_, DbPool>, department: Department, active_admin_id: i64) -> Result<i64, String> {
+    db::add_department(&pool, department, active_admin_id)
 }
 #[tauri::command]
 pub fn update_department(
@@ -52,12 +52,13 @@ pub fn update_department(
     department_id: i64,
     department_name: String,
     department_code: String,
+    active_admin_id: i64,
 ) -> Result<(), String> {
-    db::update_department(&pool, department_id, &department_name, &department_code)
+    db::update_department(&pool, department_id, &department_name, &department_code, active_admin_id)
 }
 #[tauri::command]
-pub fn delete_department(pool: State<'_, DbPool>, department_id: i64) -> Result<(), String> {
-    db::delete_department(&pool, department_id)
+pub fn delete_department(pool: State<'_, DbPool>, department_id: i64, active_admin_id: i64) -> Result<(), String> {
+    db::delete_department(&pool, department_id, active_admin_id)
 }
 
 #[tauri::command]
@@ -65,8 +66,8 @@ pub fn get_programs(pool: State<'_, DbPool>) -> Result<Vec<Program>, String> {
     db::get_programs(&pool)
 }
 #[tauri::command]
-pub fn add_program(pool: State<'_, DbPool>, program: Program) -> Result<i64, String> {
-    db::add_program(&pool, program)
+pub fn add_program(pool: State<'_, DbPool>, program: Program, active_admin_id: i64) -> Result<i64, String> {
+    db::add_program(&pool, program, active_admin_id)
 }
 #[tauri::command]
 pub fn update_program(
@@ -75,6 +76,7 @@ pub fn update_program(
     department_id: i64,
     program_name: String,
     program_code: String,
+    active_admin_id: i64,
 ) -> Result<(), String> {
     db::update_program(
         &pool,
@@ -82,11 +84,12 @@ pub fn update_program(
         department_id,
         &program_name,
         &program_code,
+        active_admin_id,
     )
 }
 #[tauri::command]
-pub fn delete_program(pool: State<'_, DbPool>, program_id: i64) -> Result<(), String> {
-    db::delete_program(&pool, program_id)
+pub fn delete_program(pool: State<'_, DbPool>, program_id: i64, active_admin_id: i64) -> Result<(), String> {
+    db::delete_program(&pool, program_id, active_admin_id)
 }
 
 #[tauri::command]
@@ -112,8 +115,9 @@ pub fn update_person_status(
     pool: State<'_, DbPool>,
     person_id: i64,
     is_active: bool,
+    active_admin_id: i64,
 ) -> Result<(), String> {
-    db::update_person_status(&pool, person_id, is_active)
+    db::update_person_status(&pool, person_id, is_active, active_admin_id)
 }
 
 #[tauri::command]
@@ -121,8 +125,8 @@ pub fn get_scanners(pool: State<'_, DbPool>) -> Result<Vec<Scanner>, String> {
     db::get_scanners(&pool)
 }
 #[tauri::command]
-pub fn add_scanner(pool: State<'_, DbPool>, scanner: Scanner) -> Result<i64, String> {
-    db::add_scanner(&pool, scanner)
+pub fn add_scanner(pool: State<'_, DbPool>, scanner: Scanner, active_admin_id: i64) -> Result<i64, String> {
+    db::add_scanner(&pool, scanner, active_admin_id)
 }
 #[tauri::command]
 pub fn get_access_logs(
@@ -159,16 +163,16 @@ pub fn get_events(pool: State<'_, DbPool>) -> Result<Vec<Event>, String> {
     db::get_events(&pool)
 }
 #[tauri::command]
-pub fn add_event(pool: State<'_, DbPool>, event: Event) -> Result<i64, String> {
-    db::add_event(&pool, event)
+pub fn add_event(pool: State<'_, DbPool>, event: Event, active_admin_id: i64) -> Result<i64, String> {
+    db::add_event(&pool, event, active_admin_id)
 }
 #[tauri::command]
-pub fn update_event(pool: State<'_, DbPool>, event_id: i64, event: Event) -> Result<(), String> {
-    db::update_event(&pool, event_id, event)
+pub fn update_event(pool: State<'_, DbPool>, event_id: i64, event: Event, active_admin_id: i64) -> Result<(), String> {
+    db::update_event(&pool, event_id, event, active_admin_id)
 }
 #[tauri::command]
-pub fn delete_event(pool: State<'_, DbPool>, event_id: i64) -> Result<(), String> {
-    db::delete_event(&pool, event_id)
+pub fn delete_event(pool: State<'_, DbPool>, event_id: i64, active_admin_id: i64) -> Result<(), String> {
+    db::delete_event(&pool, event_id, active_admin_id)
 }
 
 #[tauri::command]
@@ -186,8 +190,23 @@ pub fn log_audit_action(
     action_type: String,
     target_table: String,
     target_id: i64,
+    old_values: Option<String>,
+    new_values: Option<String>,
 ) -> Result<(), String> {
-    db::log_audit_action(&pool, admin_id, &action_type, &target_table, target_id)
+    db::log_audit_action(&pool, admin_id, &action_type, &target_table, target_id, old_values, new_values)
+}
+
+#[tauri::command]
+pub fn log_frontend_action(
+    pool: State<'_, DbPool>,
+    admin_id: i64,
+    action_type: String,
+    target_table: String,
+    target_id: Option<i64>,
+    old_values: Option<String>,
+    new_values: Option<String>,
+) -> Result<(), String> {
+    db::log_audit_action(&pool, admin_id, &action_type, &target_table, target_id.unwrap_or(0), old_values, new_values)
 }
 
 #[tauri::command]
@@ -387,6 +406,7 @@ pub fn register_user(
     position_title: Option<String>,
     purpose: Option<String>,
     person_to_visit: Option<String>,
+    active_admin_id: i64,
 ) -> Result<i64, String> {
     db::register_user(
         &pool,
@@ -403,6 +423,7 @@ pub fn register_user(
         position_title,
         purpose,
         person_to_visit,
+        active_admin_id,
     )
 }
 
@@ -432,6 +453,7 @@ pub fn update_user(
     position_title: Option<String>,
     purpose: Option<String>,
     person_to_visit: Option<String>,
+    active_admin_id: i64,
 ) -> Result<(), String> {
     db::update_user(
         &pool,
@@ -449,12 +471,13 @@ pub fn update_user(
         position_title,
         purpose,
         person_to_visit,
+        active_admin_id,
     )
 }
 
 #[tauri::command]
-pub fn delete_user(pool: State<'_, DbPool>, person_id: i64, role: String) -> Result<(), String> {
-    db::delete_user(&pool, person_id, &role)
+pub fn delete_user(pool: State<'_, DbPool>, person_id: i64, role: String, active_admin_id: i64) -> Result<(), String> {
+    db::delete_user(&pool, person_id, &role, active_admin_id)
 }
 
 #[tauri::command]
@@ -700,7 +723,7 @@ $doc.add_PrintPage({
     $x = [int][Math]::Round(($pageWidth - $printWidth) / 2)
     $hardMarginX = [int][Math]::Round($doc.DefaultPageSettings.HardMarginX)
     $hardMarginY = [int][Math]::Round($doc.DefaultPageSettings.HardMarginY)
-    $horizontalNudge = -17
+    $horizontalNudge = -20
     $topNudge = -8
 
     # Compensate hardware hard margins so image is visually centered on thermal paper.

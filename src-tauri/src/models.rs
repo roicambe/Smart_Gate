@@ -216,7 +216,9 @@ pub struct AccessLogDetails {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AuditLogDetails {
     pub audit_id: i64,
+    pub admin_id: i64,
     pub admin_username: String,
+    pub admin_full_name: String,
     pub action_type: String,
     pub target_table: String,
     pub target_id: Option<i64>,
@@ -230,3 +232,4 @@ pub struct SystemBranding {
     pub system_name: String,
     pub system_logo: String,
 }
+

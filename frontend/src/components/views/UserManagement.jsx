@@ -175,12 +175,13 @@ export const UserManagement = ({ adminSession }) => {
         e.preventDefault();
         try {
             const payload = buildUserPayload(formData.role, formData);
-            const personId = await invoke('register_user', payload);
+            const personId = await invoke('register_user', { ...payload, activeAdminId: adminSession?.account_id });
 
             if (formData.role !== 'visitor' && !formData.is_active) {
                 await invoke('update_person_status', {
                     personId,
                     isActive: false,
+                    activeAdminId: adminSession?.account_id
                 });
             }
 
@@ -232,12 +233,14 @@ export const UserManagement = ({ adminSession }) => {
             await invoke('update_user', {
                 personId: selectedUser.person_id,
                 ...payload,
+                activeAdminId: adminSession?.account_id
             });
 
             if (activeRole !== 'visitor') {
                 await invoke('update_person_status', {
                     personId: selectedUser.person_id,
                     isActive: formData.is_active,
+                    activeAdminId: adminSession?.account_id
                 });
             }
 
@@ -259,7 +262,8 @@ export const UserManagement = ({ adminSession }) => {
         try {
             await invoke('delete_user', {
                 personId: selectedUser.person_id,
-                role: activeRole
+                role: activeRole,
+                activeAdminId: adminSession?.account_id
             });
             setStatus({ type: 'success', message: 'User deleted successfully!' });
             setShowDeleteModal(false);

@@ -10,7 +10,7 @@ export const MainMenu = ({ setView, branding }) => {
             {/* Hero Section */}
             <div className="flex flex-col items-center mb-16 text-white animate-in slide-in-from-bottom-5 fade-in duration-700">
                 <div className="h-48 w-48 mb-6 flex items-center justify-center drop-shadow-2xl">
-                    <img src={logoSrc} alt="System Logo" className="w-full h-full object-cover rounded-full filter drop-shadow-[0_10px_15px_rgba(0,0,0,0.5)] border-4 border-white/20" />
+                    <img src={logoSrc} alt="System Logo" className="w-full h-full object-cover rounded-full filter drop-shadow-[0_10px_15px_rgba(0,0,0,0.5)]" />
                 </div>
                 <h1 className="text-4xl md:text-5xl lg:text-7xl font-extrabold text-center tracking-tight text-white drop-shadow-xl font-serif">
                     Smart Gate

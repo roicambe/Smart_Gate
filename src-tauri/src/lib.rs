@@ -48,6 +48,7 @@ pub fn run() {
             commands::delete_event,
             commands::log_entry,
             commands::log_audit_action,
+            commands::log_frontend_action,
             commands::admin_login,
             commands::update_admin_credentials,
             commands::get_dashboard_stats,
