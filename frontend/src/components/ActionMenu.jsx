@@ -1,18 +1,23 @@
-import React, { useState } from "react";
-import { ArrowLeft, Keyboard, QrCode, ScanFace, Users, LogIn, LogOut, ChevronLeft, ArrowRight, CheckCircle2, AlertCircle } from "lucide-react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Keyboard, QrCode, ScanFace, Users, LogIn, LogOut, ChevronLeft, ArrowRight } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { QRCodeSVG } from "qrcode.react";
 import { QRScannerOverlay } from "./QRScannerOverlay";
+import { VisitorPassPrinter } from "./VisitorPassPrinter";
+import { extractScanId } from "../utils/patternHunter";
+import { useGhostScannerListener } from "../hooks/useGhostScannerListener";
+import { useToast } from "./toast/ToastProvider";
 
-export const ActionMenu = ({ view, setView }) => {
+export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) => {
     const isEntrance = view === 'action_entrance';
     const [showManualModal, setShowManualModal] = useState(false);
     const [showVisitorModal, setShowVisitorModal] = useState(false);
     const [manualId, setManualId] = useState("");
-    const [status, setStatus] = useState(null);
-    const [successVisitor, setSuccessVisitor] = useState(null);
-    const [showHardwareModal, setShowHardwareModal] = useState(false);
     const [showQRScanner, setShowQRScanner] = useState(false);
+    const [showPrintModal, setShowPrintModal] = useState(false);
+    const [printPassData, setPrintPassData] = useState(null);
+    const audioContextRef = useRef(null);
+    const isBackgroundScanRunningRef = useRef(false);
+    const { showSuccess, showError, showWarning } = useToast();
 
     const [visitorForm, setVisitorForm] = useState({
         firstName: '',
@@ -26,13 +31,12 @@ export const ActionMenu = ({ view, setView }) => {
 
     const handleVisitorSubmit = async (e) => {
         e.preventDefault();
-        setStatus(null);
         try {
             const yearPart = new Date().getFullYear().toString().slice(-2);
             const randomPart = Math.floor(1000 + Math.random() * 9000).toString().padStart(4, '0');
             const generatedId = `VIS-${yearPart}${randomPart}`;
             
-            const personId = await invoke('register_user', {
+            await invoke('register_user', {
                 role: "visitor",
                 idNumber: generatedId,
                 firstName: visitorForm.firstName,
@@ -46,7 +50,8 @@ export const ActionMenu = ({ view, setView }) => {
                 yearLevel: null,
                 departmentId: null,
                 positionTitle: null,
-                idPresented: generatedId
+                purpose: visitorForm.purpose,
+                personToVisit: visitorForm.personToVisit
             });
             
             const result = await invoke('manual_id_entry', {
@@ -55,18 +60,29 @@ export const ActionMenu = ({ view, setView }) => {
             });
             
             if (result.success) {
-                setSuccessVisitor({ id: generatedId, name: `${visitorForm.firstName} ${visitorForm.lastName}`, email: visitorForm.email });
+                const normalizedVisitorName = `${visitorForm.firstName} ${visitorForm.lastName}`.replace(/\s+/g, " ").trim();
+                const normalizedVisitorId = generatedId.trim().toUpperCase();
+                const visitorData = {
+                    id: normalizedVisitorId,
+                    name: normalizedVisitorName,
+                    visitor_id: normalizedVisitorId,
+                    visitor_name: normalizedVisitorName,
+                    email: visitorForm.email
+                };
+                showSuccess(`Registration Successful: ${visitorData.name} (${generatedId}).`);
+                setPrintPassData(visitorData);
+                setShowPrintModal(true);
                 
                 if (visitorForm.email) {
                     invoke("send_visitor_qr", { idNumber: generatedId })
                         .catch(qrErr => console.error("Failed to send QR email:", qrErr));
                 }
             } else {
-                setStatus({ type: 'error', message: result.message });
+                showError(result.message);
             }
         } catch (error) {
             console.error(error);
-            setStatus({ type: 'error', message: typeof error === 'string' ? error : "Failed to register visitor." });
+            showError(typeof error === 'string' ? error : "Failed to register visitor.");
         } finally {
             setShowVisitorModal(false);
             setVisitorForm({ firstName: '', middleName: '', lastName: '', email: '', contactNumber: '', purpose: '', personToVisit: '' });
@@ -75,7 +91,6 @@ export const ActionMenu = ({ view, setView }) => {
 
     const handleManualSubmit = async (e) => {
         e.preventDefault();
-        setStatus(null);
         try {
             const scannerFunction = isEntrance ? 'entrance' : 'exit';
             const result = await invoke('manual_id_entry', {
@@ -84,18 +99,102 @@ export const ActionMenu = ({ view, setView }) => {
             });
 
             if (result.success) {
-                setStatus({ type: 'success', message: `${result.message} - ${result.person_name} (${result.role})` });
+                showSuccess(`${result.message} - ${result.person_name} (${result.role})`);
             } else {
-                setStatus({ type: 'error', message: result.message });
+                showError(result.message);
             }
         } catch (error) {
             console.error(error);
-            setStatus({ type: 'error', message: "System Error. Failed to process ID." });
+            showError("System Error. Failed to process ID.");
         } finally {
             setShowManualModal(false);
             setManualId("");
         }
     };
+
+    useEffect(() => () => {
+        if (audioContextRef.current) {
+            audioContextRef.current.close().catch(() => {});
+        }
+    }, []);
+
+    const playBackgroundBeep = useCallback(() => {
+        try {
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContextClass) {
+                return;
+            }
+
+            if (!audioContextRef.current) {
+                audioContextRef.current = new AudioContextClass();
+            }
+
+            const ctx = audioContextRef.current;
+            if (ctx.state === "suspended") {
+                ctx.resume().catch(() => {});
+            }
+
+            const oscillator = ctx.createOscillator();
+            const gain = ctx.createGain();
+            oscillator.type = "square";
+            oscillator.frequency.setValueAtTime(1046, ctx.currentTime);
+
+            gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.01);
+            gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.12);
+
+            oscillator.connect(gain);
+            gain.connect(ctx.destination);
+            oscillator.start();
+            oscillator.stop(ctx.currentTime + 0.14);
+        } catch (error) {
+            console.error("Failed to play background scanner beep:", error);
+        }
+    }, []);
+
+    const processBackgroundScan = useCallback(async (rawString) => {
+        if (isGhostScannerDisabled || isBackgroundScanRunningRef.current) {
+            return;
+        }
+
+        const scannedId = extractScanId(rawString);
+        if (!scannedId) {
+            return;
+        }
+
+        isBackgroundScanRunningRef.current = true;
+        try {
+            const scannerFunction = isEntrance ? "entrance" : "exit";
+            const result = await invoke("manual_id_entry", {
+                idNumber: scannedId,
+                scannerFunction
+            });
+
+            if (!result.success) {
+                showError(result.message);
+                return;
+            }
+
+            const actionWord = isEntrance ? "Logged In" : "Logged Out";
+            const personName = result.person_name || scannedId;
+            showSuccess(`Background Scan Success: ${personName} ${actionWord}.`);
+            playBackgroundBeep();
+
+            if (manualId.trim().toUpperCase() === scannedId.toUpperCase()) {
+                setManualId("");
+            }
+        } catch (error) {
+            console.error("Background scanner processing failed:", error);
+            showError("Background scanner failed. Please try scanning again.");
+        } finally {
+            isBackgroundScanRunningRef.current = false;
+        }
+    }, [isEntrance, isGhostScannerDisabled, manualId, playBackgroundBeep, showSuccess, showError]);
+
+    useGhostScannerListener({
+        enabled: !isGhostScannerDisabled,
+        onScanBuffer: processBackgroundScan
+    });
 
     return (
         <div className="flex-1 flex flex-col w-full h-full p-8 max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -125,28 +224,12 @@ export const ActionMenu = ({ view, setView }) => {
                 </div>
             </div>
 
-            {/* Status Toast Container (Visible upon submission) */}
-            {status && (
-                <div className="absolute top-24 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-lg px-4 animate-in slide-in-from-top-4 fade-in duration-300">
-                    <div className={`p-4 rounded-xl flex items-center justify-between gap-4 backdrop-blur-xl border shadow-2xl ${status.type === 'success' ? 'bg-emerald-500/20 text-emerald-100 border-emerald-500/30' : 'bg-rose-500/20 text-rose-100 border-rose-500/30'
-                        }`}>
-                        <div className="flex items-center gap-3">
-                            {status.type === 'success' ? <CheckCircle2 className="w-6 h-6 text-emerald-400" /> : <AlertCircle className="w-6 h-6 text-rose-400" />}
-                            <span className="font-medium text-lg text-white drop-shadow-sm">{status.message}</span>
-                        </div>
-                        <button onClick={() => setStatus(null)} className="p-1 hover:bg-white/10 rounded-lg transition-colors">
-                            <ArrowLeft className="w-5 h-5 text-white/50 hover:text-white" />
-                        </button>
-                    </div>
-                </div>
-            )}
-
             {/* Grid of Enlarged Action Cards (Glassmorphism) */}
             {isEntrance ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-8 flex-1 place-content-center items-center">
                     {/* Manually Input ID */}
                     <button
-                        onClick={() => { setStatus(null); setShowManualModal(true); }}
+                        onClick={() => { setShowManualModal(true); }}
                         className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]"
                     >
                         <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
@@ -173,7 +256,7 @@ export const ActionMenu = ({ view, setView }) => {
 
                     {/* Face Recognition */}
                     <button 
-                        onClick={() => setShowHardwareModal(true)}
+                        onClick={() => showWarning("Hardware Integration in Progress: Please use Manual ID for now.")}
                         className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]">
                         <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
                             <ScanFace className="w-12 h-12 drop-shadow-md" />
@@ -187,7 +270,6 @@ export const ActionMenu = ({ view, setView }) => {
                     {/* Visitors */}
                     <button 
                         onClick={() => { 
-                            setStatus(null); 
                             setShowVisitorModal(true); 
                         }}
                         className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]"
@@ -207,7 +289,7 @@ export const ActionMenu = ({ view, setView }) => {
                         <div className="flex-1">
                             {/* Manually Input ID */}
                             <button
-                                onClick={() => { setStatus(null); setShowManualModal(true); }}
+                                onClick={() => { setShowManualModal(true); }}
                                 className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]"
                             >
                                 <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
@@ -237,7 +319,7 @@ export const ActionMenu = ({ view, setView }) => {
                     {/* Face Recognition (Bottom Row) */}
                     <div className="w-full sm:w-1/2 mx-auto justify-self-center">
                         <button 
-                            onClick={() => setShowHardwareModal(true)}
+                            onClick={() => showWarning("Hardware Integration in Progress: Please use Manual ID for now.")}
                             className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]">
                             <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
                                 <ScanFace className="w-12 h-12 drop-shadow-md" />
@@ -355,33 +437,19 @@ export const ActionMenu = ({ view, setView }) => {
                     </div>
                 </div>
             )}
-            {/* Hardware Placeholder Modal */}
-            {showHardwareModal && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md">
-                    <div className="bg-black/80 backdrop-blur-2xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 fade-in duration-200">
-                        <div className="p-8 text-center flex flex-col items-center">
-                            <AlertCircle className="w-16 h-16 text-blue-400 mb-4" />
-                            <h2 className="text-2xl font-bold text-white tracking-wide mb-2">Hardware Integration in Progress</h2>
-                            <p className="text-white/70 mb-8">Please use Manual ID for now to register entry or exit.</p>
-                            <button
-                                onClick={() => setShowHardwareModal(false)}
-                                className="px-8 py-3 bg-white text-black font-bold rounded-xl hover:bg-slate-200 transition-all focus:outline-none focus:ring-4 focus:ring-white/30"
-                            >
-                                Understood
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             {/* QR Scanner Modal */}
             {showQRScanner && (
                 <QRScannerOverlay
                     scannerFunction={isEntrance ? 'entrance' : 'exit'}
                     onClose={() => setShowQRScanner(false)}
-                    onScan={async (scannedId) => {
+                    onScan={async (scannedId, error) => {
                         setShowQRScanner(false);
-                        setStatus(null);
+                        
+                        if (error || !scannedId) {
+                            showError(error || "Invalid scan target.");
+                            return;
+                        }
+
                         try {
                             const result = await invoke('manual_id_entry', {
                                 idNumber: scannedId,
@@ -389,62 +457,29 @@ export const ActionMenu = ({ view, setView }) => {
                             });
 
                             if (result.success) {
-                                setStatus({ type: 'success', message: `${result.message} - ${result.person_name} (${result.role})` });
+                                showSuccess(`${result.message} - ${result.person_name} (${result.role})`);
                             } else {
-                                setStatus({ type: 'error', message: result.message });
+                                showError(result.message);
                             }
                         } catch (error) {
                             console.error(error);
-                            setStatus({ type: 'error', message: "System Error. Failed to process ID." });
+                            showError("System Error. Failed to process ID.");
                         }
                     }}
                 />
             )}
 
-            {/* Success Visitor Modal */}
-            {successVisitor && (
-                <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-md">
-                    <div className="bg-emerald-950/80 backdrop-blur-2xl border border-emerald-500/30 rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 fade-in duration-200">
-                        <div className="p-8 text-center flex flex-col items-center">
-                            <div className="w-20 h-20 bg-emerald-500/20 rounded-full flex items-center justify-center border-4 border-emerald-500/30 mb-6">
-                                <CheckCircle2 className="w-10 h-10 text-emerald-400" />
-                            </div>
-                            <h2 className="text-3xl font-bold text-white tracking-wide mb-2">Registration Successful!</h2>
-                            <p className="text-emerald-100/70 mb-6">Temporary Visitor Registration Complete</p>
-                            
-                            <div className="flex gap-6 items-stretch w-full justify-center mb-8">
-                                <div className="bg-white p-4 rounded-xl shadow-[0_0_20px_rgba(255,255,255,0.2)] flex items-center justify-center shrink-0">
-                                    <QRCodeSVG value={successVisitor.id} size={150} />
-                                </div>
-                                <div className="bg-black/50 border border-emerald-500/30 p-6 rounded-2xl flex-1 relative overflow-hidden flex flex-col justify-center text-left">
-                                    <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 to-transparent"></div>
-                                    <p className="text-emerald-200/60 text-sm font-semibold uppercase tracking-wider mb-2">Temporary Visitor ID</p>
-                                    <p className="text-4xl sm:text-5xl font-mono font-bold text-white tracking-widest relative z-10">{successVisitor.id}</p>
-                                    <p className="text-white/80 mt-4 text-xl relative z-10">{successVisitor.name}</p>
-                                </div>
-                            </div>
-                            
-                            <div className="w-full text-center space-y-3 mb-8">
-                                {successVisitor.email && (
-                                    <p className="text-emerald-200/90 font-medium text-lg border-b border-emerald-500/20 pb-4">
-                                        A digital copy of this pass has been sent to <span className="text-white font-bold">{successVisitor.email}</span>. You can also take a picture.
-                                    </p>
-                                )}
-                                <p className="text-emerald-200/80 font-medium italic pt-2">
-                                    Please use this ID for logging your Departure (Exit) later.
-                                </p>
-                            </div>
-                            
-                            <button
-                                onClick={() => setSuccessVisitor(null)}
-                                className="w-full px-6 py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-bold rounded-xl transition-all shadow-[0_0_20px_rgba(16,185,129,0.2)] hover:shadow-[0_0_30px_rgba(16,185,129,0.4)] focus:outline-none focus:ring-4 focus:ring-emerald-500/30 text-lg"
-                            >
-                                Done
-                            </button>
-                        </div>
-                    </div>
-                </div>
+            {/* Print Visitor Pass Modal */}
+            {showPrintModal && printPassData && (
+                <VisitorPassPrinter
+                    visitorData={printPassData}
+                    onClose={() => {
+                        setShowPrintModal(false);
+                        setPrintPassData(null);
+                    }}
+                />
             )}
+
         </div>
     );
 };

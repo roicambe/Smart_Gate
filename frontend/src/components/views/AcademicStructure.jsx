@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Building, Plus, Search, Edit2, Trash2, X, AlertCircle, CheckCircle2, Check, AlertTriangle, BookOpen, Filter } from 'lucide-react';
+import { Building, Plus, Search, Edit2, Trash2, X, Check, AlertTriangle, BookOpen, Filter } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { useToast } from '../toast/ToastProvider';
 
-export const AcademicStructure = () => {
+export const AcademicStructure = ({ branding, adminSession }) => {
     const [activeTab, setActiveTab] = useState('department'); // 'department', 'program'
     const [searchQuery, setSearchQuery] = useState('');
     const [departmentFilter, setDepartmentFilter] = useState(''); // '' = All Departments
@@ -16,6 +17,7 @@ export const AcademicStructure = () => {
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [selectedItem, setSelectedItem] = useState(null);
     const [status, setStatus] = useState(null);
+    const { showSuccess, showError } = useToast();
 
     // Form State
     const [formData, setFormData] = useState({
@@ -51,6 +53,19 @@ export const AcademicStructure = () => {
         fetchData();
     }, [activeTab]);
 
+    useEffect(() => {
+        if (!status) {
+            return;
+        }
+
+        if (status.type === 'success') {
+            showSuccess(status.message);
+        } else {
+            showError(status.message);
+        }
+        setStatus(null);
+    }, [status, showSuccess, showError]);
+
     const handleRegisterSubmit = async (e) => {
         e.preventDefault();
         try {
@@ -60,7 +75,8 @@ export const AcademicStructure = () => {
                         department_id: 0,
                         department_name: formData.department_name,
                         department_code: formData.department_code
-                    }
+                    },
+                    activeAdminId: adminSession?.account_id
                 });
                 setStatus({ type: 'success', message: 'Department added successfully!' });
             } else {
@@ -70,7 +86,8 @@ export const AcademicStructure = () => {
                         department_id: parseInt(formData.department_id),
                         program_name: formData.program_name,
                         program_code: formData.program_code
-                    }
+                    },
+                    activeAdminId: adminSession?.account_id
                 });
                 setStatus({ type: 'success', message: 'Program added successfully!' });
             }
@@ -109,7 +126,8 @@ export const AcademicStructure = () => {
                 await invoke('update_department', {
                     departmentId: selectedItem.department_id,
                     departmentName: formData.department_name,
-                    departmentCode: formData.department_code
+                    departmentCode: formData.department_code,
+                    activeAdminId: adminSession?.account_id
                 });
                 setStatus({ type: 'success', message: 'Department updated successfully!' });
             } else {
@@ -117,7 +135,8 @@ export const AcademicStructure = () => {
                     programId: selectedItem.program_id,
                     departmentId: parseInt(formData.department_id),
                     programName: formData.program_name,
-                    programCode: formData.program_code
+                    programCode: formData.program_code,
+                    activeAdminId: adminSession?.account_id
                 });
                 setStatus({ type: 'success', message: 'Program updated successfully!' });
             }
@@ -137,9 +156,9 @@ export const AcademicStructure = () => {
     const confirmDelete = async () => {
         try {
             if (activeTab === 'department') {
-                await invoke('delete_department', { departmentId: selectedItem.department_id });
+                await invoke('delete_department', { departmentId: selectedItem.department_id, activeAdminId: adminSession?.account_id });
             } else {
-                await invoke('delete_program', { programId: selectedItem.program_id });
+                await invoke('delete_program', { programId: selectedItem.program_id, activeAdminId: adminSession?.account_id });
             }
             setStatus({ type: 'success', message: `${activeTab} deleted successfully!` });
             setShowDeleteModal(false);
@@ -172,19 +191,6 @@ export const AcademicStructure = () => {
 
     return (
         <div className="w-full h-full min-h-0 space-y-6 animate-in slide-in-from-bottom-4 duration-500 relative flex flex-col">
-            {/* Status Toast */}
-            {status && (
-                <div className="absolute top-0 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-md px-4">
-                    <div className={`p-4 rounded-xl flex items-center justify-between gap-4 shadow-lg border ${status.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'}`}>
-                        <div className="flex items-center gap-3">
-                            {status.type === 'success' ? <CheckCircle2 className="w-5 h-5 text-emerald-600" /> : <AlertCircle className="w-5 h-5 text-rose-600" />}
-                            <span className="font-medium text-sm">{status.message}</span>
-                        </div>
-                        <button onClick={() => setStatus(null)}><X className="w-5 h-5 hover:text-slate-500" /></button>
-                    </div>
-                </div>
-            )}
-
             <div className="flex justify-between items-center">
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900 mb-2">Academic Structure</h1>
@@ -225,8 +231,8 @@ export const AcademicStructure = () => {
                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/50 font-medium appearance-none cursor-pointer"
                             >
                                 <option value="">All Departments</option>
-                                {departments.map(d => (
-                                    <option key={d.department_id} value={d.department_id}>
+                                {departments.map((d, idx) => (
+                                    <option key={`${d.department_id || 'dept'}-${idx}`} value={d.department_id}>
                                         {d.department_code} - {d.department_name}
                                     </option>
                                 ))}
@@ -273,7 +279,7 @@ export const AcademicStructure = () => {
                                     </td>
                                 </tr>
                             ) : (
-                                filteredData.map((item) => {
+                                filteredData.map((item, index) => {
                                     const itemId = activeTab === 'department' ? item.department_id : item.program_id;
                                     const code = activeTab === 'department' ? item.department_code : item.program_code;
                                     const name = activeTab === 'department' ? item.department_name : item.program_name;
@@ -284,7 +290,7 @@ export const AcademicStructure = () => {
                                     }
 
                                     return (
-                                        <tr key={`${activeTab}-${itemId}`} className="hover:bg-slate-50 even:bg-slate-50/50 transition-colors group">
+                                        <tr key={`${activeTab}-${itemId || 'missing'}-${index}`} className="hover:bg-slate-50 even:bg-slate-50/50 transition-colors group">
                                             <td className="px-6 py-4 font-mono font-medium text-slate-900">{code}</td>
                                             <td className="px-6 py-4 font-medium text-slate-900">{name}</td>
                                             {activeTab === 'program' && <td className="px-6 py-4 text-slate-600">{deptName}</td>}
@@ -348,8 +354,8 @@ export const AcademicStructure = () => {
                                             className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none appearance-none"
                                         >
                                             <option value="" disabled>Select a Department</option>
-                                            {departments.map(d => (
-                                                <option key={d.department_id} value={d.department_id} className="bg-slate-900">{d.department_code} - {d.department_name}</option>
+                                            {departments.map((d, idx) => (
+                                                <option key={`${d.department_id || 'dept'}-${idx}`} value={d.department_id} className="bg-slate-900">{d.department_code} - {d.department_name}</option>
                                             ))}
                                         </select>
                                     </div>

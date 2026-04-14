@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Plus, Search, Edit2, Trash2, X, AlertCircle, CheckCircle2, Check, AlertTriangle } from 'lucide-react';
+import { Calendar, Plus, Search, Edit2, Trash2, X, Check, AlertTriangle } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { useToast } from '../toast/ToastProvider';
 
-export const EventManagement = () => {
+export const EventManagement = ({ branding, adminSession }) => {
     const [events, setEvents] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [isLoading, setIsLoading] = useState(true);
@@ -11,7 +12,7 @@ export const EventManagement = () => {
     const [showEditModal, setShowEditModal] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [selectedEvent, setSelectedEvent] = useState(null);
-    const [status, setStatus] = useState(null);
+    const { showSuccess, showError } = useToast();
 
     const [formData, setFormData] = useState({
         event_name: '',
@@ -32,7 +33,7 @@ export const EventManagement = () => {
             setEvents(data);
         } catch (error) {
             console.error(error);
-            setStatus({ type: 'error', message: 'Failed to fetch events.' });
+            showError('Failed to fetch events.');
         } finally {
             setIsLoading(false);
         }
@@ -49,15 +50,16 @@ export const EventManagement = () => {
                 event: {
                     event_id: 0,
                     ...formData
-                }
+                },
+                activeAdminId: adminSession?.account_id
             });
-            setStatus({ type: 'success', message: 'Event added successfully!' });
+            showSuccess('Event Created: Event added successfully!');
             setShowRegisterModal(false);
             setFormData({ event_name: '', schedule_type: 'weekly', event_date: '', start_date: '', end_date: '', start_time: '', end_time: '', required_role: 'all', is_enabled: true });
             fetchEvents();
         } catch (error) {
             console.error(error);
-            setStatus({ type: 'error', message: typeof error === 'string' ? error : 'Failed to add event.' });
+            showError(typeof error === 'string' ? error : 'Failed to add event.');
         }
     };
 
@@ -85,14 +87,15 @@ export const EventManagement = () => {
                 event: {
                     event_id: selectedEvent.event_id,
                     ...formData
-                }
+                },
+                activeAdminId: adminSession?.account_id
             });
-            setStatus({ type: 'success', message: 'Event updated successfully!' });
+            showSuccess('Settings Updated: Event updated successfully!');
             setShowEditModal(false);
             fetchEvents();
         } catch (error) {
             console.error(error);
-            setStatus({ type: 'error', message: typeof error === 'string' ? error : 'Failed to update event.' });
+            showError(typeof error === 'string' ? error : 'Failed to update event.');
         }
     };
 
@@ -103,19 +106,18 @@ export const EventManagement = () => {
 
     const confirmDelete = async () => {
         try {
-            await invoke('delete_event', { eventId: selectedEvent.event_id });
-            setStatus({ type: 'success', message: 'Event deleted successfully!' });
+            await invoke('delete_event', { eventId: selectedEvent.event_id, activeAdminId: adminSession?.account_id });
+            showSuccess('Event deleted successfully!');
             setShowDeleteModal(false);
             fetchEvents();
         } catch (error) {
             console.error(error);
-            setStatus({ type: 'error', message: typeof error === 'string' ? error : 'Failed to delete event.' });
+            showError(typeof error === 'string' ? error : 'Failed to delete event.');
         }
     };
 
     const handleRegisterClick = () => {
         setFormData({ event_name: '', schedule_type: 'weekly', event_date: '', start_date: '', end_date: '', start_time: '', end_time: '', required_role: 'all', is_enabled: true });
-        setStatus(null);
         setShowRegisterModal(true);
     };
 
@@ -125,18 +127,6 @@ export const EventManagement = () => {
 
     return (
         <div className="w-full h-full min-h-0 space-y-6 animate-in slide-in-from-bottom-4 duration-500 relative flex flex-col">
-            {status && (
-                <div className="absolute top-0 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-md px-4">
-                    <div className={`p-4 rounded-xl flex items-center justify-between gap-4 shadow-lg border ${status.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'}`}>
-                        <div className="flex items-center gap-3">
-                            {status.type === 'success' ? <CheckCircle2 className="w-5 h-5 text-emerald-600" /> : <AlertCircle className="w-5 h-5 text-rose-600" />}
-                            <span className="font-medium text-sm">{status.message}</span>
-                        </div>
-                        <button onClick={() => setStatus(null)}><X className="w-5 h-5 hover:text-slate-500" /></button>
-                    </div>
-                </div>
-            )}
-
             <div className="flex justify-between items-center">
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900 mb-2">Event Management</h1>

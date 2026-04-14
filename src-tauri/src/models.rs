@@ -127,6 +127,7 @@ pub struct VisitorDetails {
     pub purpose_of_visit: String,
     pub person_to_visit: String,
     pub contact_number: Option<String>,
+    pub created_at: Option<String>,
     pub time_in: Option<String>,
     pub time_out: Option<String>,
 }
@@ -154,12 +155,23 @@ pub struct AdminAccount {
     pub account_id: i64,
     pub username: String,
     pub full_name: String,
+    pub email: Option<String>,
     pub role: String,
+    pub is_first_login: bool,
     pub created_at: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AdminLoginResponse {
+    pub success: bool,
+    pub message: String,
+    pub requires_activation: bool,
+    pub masked_email: Option<String>,
+    pub account: Option<AdminAccount>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AdminActivationResponse {
     pub success: bool,
     pub message: String,
     pub account: Option<AdminAccount>,
@@ -205,7 +217,9 @@ pub struct AccessLogDetails {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct AuditLogDetails {
     pub audit_id: i64,
+    pub admin_id: i64,
     pub admin_username: String,
+    pub admin_full_name: String,
     pub action_type: String,
     pub target_table: String,
     pub target_id: Option<i64>,
@@ -219,3 +233,12 @@ pub struct SystemBranding {
     pub system_name: String,
     pub system_logo: String,
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BulkImportResult {
+    pub success_count: i64,
+    pub failed_count: i64,
+    pub imported_ids: Vec<String>,
+    pub error_logs: Vec<String>,
+}
+

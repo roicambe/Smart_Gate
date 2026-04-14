@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
-    Search, Filter, RefreshCw, Calendar, ArrowUpRight, ArrowDownLeft, Download, FileText, FileSpreadsheet, AlertTriangle, CheckCircle, XCircle, Loader2, ChevronLeft, ChevronRight
+    Search, Filter, RefreshCw, Calendar, ArrowUpRight, ArrowDownLeft, Download, FileText, FileSpreadsheet, Loader2, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
@@ -9,8 +9,9 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import logoUrl from '../../../imgs/plp-logo.png';
+import { useToast } from '../toast/ToastProvider';
 
-export const AccessLogs = ({ branding }) => {
+export const AccessLogs = ({ branding, adminSession }) => {
     const [activeTab, setActiveTab] = useState('gateLogs'); // 'gateLogs' | 'eventLogs'
     
     // Gate Logs state
@@ -22,11 +23,12 @@ export const AccessLogs = ({ branding }) => {
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [roleFilter, setRoleFilter] = useState('All');
+    const [actionFilter, setActionFilter] = useState('All');
+    const [locationFilter, setLocationFilter] = useState('All');
 
     // Date Filtering State
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
-    const [dateError, setDateError] = useState('');
 
     // Pagination
     const ITEMS_PER_PAGE = 15;
@@ -35,17 +37,8 @@ export const AccessLogs = ({ branding }) => {
     // Export State & UX
     const [showExportMenu, setShowExportMenu] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
-    const [toastMessage, setToastMessage] = useState(null);
-    const [toastType, setToastType] = useState('success'); // 'success' or 'error'
     const exportMenuRef = useRef(null);
-
-    // Auto-hide toast after 3 seconds
-    useEffect(() => {
-        if (toastMessage) {
-            const timer = setTimeout(() => setToastMessage(null), 3000);
-            return () => clearTimeout(timer);
-        }
-    }, [toastMessage]);
+    const { showSuccess, showError, showWarning, showProcessing } = useToast();
 
     // Close export menu when clicking outside
     useEffect(() => {
@@ -61,14 +54,20 @@ export const AccessLogs = ({ branding }) => {
     // Fetch logs from backend based on active tab
     const fetchLogs = async () => {
         if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
-            setDateError('Invalid Date Range: End Date must be after Start Date.');
+            showWarning('Invalid Date Range: End Date must be after Start Date.');
             return;
         }
-        setDateError('');
         setLoading(true);
         try {
             if (activeTab === 'gateLogs') {
-                const data = await invoke('get_access_logs', { startDate: startDate || null, endDate: endDate || null });
+                const data = await invoke('get_access_logs', { 
+                    roleFilter: roleFilter === 'All' ? null : roleFilter.toLowerCase(), 
+                    actionType: actionFilter === 'All' ? null : actionFilter.toLowerCase(), 
+                    locationName: locationFilter === 'All' ? null : locationFilter,
+                    searchTerm: searchTerm.trim() === '' ? null : searchTerm.trim(),
+                    startDate: startDate || null, 
+                    endDate: endDate || null 
+                });
                 setLogs(data);
             } else {
                 const data = await invoke('get_event_attendance_logs', { startDate: startDate || null, endDate: endDate || null });
@@ -81,6 +80,33 @@ export const AccessLogs = ({ branding }) => {
         }
     };
 
+    const clearFilters = async () => {
+        setSearchTerm('');
+        setRoleFilter('All');
+        setActionFilter('All');
+        setLocationFilter('All');
+        setStartDate('');
+        setEndDate('');
+
+        setLoading(true);
+        try {
+            if (activeTab === 'gateLogs') {
+                const data = await invoke('get_access_logs', { 
+                    roleFilter: null, actionType: null, locationName: null, searchTerm: null, startDate: null, endDate: null 
+                });
+                setLogs(data);
+            } else {
+                const data = await invoke('get_event_attendance_logs', { startDate: null, endDate: null });
+                setEventLogs(data);
+            }
+        } catch (error) {
+             console.error("Failed to clear filters:", error);
+             showError("Failed to clear filters.");
+        } finally {
+             setLoading(false);
+        }
+    };
+
     useEffect(() => {
         fetchLogs();
     }, [activeTab]);
@@ -88,17 +114,18 @@ export const AccessLogs = ({ branding }) => {
     // Filter logic based on active tab
     const currentData = activeTab === 'gateLogs' ? logs : eventLogs;
     
-    const filteredLogs = currentData.filter(log => {
+    // Gate logs are already filtered on backend. Event logs still rely on simple frontend filters for now.
+    const filteredLogs = activeTab === 'gateLogs' ? currentData : currentData.filter(log => {
         const matchesSearch = log.person_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             log.id_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            (activeTab === 'eventLogs' && log.event_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            log.event_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             log.role.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesRole = roleFilter === 'All' || log.role.toLowerCase() === roleFilter.toLowerCase();
         return matchesSearch && matchesRole;
     });
 
     // Pagination - reset to page 1 when filters change
-    useEffect(() => { setCurrentPage(1); }, [searchTerm, roleFilter, startDate, endDate, activeTab]);
+    useEffect(() => { setCurrentPage(1); }, [searchTerm, roleFilter, actionFilter, locationFilter, startDate, endDate, activeTab]);
     const totalPages = Math.ceil(filteredLogs.length / ITEMS_PER_PAGE);
     const paginatedLogs = useMemo(() => {
         const start = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -116,6 +143,7 @@ export const AccessLogs = ({ branding }) => {
         if (filteredLogs.length === 0) return;
         setIsExporting(true);
         setShowExportMenu(false);
+        showProcessing("Preparing Excel export...");
 
         try {
             const exportData = filteredLogs.map(log => {
@@ -154,9 +182,7 @@ export const AccessLogs = ({ branding }) => {
             });
 
             if (!filePath) {
-                // User cancelled the dialog
-                setToastType('error');
-                setToastMessage("Export cancelled.");
+                showWarning("Export cancelled.");
                 return;
             }
 
@@ -164,12 +190,19 @@ export const AccessLogs = ({ branding }) => {
             const excelBuffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
             await writeFile(filePath, new Uint8Array(excelBuffer));
 
-            setToastType('success');
-            setToastMessage(`Success: Report saved to ${filePath}`);
+            await invoke('log_frontend_action', {
+                adminId: adminSession?.account_id,
+                actionType: 'EXPORT',
+                targetTable: activeTab === 'gateLogs' ? 'entry_logs' : 'event_attendance',
+                targetId: null,
+                oldValues: null,
+                newValues: JSON.stringify({ format: 'Excel', filename, record_count: filteredLogs.length })
+            }).catch(e => console.error("Audit log failed for export", e));
+
+            showSuccess(`Success: Report saved to ${filePath}`);
         } catch (error) {
             console.error("Excel export failed", error);
-            setToastType('error');
-            setToastMessage("An error occurred during export.");
+            showError("An error occurred during export.");
         } finally {
             setIsExporting(false);
         }
@@ -179,6 +212,7 @@ export const AccessLogs = ({ branding }) => {
         if (filteredLogs.length === 0) return;
         setIsExporting(true);
         setShowExportMenu(false);
+        showProcessing("Preparing PDF export...");
 
         try {
             const doc = new jsPDF();
@@ -308,20 +342,26 @@ export const AccessLogs = ({ branding }) => {
             });
 
             if (!filePath) {
-                setToastType('error');
-                setToastMessage("Export cancelled.");
+                showWarning("Export cancelled.");
                 return;
             }
 
             // Write File via Tauri
             await writeFile(filePath, new Uint8Array(pdfBuffer));
 
-            setToastType('success');
-            setToastMessage(`Success: Report saved to ${filePath}`);
+            await invoke('log_frontend_action', {
+                adminId: adminSession?.account_id,
+                actionType: 'EXPORT',
+                targetTable: activeTab === 'gateLogs' ? 'entry_logs' : 'event_attendance',
+                targetId: null,
+                oldValues: null,
+                newValues: JSON.stringify({ format: 'PDF', filename, record_count: filteredLogs.length })
+            }).catch(e => console.error("Audit log failed for PDF export", e));
+
+            showSuccess(`Success: Report saved to ${filePath}`);
         } catch (error) {
             console.error("PDF export failed", error);
-            setToastType('error');
-            setToastMessage("An error occurred during export.");
+            showError("An error occurred during export.");
         } finally {
             setIsExporting(false);
         }
@@ -329,36 +369,6 @@ export const AccessLogs = ({ branding }) => {
 
     return (
         <div className="flex flex-col h-full min-h-0 gap-6 relative">
-
-            {/* Loading Overlay */}
-            {isExporting && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white p-6 rounded-2xl shadow-xl flex flex-col items-center gap-4 max-w-sm w-full mx-4">
-                        <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
-                        <div className="text-center">
-                            <h3 className="text-lg font-bold text-slate-900">Preparing Document</h3>
-                            <p className="text-sm text-slate-500 mt-1">Please wait while we generate your report...</p>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Toast Notification */}
-            {toastMessage && (
-                <div className="absolute top-0 right-4 z-50 animate-in fade-in slide-in-from-top-4 duration-300">
-                    <div className={`px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 border ${toastType === 'success'
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                        : 'bg-rose-50 border-rose-200 text-rose-700'
-                        }`}>
-                        {toastType === 'success' ? (
-                            <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0" />
-                        ) : (
-                            <XCircle className="w-5 h-5 text-rose-500 shrink-0" />
-                        )}
-                        <p className="text-sm font-medium">{toastMessage}</p>
-                    </div>
-                </div>
-            )}
 
             {/* Header Title Section */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
@@ -370,96 +380,13 @@ export const AccessLogs = ({ branding }) => {
                         {activeTab === 'gateLogs' ? 'Real-time entry and exit monitoring.' : 'Tracking attendance for events and ceremonies.'}
                     </p>
                 </div>
-                <button
-                    onClick={fetchLogs}
-                    className="p-2 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-50 shadow-sm transition-all"
-                    title="Refresh Logs"
-                >
-                    <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
-                </button>
-            </div>
-
-            {/* Error Message */}
-            {dateError && (
-                <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-4 rounded-md flex items-center gap-3">
-                    <AlertTriangle className="w-5 h-5 text-red-500" />
-                    <p className="text-red-700 text-sm font-medium">{dateError}</p>
-                </div>
-            )}
-
-            {/* Enterprise Control Bar */}
-            <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col lg:flex-row items-center justify-between gap-4 mb-6">
-                
-                {/* Left Section (Navigation) */}
-                <div className="flex p-1 bg-slate-100 rounded-xl space-x-1 w-full lg:w-auto overflow-x-auto shrink-0">
-                    <button
-                        onClick={() => setActiveTab('gateLogs')}
-                        className={`flex-1 lg:flex-none px-6 py-2 rounded-lg font-semibold text-sm transition-all whitespace-nowrap focus:outline-none ${activeTab === 'gateLogs' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}
-                    >
-                        General Gate Logs
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('eventLogs')}
-                        className={`flex-1 lg:flex-none px-6 py-2 rounded-lg font-semibold text-sm transition-all whitespace-nowrap focus:outline-none ${activeTab === 'eventLogs' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}
-                    >
-                        Event Attendance
-                    </button>
-                </div>
-
-                {/* Right Section (Filters & Export) */}
-                <div className="flex flex-col sm:flex-row items-center gap-3 w-full lg:w-auto flex-wrap lg:justify-end">
-                    
-                    {/* Search Input */}
-                    <div className="relative w-full sm:w-56 shrink-0">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <Search className="h-4 w-4 text-slate-400" />
-                        </div>
-                        <input
-                            type="text"
-                            className="block w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-slate-500 sm:text-sm transition-all"
-                            placeholder={activeTab === 'gateLogs' ? "Search Name or ID..." : "Search Event or Name..."}
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
-                    </div>
-
-                    {/* Date Filters */}
-                    <div className="flex items-center gap-2 border border-slate-200 rounded-lg p-1 bg-slate-50 w-full sm:w-auto shrink-0 flex-wrap sm:flex-nowrap justify-center">
-                        <div className="flex items-center gap-2 px-2">
-                            <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
-                            <input
-                                type="date"
-                                value={startDate}
-                                onChange={(e) => setStartDate(e.target.value)}
-                                className="bg-transparent text-slate-900 focus:outline-none sm:text-sm font-medium w-[110px]"
-                            />
-                        </div>
-                        <span className="text-slate-300">|</span>
-                        <div className="flex items-center gap-2 px-2">
-                            <input
-                                type="date"
-                                value={endDate}
-                                onChange={(e) => setEndDate(e.target.value)}
-                                className="bg-transparent text-slate-900 focus:outline-none sm:text-sm font-medium w-[110px]"
-                            />
-                        </div>
-                        <button
-                            onClick={fetchLogs}
-                            className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded-md text-xs font-semibold uppercase tracking-wider transition-colors ml-1 focus:outline-none focus:ring-2 focus:ring-slate-400"
-                        >
-                            Apply
-                        </button>
-                    </div>
-
+                <div className="flex items-center gap-3">
                     {/* Export Dropdown */}
-                    <div className="relative w-full sm:w-auto shrink-0" ref={exportMenuRef}>
+                    <div className="relative shrink-0" ref={exportMenuRef}>
                         <button
                             onClick={() => setShowExportMenu(!showExportMenu)}
                             disabled={isExporting}
-                            className={`flex items-center justify-center gap-2 px-4 py-2 w-full sm:w-auto rounded-lg border transition-all focus:outline-none ${isExporting
-                                ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
-                                : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900 shadow-sm'
-                                }`}
+                            className={`flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors focus:outline-none shadow-sm ${isExporting ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                             {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                             <span className="font-semibold text-sm">
@@ -486,8 +413,132 @@ export const AccessLogs = ({ branding }) => {
                             </div>
                         )}
                     </div>
+
+                    <button
+                        onClick={fetchLogs}
+                        className="p-2 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-50 shadow-sm transition-all"
+                        title="Refresh Logs"
+                    >
+                        <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+                    </button>
                 </div>
             </div>
+
+            {/* Filter Bar (Action Bar) Cleanup */}
+            <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col lg:flex-row items-center justify-between gap-4">
+                
+                {/* Sub-Tab Navigation inside Filter Bar */}
+                <div className="flex gap-2 p-1 bg-slate-100 rounded-xl w-full lg:w-auto overflow-x-auto shrink-0">
+                    <button
+                        onClick={() => setActiveTab('gateLogs')}
+                        className={`px-6 py-2.5 rounded-lg font-medium transition-all duration-300 whitespace-nowrap focus:outline-none ${activeTab === 'gateLogs' ? 'bg-white text-slate-900 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/50'}`}
+                    >
+                        General Gate Logs
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('eventLogs')}
+                        className={`px-6 py-2.5 rounded-lg font-medium transition-all duration-300 whitespace-nowrap focus:outline-none ${activeTab === 'eventLogs' ? 'bg-white text-slate-900 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/50'}`}
+                    >
+                        Event Attendance
+                    </button>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto flex-wrap lg:justify-end">
+                    
+                    {/* Search Input */}
+                    <div className="relative w-full sm:w-56 shrink-0">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Search className="h-4 w-4 text-slate-400" />
+                        </div>
+                        <input
+                            type="text"
+                            className="block w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-slate-500 sm:text-sm transition-all"
+                            placeholder={activeTab === 'gateLogs' ? "Search Name or ID..." : "Search Event or Name..."}
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+
+                    {/* Role Filter */}
+                    <select
+                        value={roleFilter}
+                        onChange={(e) => setRoleFilter(e.target.value)}
+                        className="bg-slate-50 border border-slate-200 text-slate-700 sm:text-sm rounded-lg focus:ring-slate-500 focus:border-slate-500 block w-full sm:w-auto p-2 outline-none"
+                    >
+                        <option value="All">All Roles</option>
+                        <option value="student">Student</option>
+                        <option value="professor">Professor</option>
+                        <option value="staff">Staff</option>
+                        <option value="visitor">Visitor</option>
+                    </select>
+
+                    {/* Action Filter (Only for Gate Logs) */}
+                    {activeTab === 'gateLogs' && (
+                        <select
+                            value={actionFilter}
+                            onChange={(e) => setActionFilter(e.target.value)}
+                            className="bg-slate-50 border border-slate-200 text-slate-700 sm:text-sm rounded-lg focus:ring-slate-500 focus:border-slate-500 block w-full sm:w-auto p-2 outline-none"
+                        >
+                            <option value="All">All Actions</option>
+                            <option value="entrance">Entry</option>
+                            <option value="exit">Exit</option>
+                        </select>
+                    )}
+
+                    {/* Location Filter (Only for Gate Logs) */}
+                    {activeTab === 'gateLogs' && (
+                        <select
+                            value={locationFilter}
+                            onChange={(e) => setLocationFilter(e.target.value)}
+                            className="bg-slate-50 border border-slate-200 text-slate-700 sm:text-sm rounded-lg focus:ring-slate-500 focus:border-slate-500 block w-full sm:w-auto p-2 outline-none"
+                        >
+                            <option value="All">All Locations</option>
+                            <option value="Main Entrance">Main Entrance</option>
+                            <option value="Main Exit">Main Exit</option>
+                        </select>
+                    )}
+
+                    {/* Date Filters */}
+                    <div className="flex items-center gap-2 border border-slate-200 rounded-lg p-1 bg-slate-50 w-full xl:w-auto shrink-0 flex-wrap xl:flex-nowrap justify-center">
+                        <div className="flex items-center gap-2 px-2">
+                            <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
+                            <input
+                                type="date"
+                                value={startDate}
+                                onChange={(e) => setStartDate(e.target.value)}
+                                className="bg-transparent text-slate-900 focus:outline-none sm:text-sm font-medium w-[110px]"
+                            />
+                        </div>
+                        <span className="text-slate-300">|</span>
+                        <div className="flex items-center gap-2 px-2">
+                            <input
+                                type="date"
+                                value={endDate}
+                                onChange={(e) => setEndDate(e.target.value)}
+                                className="bg-transparent text-slate-900 focus:outline-none sm:text-sm font-medium w-[110px]"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Apply & Clear buttons */}
+                    <div className="flex gap-2 w-full sm:w-auto pt-1 sm:pt-0 shrink-0">
+                        <button
+                            onClick={fetchLogs}
+                            className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors focus:outline-none shadow-sm"
+                        >
+                            APPLY
+                        </button>
+                        <button
+                            onClick={clearFilters}
+                            className="flex-1 sm:flex-none bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-semibold transition-colors focus:outline-none shadow-sm"
+                        >
+                            CLEAR
+                        </button>
+                    </div>
+
+                    </div>
+                </div>
+
 
             {/* Solid Table View - scroll container with sticky headers */}
             <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 shadow-sm rounded-xl relative">

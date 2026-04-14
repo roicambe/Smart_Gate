@@ -1,14 +1,311 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { FileText, Search, RefreshCw, Filter, Calendar, Download, FileSpreadsheet, AlertTriangle, CheckCircle, XCircle, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { FileText, Search, RefreshCw, Filter, Calendar, Download, FileSpreadsheet, Loader2, ChevronLeft, ChevronRight, Eye, X } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import logoUrl from '../../../imgs/plp-logo.png';
+import { useToast } from '../toast/ToastProvider';
 
-export const AuditTrail = ({ branding }) => {
+// ─── Human-Readable Translator (Dual-Layer) ──────────────────────────────────
+// Layer 1: getShortSummary() — concise 3-4 word label for the table column.
+// Layer 2: translateAuditLog() — full descriptive sentence for the modal view.
+
+const FRIENDLY_TABLE_NAMES = {
+    accounts: 'Administrator Account',
+    persons: 'User Profile',
+    students: 'Student Record',
+    employees: 'Employee Record',
+    visitors: 'Visitor Record',
+    events: 'Event',
+    settings: 'System Setting',
+    departments: 'Department',
+    programs: 'Program',
+    scanners: 'Scanner',
+};
+
+const FRIENDLY_FIELD_NAMES = {
+    system_name: 'System Name',
+    system_logo: 'System Logo',
+    full_name: 'Full Name',
+    first_name: 'First Name',
+    last_name: 'Last Name',
+    middle_name: 'Middle Name',
+    id_number: 'ID Number',
+    email: 'Email',
+    contact_number: 'Contact Number',
+    role: 'Role',
+    username: 'Username',
+    password_hash: 'Password',
+    is_active: 'Active Status',
+    is_first_login: 'First Login Status',
+    program_id: 'Program',
+    department_id: 'Department',
+    year_level: 'Year Level',
+    position_title: 'Position Title',
+    purpose_of_visit: 'Purpose of Visit',
+    person_to_visit: 'Person to Visit',
+    event_name: 'Event Name',
+    event_date: 'Event Date',
+    start_time: 'Start Time',
+    end_time: 'End Time',
+    required_role: 'Required Role',
+    is_enabled: 'Enabled Status',
+    location_name: 'Location Name',
+    function: 'Function',
+    setting_key: 'Setting Key',
+    setting_value: 'Setting Value',
+    activation_otp: 'Activation OTP',
+    activation_otp_expires_at: 'OTP Expiration',
+};
+
+const getFriendlyFieldName = (key) => FRIENDLY_FIELD_NAMES[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+const getFriendlyTableName = (table) => FRIENDLY_TABLE_NAMES[table] || table.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+const formatFieldValue = (key, value) => {
+    if (value === null || value === undefined || value === '') return '(empty)';
+    if (key === 'password_hash') return '••••••••';
+    if (key === 'is_active' || key === 'is_first_login' || key === 'is_enabled') return value ? 'Yes' : 'No';
+    if (key === 'system_logo') return value ? '(image data)' : '(empty)';
+    return String(value);
+};
+
+const safeParseJSON = (val) => {
+    if (!val) return null;
+    if (typeof val === 'object') return val;
+    try { return JSON.parse(val); } catch { return null; }
+};
+
+const isValueDifferent = (o, n) => {
+    let oVal = o;
+    let nVal = n;
+    if (typeof oVal === 'boolean') oVal = oVal ? 1 : 0;
+    if (typeof nVal === 'boolean') nVal = nVal ? 1 : 0;
+    if (oVal == null) oVal = '';
+    if (nVal == null) nVal = '';
+    return String(oVal) !== String(nVal);
+};
+
+const FIELD_ORDER_WEIGHTS = {
+    'Role': 1,
+    'ID Number': 2,
+    'Last Name': 3,
+    'First Name': 4,
+    'Middle Name': 5,
+    'Email': 6,
+    'Contact Number': 7
+};
+
+// ─── Layer 1: Short Summary (Table Column) ───────────────────────────────────
+// Returns a concise 3-4 word label for the main table's "Details" column.
+const getShortSummary = (log) => {
+    const oldObj = safeParseJSON(log.old_values);
+    const newObj = safeParseJSON(log.new_values);
+
+    if (newObj && typeof newObj.summary === 'string' && newObj.summary.trim()) {
+        return newObj.summary;
+    }
+
+    const getIdNumber = () => (newObj && newObj.id_number) || (oldObj && oldObj.id_number) || 'User';
+    const getUsername = () => (newObj && newObj.username) || (oldObj && oldObj.username) || 'Account';
+    const getEventName = () => (newObj && newObj.event_name) || (oldObj && oldObj.event_name) || 'Event';
+    const getOriginalEventName = () => (oldObj && oldObj.event_name) || (newObj && newObj.event_name) || 'Event';
+
+    if (log.action_type === 'INSERT') {
+        if (['persons', 'students', 'employees', 'visitors'].includes(log.target_table)) {
+            return `Registered user: ${getIdNumber()}`;
+        }
+        if (log.target_table === 'accounts') return `Registered account: ${getUsername()}`;
+        if (log.target_table === 'events') return `Created event: ${getEventName()}`;
+    }
+
+    if (log.action_type === 'DELETE') {
+        if (['persons', 'students', 'employees', 'visitors'].includes(log.target_table)) {
+            return `Removed user: ${getIdNumber()}`;
+        }
+        if (log.target_table === 'accounts') return `Removed account: ${getUsername()}`;
+        if (log.target_table === 'events') return `Removed event: ${getEventName()}`;
+    }
+
+    if (log.action_type === 'UPDATE') {
+        let fieldStr = 'Profile';
+        let changedFields = [];
+
+        if (oldObj && newObj) {
+            const allKeys = new Set([...Object.keys(oldObj), ...Object.keys(newObj)]);
+            for (const key of allKeys) {
+                if (isValueDifferent(oldObj[key], newObj[key])) {
+                    changedFields.push(getFriendlyFieldName(key));
+                }
+            }
+            if (changedFields.length === 1) {
+                fieldStr = changedFields[0];
+            } else if (changedFields.length > 1) {
+                const prioritized = changedFields.filter(f => f !== 'Active Status' && f !== 'Enabled Status');
+                fieldStr = prioritized.length === 1 ? prioritized[0] : (log.target_table === 'events' ? 'Event Details' : (log.target_table === 'accounts' ? 'Account' : 'Profile'));
+            } else {
+                fieldStr = 'Details';
+            }
+        }
+
+        if (['persons', 'students', 'employees', 'visitors'].includes(log.target_table)) {
+            return `Updated ${fieldStr} for ${getIdNumber()}`;
+        }
+        if (log.target_table === 'accounts') {
+            return `Updated ${fieldStr} for ${getUsername()}`;
+        }
+        if (log.target_table === 'events') {
+            if (changedFields.includes('Event Name')) return `Updated Event Name for ${getOriginalEventName()}`;
+            return `Updated ${fieldStr} for ${getOriginalEventName()}`;
+        }
+        if (log.target_table === 'departments') {
+            const code = (newObj && newObj.department_code) || (oldObj && oldObj.department_code) || 'Dept';
+            return `Updated ${changedFields.length === 1 ? changedFields[0] : 'Department'} for ${code}`;
+        }
+        if (log.target_table === 'programs') {
+            const code = (newObj && newObj.program_code) || (oldObj && oldObj.program_code) || 'Program';
+            return `Updated ${changedFields.length === 1 ? changedFields[0] : 'Program'} for ${code}`;
+        }
+        if (log.target_table === 'settings') {
+            if (changedFields.includes('System Name')) return 'Updated System Name';
+            if (changedFields.includes('System Logo')) return 'Updated System Logo';
+            return `Changed System Settings`;
+        }
+    }
+
+    if (log.action_type === 'EXPORT') {
+        const obj = newObj || oldObj;
+        if (obj && obj.format) {
+            return `Exported ${getFriendlyTableName(log.target_table)} to ${obj.format}`;
+        }
+    }
+
+    const friendlyTable = getFriendlyTableName(log.target_table).toLowerCase();
+    switch (log.action_type) {
+        case 'INSERT': return `Created ${friendlyTable}`;
+        case 'UPDATE': return `Updated ${friendlyTable}`;
+        case 'DELETE': return `Removed ${friendlyTable}`;
+        case 'EXPORT': return `Exported ${friendlyTable}`;
+        default: return 'System change';
+    }
+};
+
+// ─── Layer 2: Full Translator (Modal View) ───────────────────────────────────
+// Returns a complete, human-readable description for the View Details modal.
+// Handles N/A / empty details gracefully with contextual fallback sentences.
+const EMPTY_STATE_SENTENCES = {
+    accounts: {
+        INSERT: 'A new administrative account was successfully created in the system.',
+        UPDATE: 'An existing administrator account was modified.',
+        DELETE: 'An administrator account was permanently removed from the system.',
+    },
+    persons: {
+        INSERT: 'A new user profile was successfully registered in the database.',
+        UPDATE: 'An existing user profile was updated with new information.',
+        DELETE: 'A user profile was permanently deleted from the system.',
+    },
+    students: {
+        INSERT: 'A new student record was successfully added to the database.',
+        UPDATE: 'An existing student record was updated.',
+        DELETE: 'A student record was permanently removed from the system.',
+    },
+    employees: {
+        INSERT: 'A new employee record was successfully added to the database.',
+        UPDATE: 'An existing employee record was updated.',
+        DELETE: 'An employee record was permanently removed from the system.',
+    },
+    visitors: {
+        INSERT: 'A new visitor was successfully registered in the system.',
+        UPDATE: 'An existing visitor record was updated.',
+        DELETE: 'A visitor record was removed from the system.',
+    },
+    events: {
+        INSERT: 'A new event was successfully created in the system.',
+        UPDATE: 'An existing event configuration was modified.',
+        DELETE: 'An event was permanently removed from the system.',
+    },
+    settings: {
+        INSERT: 'A new system setting was added.',
+        UPDATE: 'A system configuration setting was changed.',
+        DELETE: 'A system setting was removed.',
+    },
+};
+
+const getEmptyStateSentence = (log) => {
+    const tableFallbacks = EMPTY_STATE_SENTENCES[log.target_table];
+    if (tableFallbacks && tableFallbacks[log.action_type]) {
+        return tableFallbacks[log.action_type];
+    }
+    const friendlyTable = getFriendlyTableName(log.target_table);
+    switch (log.action_type) {
+        case 'INSERT': return `A new record was successfully added to ${friendlyTable}.`;
+        case 'UPDATE': return `An existing record in ${friendlyTable} was modified.`;
+        case 'DELETE': return `A record was permanently removed from ${friendlyTable}.`;
+        default: return `A system operation was performed on ${friendlyTable}.`;
+    }
+};
+
+const translateAuditLog = (log) => {
+    const oldObj = safeParseJSON(log.old_values);
+    const newObj = safeParseJSON(log.new_values);
+
+    // If no structured data is available, return a contextual empty-state sentence
+    if (!oldObj && !newObj) {
+        return getEmptyStateSentence(log);
+    }
+
+    const summary = getShortSummary(log);
+    return summary.endsWith('.') ? summary : `${summary}.`;
+};
+
+// Produces an array of { field, oldValue, newValue } change items for the modal
+const getDetailedChanges = (log) => {
+    const oldObj = safeParseJSON(log.old_values);
+    const newObj = safeParseJSON(log.new_values);
+
+    let changes = [];
+
+    if (log.action_type === 'UPDATE' && oldObj && newObj) {
+        const allKeys = new Set([...Object.keys(oldObj), ...Object.keys(newObj)]);
+        for (const key of allKeys) {
+            changes.push({
+                field: getFriendlyFieldName(key),
+                oldValue: formatFieldValue(key, oldObj[key]),
+                newValue: formatFieldValue(key, newObj[key]),
+                changed: isValueDifferent(oldObj[key], newObj[key]),
+            });
+        }
+    } else if (log.action_type === 'INSERT' && newObj) {
+        changes = Object.entries(newObj).map(([key, val]) => ({
+            field: getFriendlyFieldName(key),
+            oldValue: null,
+            newValue: formatFieldValue(key, val),
+            changed: true,
+        }));
+    } else if (log.action_type === 'DELETE' && oldObj) {
+        changes = Object.entries(oldObj).map(([key, val]) => ({
+            field: getFriendlyFieldName(key),
+            oldValue: formatFieldValue(key, val),
+            newValue: null,
+            changed: true,
+        }));
+    }
+
+    changes.sort((a, b) => {
+        const orderA = FIELD_ORDER_WEIGHTS[a.field] || 99;
+        const orderB = FIELD_ORDER_WEIGHTS[b.field] || 99;
+        if (orderA !== orderB) return orderA - orderB;
+        return a.field.localeCompare(b.field);
+    });
+
+    return changes;
+};
+
+// ─── Component ───────────────────────────────────────────────────────────────
+export const AuditTrail = ({ branding, adminSession }) => {
     const [logs, setLogs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -17,26 +314,20 @@ export const AuditTrail = ({ branding }) => {
     // Date Filtering State
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
-    const [dateError, setDateError] = useState('');
 
     // Pagination
     const ITEMS_PER_PAGE = 15;
     const [currentPage, setCurrentPage] = useState(1);
 
+    // View Modal
+    const [showViewModal, setShowViewModal] = useState(false);
+    const [selectedLog, setSelectedLog] = useState(null);
+
     // Export State & UX
     const [showExportMenu, setShowExportMenu] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
-    const [toastMessage, setToastMessage] = useState(null);
-    const [toastType, setToastType] = useState('success'); // 'success' or 'error'
     const exportMenuRef = useRef(null);
-
-    // Auto-hide toast after 3 seconds
-    useEffect(() => {
-        if (toastMessage) {
-            const timer = setTimeout(() => setToastMessage(null), 3000);
-            return () => clearTimeout(timer);
-        }
-    }, [toastMessage]);
+    const { showSuccess, showError, showWarning, showProcessing } = useToast();
 
     // Close export menu when clicking outside
     useEffect(() => {
@@ -52,10 +343,9 @@ export const AuditTrail = ({ branding }) => {
     const fetchLogs = async () => {
         // Validation
         if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
-            setDateError('Invalid Date Range: End Date must be after Start Date.');
+            showWarning('Invalid Date Range: End Date must be after Start Date.');
             return;
         }
-        setDateError('');
 
         setLoading(true);
         try {
@@ -99,10 +389,16 @@ export const AuditTrail = ({ branding }) => {
         return date.toLocaleString();
     };
 
+    const handleViewClick = (log) => {
+        setSelectedLog(log);
+        setShowViewModal(true);
+    };
+
     const handleExportExcel = async () => {
         if (filteredLogs.length === 0) return;
         setIsExporting(true);
         setShowExportMenu(false);
+        showProcessing("Preparing Excel export...");
 
         try {
             const exportData = filteredLogs.map(log => ({
@@ -111,7 +407,7 @@ export const AuditTrail = ({ branding }) => {
                 'Action': log.action_type,
                 'Target Table': log.target_table,
                 'Target ID': log.target_id || '-',
-                'Details': log.new_values || log.old_values || 'N/A'
+                'Details': getShortSummary(log)
             }));
 
             const ws = XLSX.utils.json_to_sheet(exportData);
@@ -129,9 +425,7 @@ export const AuditTrail = ({ branding }) => {
             });
 
             if (!filePath) {
-                // User cancelled the dialog
-                setToastType('error');
-                setToastMessage("Export cancelled.");
+                showWarning("Export cancelled.");
                 return;
             }
 
@@ -139,12 +433,19 @@ export const AuditTrail = ({ branding }) => {
             const excelBuffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
             await writeFile(filePath, new Uint8Array(excelBuffer));
 
-            setToastType('success');
-            setToastMessage(`Success: Report saved to ${filePath}`);
+            await invoke('log_frontend_action', {
+                adminId: adminSession?.account_id,
+                actionType: 'EXPORT',
+                targetTable: 'audit_logs',
+                targetId: null,
+                oldValues: null,
+                newValues: JSON.stringify({ format: 'Excel', filename, record_count: filteredLogs.length })
+            }).catch(e => console.error("Audit log failed for export", e));
+
+            showSuccess(`Success: Report saved to ${filePath}`);
         } catch (error) {
             console.error("Excel export failed", error);
-            setToastType('error');
-            setToastMessage("An error occurred during export.");
+            showError("An error occurred during export.");
         } finally {
             setIsExporting(false);
         }
@@ -154,6 +455,7 @@ export const AuditTrail = ({ branding }) => {
         if (filteredLogs.length === 0) return;
         setIsExporting(true);
         setShowExportMenu(false);
+        showProcessing("Preparing PDF export...");
 
         try {
             const doc = new jsPDF('landscape'); // Use landscape for more columns
@@ -225,7 +527,7 @@ export const AuditTrail = ({ branding }) => {
                     log.action_type,
                     log.target_table,
                     log.target_id || '-',
-                    log.new_values || log.old_values || 'N/A'
+                    getShortSummary(log)
                 ]);
             });
 
@@ -282,20 +584,26 @@ export const AuditTrail = ({ branding }) => {
             });
 
             if (!filePath) {
-                setToastType('error');
-                setToastMessage("Export cancelled.");
+                showWarning("Export cancelled.");
                 return;
             }
 
             // Write File via Tauri
             await writeFile(filePath, new Uint8Array(pdfBuffer));
 
-            setToastType('success');
-            setToastMessage(`Success: Report saved to ${filePath}`);
+            await invoke('log_frontend_action', {
+                adminId: adminSession?.account_id,
+                actionType: 'EXPORT',
+                targetTable: 'audit_logs',
+                targetId: null,
+                oldValues: null,
+                newValues: JSON.stringify({ format: 'PDF', filename, record_count: filteredLogs.length })
+            }).catch(e => console.error("Audit log failed for PDF export", e));
+
+            showSuccess(`Success: Report saved to ${filePath}`);
         } catch (error) {
             console.error("PDF export failed", error);
-            setToastType('error');
-            setToastMessage("An error occurred during export.");
+            showError("An error occurred during export.");
         } finally {
             setIsExporting(false);
         }
@@ -303,36 +611,6 @@ export const AuditTrail = ({ branding }) => {
 
     return (
         <div className="flex flex-col h-full min-h-0 gap-6 animate-in slide-in-from-bottom-4 duration-500 relative">
-
-            {/* Loading Overlay */}
-            {isExporting && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white p-6 rounded-2xl shadow-xl flex flex-col items-center gap-4 max-w-sm w-full mx-4">
-                        <Loader2 className="w-10 h-10 text-indigo-600 animate-spin" />
-                        <div className="text-center">
-                            <h3 className="text-lg font-bold text-slate-900">Preparing Document</h3>
-                            <p className="text-sm text-slate-500 mt-1">Please wait while we generate your report...</p>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Toast Notification */}
-            {toastMessage && (
-                <div className="absolute top-0 right-4 z-50 animate-in fade-in slide-in-from-top-4 duration-300">
-                    <div className={`px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 border ${toastType === 'success'
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
-                        : 'bg-rose-50 border-rose-200 text-rose-700'
-                        }`}>
-                        {toastType === 'success' ? (
-                            <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0" />
-                        ) : (
-                            <XCircle className="w-5 h-5 text-rose-500 shrink-0" />
-                        )}
-                        <p className="text-sm font-medium">{toastMessage}</p>
-                    </div>
-                </div>
-            )}
 
             {/* Header Section */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -393,14 +671,6 @@ export const AuditTrail = ({ branding }) => {
                     </button>
                 </div>
             </div>
-
-            {/* Error Message */}
-            {dateError && (
-                <div className="bg-red-50 border-l-4 border-red-500 p-4 mb-4 rounded-md flex items-center gap-3">
-                    <AlertTriangle className="w-5 h-5 text-red-500" />
-                    <p className="text-red-700 text-sm font-medium">{dateError}</p>
-                </div>
-            )}
 
             {/* Filter Section  */}
             <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col lg:flex-row gap-4">
@@ -475,14 +745,14 @@ export const AuditTrail = ({ branding }) => {
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Admin</th>
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Action</th>
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Target Table</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Target ID</th>
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Details</th>
+                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {paginatedLogs.length > 0 ? (
                                 paginatedLogs.map((log) => (
-                                    <tr key={log.audit_id} className="hover:bg-slate-50 transition-colors">
+                                    <tr key={log.audit_id} className="hover:bg-slate-50 transition-colors group">
                                         <td className="px-5 py-3 text-slate-600 whitespace-nowrap font-mono text-xs">
                                             {formatDate(log.created_at)}
                                         </td>
@@ -499,13 +769,19 @@ export const AuditTrail = ({ branding }) => {
                                             </span>
                                         </td>
                                         <td className="px-5 py-3 text-slate-600 font-medium">
-                                            {log.target_table}
+                                            {getFriendlyTableName(log.target_table)}
                                         </td>
-                                        <td className="px-5 py-3 text-slate-600 font-mono text-xs">
-                                            {log.target_id || '-'}
+                                        <td className="px-5 py-3 text-slate-600 text-sm">
+                                            {getShortSummary(log)}
                                         </td>
-                                        <td className="px-5 py-3 text-slate-500 text-xs font-mono max-w-xs truncate" title={log.new_values || log.old_values || 'No details'}>
-                                            {log.new_values || log.old_values || 'N/A'}
+                                        <td className="px-5 py-3 text-right">
+                                            <button
+                                                className="p-2 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-colors border border-transparent hover:border-indigo-200 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                                                title="View Details"
+                                                onClick={() => handleViewClick(log)}
+                                            >
+                                                <Eye className="w-4 h-4" />
+                                            </button>
                                         </td>
                                     </tr>
                                 ))
@@ -560,6 +836,131 @@ export const AuditTrail = ({ branding }) => {
                     )}
                 </div>
             </div>
+
+            {/* View Details Modal */}
+            {showViewModal && selectedLog && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
+                        <div className="bg-slate-50 border-b border-slate-200 p-6 flex justify-between items-center">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-indigo-50 rounded-xl border border-indigo-100 text-indigo-600">
+                                    <FileText className="w-5 h-5" />
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-bold text-slate-900">Audit Log Details</h2>
+                                    <p className="text-sm text-slate-500">Full record of this system change.</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setShowViewModal(false)} className="text-slate-400 hover:bg-slate-200 hover:text-slate-600 p-2 rounded-xl transition-colors">
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+                            {/* Meta Info Grid */}
+                            <div className="grid grid-cols-2 gap-y-4 gap-x-6 text-sm">
+                                <div>
+                                    <p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Log ID</p>
+                                    <p className="font-semibold text-slate-900 font-mono">{selectedLog.audit_id}</p>
+                                </div>
+                                <div>
+                                    <p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Performed By</p>
+                                    <p className="font-semibold text-slate-900">{selectedLog.admin_full_name}</p>
+                                    <p className="text-slate-400 text-xs font-mono">@{selectedLog.admin_username} · ID #{selectedLog.admin_id}</p>
+                                </div>
+                                <div>
+                                    <p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Action</p>
+                                    <span className={`inline-flex px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${selectedLog.action_type === 'INSERT' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
+                                        selectedLog.action_type === 'UPDATE' ? 'bg-amber-100 text-amber-700 border-amber-200' :
+                                            selectedLog.action_type === 'DELETE' ? 'bg-rose-100 text-rose-700 border-rose-200' :
+                                                'bg-slate-100 text-slate-700 border-slate-200'
+                                        }`}>
+                                        {selectedLog.action_type}
+                                    </span>
+                                </div>
+                                <div>
+                                    <p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Timestamp</p>
+                                    <p className="font-semibold text-slate-900 font-mono text-xs">{formatDate(selectedLog.created_at)}</p>
+                                </div>
+                                <div>
+                                    <p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Target Table</p>
+                                    <p className="font-semibold text-slate-900">{getFriendlyTableName(selectedLog.target_table)} <span className="text-slate-400 font-mono text-xs">({selectedLog.target_table})</span></p>
+                                </div>
+                                <div>
+                                    <p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Target ID</p>
+                                    <p className="font-semibold text-slate-900 font-mono">{selectedLog.target_id || '-'}</p>
+                                </div>
+                            </div>
+
+                            {/* Human-Readable Summary */}
+                            <div className="border-t border-slate-100 pt-5">
+                                <p className="text-slate-500 mb-2 text-xs uppercase tracking-wider font-semibold">Summary</p>
+                                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                                    <p className="text-sm text-slate-800 leading-relaxed font-medium">
+                                        {translateAuditLog(selectedLog)}
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Detailed Changes Table */}
+                            {(() => {
+                                const changes = getDetailedChanges(selectedLog);
+                                if (changes.length === 0) return null;
+                                return (
+                                    <div className="border-t border-slate-100 pt-5">
+                                        <p className="text-slate-500 mb-3 text-xs uppercase tracking-wider font-semibold">
+                                            {selectedLog.action_type === 'UPDATE' ? 'Field Changes' : selectedLog.action_type === 'INSERT' ? 'New Values' : 'Removed Values'}
+                                        </p>
+                                        <div className="rounded-xl border border-slate-200 overflow-x-auto bg-white">
+                                            <table className="w-full text-sm text-left">
+                                                <thead className="bg-slate-50 border-b border-slate-200">
+                                                    <tr className="text-xs uppercase text-slate-500">
+                                                        <th className="px-4 py-2.5 font-semibold tracking-wider">Field</th>
+                                                        {selectedLog.action_type === 'UPDATE' ? (
+                                                            <>
+                                                                <th className="px-4 py-2.5 font-semibold tracking-wider">Old Value</th>
+                                                                <th className="px-4 py-2.5 font-semibold tracking-wider">New Value</th>
+                                                            </>
+                                                        ) : (
+                                                            <th className="px-4 py-2.5 font-semibold tracking-wider">Value</th>
+                                                        )}
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-100">
+                                                    {changes.map((change, idx) => (
+                                                        <tr key={idx} className={change.changed ? 'bg-amber-50/40' : ''}>
+                                                            <td className="px-4 py-2 font-medium text-slate-700 whitespace-nowrap">{change.field}</td>
+                                                            {selectedLog.action_type === 'UPDATE' ? (
+                                                                <>
+                                                                    <td className={`px-4 py-2 font-mono text-xs whitespace-nowrap ${change.changed ? 'text-rose-600 line-through' : 'text-slate-500'}`}>
+                                                                        <div className="max-w-[150px] sm:max-w-[220px] overflow-x-auto pb-1 [scrollbar-width:thin]">
+                                                                            {change.oldValue || '-'}
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className={`px-4 py-2 font-mono text-xs whitespace-nowrap ${change.changed ? 'text-emerald-600 font-semibold' : 'text-slate-500'}`}>
+                                                                        <div className="max-w-[150px] sm:max-w-[220px] overflow-x-auto pb-1 [scrollbar-width:thin]">
+                                                                            {change.newValue || '-'}
+                                                                        </div>
+                                                                    </td>
+                                                                </>
+                                                            ) : (
+                                                                <td className="px-4 py-2 font-mono text-xs text-slate-700 whitespace-nowrap">
+                                                                    <div className="max-w-[150px] sm:max-w-[300px] overflow-x-auto pb-1 [scrollbar-width:thin]">
+                                                                        {change.newValue || change.oldValue || '-'}
+                                                                    </div>
+                                                                </td>
+                                                            )}
+                                                        </tr>
+                                                    ))}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

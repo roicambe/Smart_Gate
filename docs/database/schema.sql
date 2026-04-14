@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS persons (
     email VARCHAR NULL,               -- Added: Normalized contact data
     contact_number VARCHAR NULL,      -- Added: Normalized contact data
     face_template_path VARCHAR NULL,
-    is_active BOOLEAN NOT NULL DEFAULT 1    
+    is_active BOOLEAN NOT NULL DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS students (
@@ -110,7 +111,11 @@ CREATE TABLE IF NOT EXISTS accounts (
     username VARCHAR UNIQUE NOT NULL,
     password_hash VARCHAR NOT NULL,
     full_name VARCHAR NOT NULL DEFAULT 'Administrator',
+    email VARCHAR NULL,
     role TEXT CHECK(role IN ('System Administrator', 'Gate Supervisor')) NOT NULL,
+    is_first_login BOOLEAN NOT NULL DEFAULT 0,
+    activation_otp VARCHAR NULL,
+    activation_otp_expires_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
