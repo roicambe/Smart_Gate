@@ -54,6 +54,7 @@ pub struct Scanner {
 pub struct Event {
     pub event_id: i64,
     pub event_name: String,
+    pub description: Option<String>,
     pub schedule_type: Option<String>,
     pub event_date: String,
     pub start_date: Option<String>,
@@ -138,6 +139,7 @@ pub struct EventAttendance {
     pub event_id: i64,
     pub person_id: i64,
     pub scanned_at: String,
+    pub status: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -148,6 +150,7 @@ pub struct EventAttendanceLog {
     pub role: String,
     pub event_name: String,
     pub scanned_at: String,
+    pub status: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
