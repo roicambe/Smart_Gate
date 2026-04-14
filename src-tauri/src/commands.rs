@@ -386,8 +386,18 @@ pub fn get_dashboard_stats(pool: State<'_, DbPool>) -> Result<DashboardData, Str
 }
 
 #[tauri::command]
-pub fn get_visitors(pool: State<'_, DbPool>) -> Result<Vec<VisitorDetails>, String> {
-    db::get_visitors(&pool)
+pub fn get_visitors(pool: State<'_, DbPool>, sort_order: Option<String>) -> Result<Vec<VisitorDetails>, String> {
+    db::get_visitors(&pool, sort_order)
+}
+
+#[tauri::command]
+pub fn bulk_import_users_from_excel(
+    pool: State<'_, DbPool>,
+    file_path: String,
+    role: String,
+    active_admin_id: i64,
+) -> Result<BulkImportResult, String> {
+    db::bulk_import_users_from_excel(&pool, &file_path, &role, active_admin_id)
 }
 
 #[tauri::command]
@@ -406,7 +416,7 @@ pub fn register_user(
     position_title: Option<String>,
     purpose: Option<String>,
     person_to_visit: Option<String>,
-    active_admin_id: i64,
+    active_admin_id: Option<i64>,
 ) -> Result<i64, String> {
     db::register_user(
         &pool,

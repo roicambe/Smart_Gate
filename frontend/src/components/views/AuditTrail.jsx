@@ -101,57 +101,78 @@ const FIELD_ORDER_WEIGHTS = {
 
 // ─── Layer 1: Short Summary (Table Column) ───────────────────────────────────
 // Returns a concise 3-4 word label for the main table's "Details" column.
-const SHORT_SUMMARIES = {
-    accounts: { INSERT: 'Created new account', UPDATE: 'Updated an account', DELETE: 'Removed an account' },
-    persons:  { INSERT: 'Registered new user', UPDATE: 'Updated user profile', DELETE: 'Removed a user' },
-    students: { INSERT: 'Enrolled a student', UPDATE: 'Updated student record', DELETE: 'Removed a student' },
-    employees:{ INSERT: 'Added an employee', UPDATE: 'Updated employee record', DELETE: 'Removed an employee' },
-    visitors: { INSERT: 'Registered a visitor', UPDATE: 'Updated visitor info', DELETE: 'Removed a visitor' },
-    events:   { INSERT: 'Created new event', UPDATE: 'Updated an event', DELETE: 'Removed an event' },
-    departments: { INSERT: 'Added department', UPDATE: 'Updated department', DELETE: 'Removed department' },
-    programs: { INSERT: 'Added program', UPDATE: 'Updated program', DELETE: 'Removed program' },
-    scanners: { INSERT: 'Added scanner', UPDATE: 'Updated scanner', DELETE: 'Removed scanner' },
-};
-
 const getShortSummary = (log) => {
     const oldObj = safeParseJSON(log.old_values);
     const newObj = safeParseJSON(log.new_values);
 
-    if (log.action_type === 'UPDATE' && oldObj && newObj) {
+    if (newObj && typeof newObj.summary === 'string' && newObj.summary.trim()) {
+        return newObj.summary;
+    }
+
+    const getIdNumber = () => (newObj && newObj.id_number) || (oldObj && oldObj.id_number) || 'User';
+    const getUsername = () => (newObj && newObj.username) || (oldObj && oldObj.username) || 'Account';
+    const getEventName = () => (newObj && newObj.event_name) || (oldObj && oldObj.event_name) || 'Event';
+    const getOriginalEventName = () => (oldObj && oldObj.event_name) || (newObj && newObj.event_name) || 'Event';
+
+    if (log.action_type === 'INSERT') {
+        if (['persons', 'students', 'employees', 'visitors'].includes(log.target_table)) {
+            return `Registered user: ${getIdNumber()}`;
+        }
+        if (log.target_table === 'accounts') return `Registered account: ${getUsername()}`;
+        if (log.target_table === 'events') return `Created event: ${getEventName()}`;
+    }
+
+    if (log.action_type === 'DELETE') {
+        if (['persons', 'students', 'employees', 'visitors'].includes(log.target_table)) {
+            return `Removed user: ${getIdNumber()}`;
+        }
+        if (log.target_table === 'accounts') return `Removed account: ${getUsername()}`;
+        if (log.target_table === 'events') return `Removed event: ${getEventName()}`;
+    }
+
+    if (log.action_type === 'UPDATE') {
+        let fieldStr = 'Profile';
         let changedFields = [];
-        const allKeys = new Set([...Object.keys(oldObj), ...Object.keys(newObj)]);
-        for (const key of allKeys) {
-            if (isValueDifferent(oldObj[key], newObj[key])) {
-                changedFields.push(getFriendlyFieldName(key));
+
+        if (oldObj && newObj) {
+            const allKeys = new Set([...Object.keys(oldObj), ...Object.keys(newObj)]);
+            for (const key of allKeys) {
+                if (isValueDifferent(oldObj[key], newObj[key])) {
+                    changedFields.push(getFriendlyFieldName(key));
+                }
+            }
+            if (changedFields.length === 1) {
+                fieldStr = changedFields[0];
+            } else if (changedFields.length > 1) {
+                const prioritized = changedFields.filter(f => f !== 'Active Status' && f !== 'Enabled Status');
+                fieldStr = prioritized.length === 1 ? prioritized[0] : (log.target_table === 'events' ? 'Event Details' : (log.target_table === 'accounts' ? 'Account' : 'Profile'));
+            } else {
+                fieldStr = 'Details';
             }
         }
-        
-        // Clean Summaries: If multiple fields changed, prioritize data over status
-        if (changedFields.length > 1) {
-            const prioritized = changedFields.filter(f => f !== 'Active Status' && f !== 'Enabled Status');
-            if (prioritized.length > 0) changedFields = prioritized;
+
+        if (['persons', 'students', 'employees', 'visitors'].includes(log.target_table)) {
+            return `Updated ${fieldStr} for ${getIdNumber()}`;
         }
-        
-        const fieldStr = changedFields.length > 0 ? changedFields.join(', ') : 'Details';
-        
-        if (log.target_table === 'persons' || log.target_table === 'students' || log.target_table === 'employees' || log.target_table === 'visitors') {
-            const idNum = newObj.id_number || oldObj.id_number || 'User';
-            return `Updated ${fieldStr} for ${idNum}`;
-        }
-        if (log.target_table === 'departments') {
-            const code = newObj.department_code || oldObj.department_code || 'Dept';
-            return `Changed ${fieldStr} for ${code}`;
-        }
-        if (log.target_table === 'programs') {
-            const code = newObj.program_code || oldObj.program_code || 'Program';
-            return `Changed ${fieldStr} for ${code}`;
+        if (log.target_table === 'accounts') {
+            return `Updated ${fieldStr} for ${getUsername()}`;
         }
         if (log.target_table === 'events') {
-            const title = newObj.event_name || oldObj.event_name || 'Event';
-            return `Changed ${fieldStr} for ${title}`;
+            if (changedFields.includes('Event Name')) return `Updated Event Name for ${getOriginalEventName()}`;
+            return `Updated ${fieldStr} for ${getOriginalEventName()}`;
+        }
+        if (log.target_table === 'departments') {
+            const code = (newObj && newObj.department_code) || (oldObj && oldObj.department_code) || 'Dept';
+            return `Updated ${changedFields.length === 1 ? changedFields[0] : 'Department'} for ${code}`;
+        }
+        if (log.target_table === 'programs') {
+            const code = (newObj && newObj.program_code) || (oldObj && oldObj.program_code) || 'Program';
+            return `Updated ${changedFields.length === 1 ? changedFields[0] : 'Program'} for ${code}`;
         }
         if (log.target_table === 'settings') {
-            return `Changed ${fieldStr}`;
+            if (changedFields.includes('System Name')) return 'Updated System Name';
+            if (changedFields.includes('System Logo')) return 'Updated System Logo';
+            return `Changed System Settings`;
         }
     }
 
@@ -162,22 +183,6 @@ const getShortSummary = (log) => {
         }
     }
 
-    // Settings fallback
-    if (log.target_table === 'settings') {
-        const obj = newObj || oldObj;
-        if (obj) {
-            if (obj.setting_key === 'system_name' || obj.system_name !== undefined) return 'Changed system name';
-            if (obj.setting_key === 'system_logo' || obj.system_logo !== undefined) return 'Changed system logo';
-        }
-        return log.action_type === 'UPDATE' ? 'Changed a setting' : 'Modified settings';
-    }
-
-    const tableSummaries = SHORT_SUMMARIES[log.target_table];
-    if (tableSummaries && tableSummaries[log.action_type]) {
-        return tableSummaries[log.action_type];
-    }
-
-    // Fallback
     const friendlyTable = getFriendlyTableName(log.target_table).toLowerCase();
     switch (log.action_type) {
         case 'INSERT': return `Created ${friendlyTable}`;
@@ -244,7 +249,6 @@ const getEmptyStateSentence = (log) => {
 };
 
 const translateAuditLog = (log) => {
-    const friendlyTable = getFriendlyTableName(log.target_table);
     const oldObj = safeParseJSON(log.old_values);
     const newObj = safeParseJSON(log.new_values);
 
@@ -253,52 +257,8 @@ const translateAuditLog = (log) => {
         return getEmptyStateSentence(log);
     }
 
-    switch (log.action_type) {
-        case 'UPDATE': {
-            if (oldObj && newObj) {
-                const changes = [];
-                const allKeys = new Set([...Object.keys(oldObj), ...Object.keys(newObj)]);
-                for (const key of allKeys) {
-                    const oldVal = oldObj[key];
-                    const newVal = newObj[key];
-                    if (isValueDifferent(oldVal, newVal)) {
-                        changes.push(
-                            `Changed ${getFriendlyFieldName(key)} from '${formatFieldValue(key, oldVal)}' to '${formatFieldValue(key, newVal)}'`
-                        );
-                    }
-                }
-                if (changes.length > 0) return changes.join('. ') + '.';
-            }
-            if (newObj) {
-                const entries = Object.entries(newObj).filter(([k]) => k !== 'password_hash');
-                if (entries.length > 0) {
-                    const summary = entries.map(([k, v]) => `${getFriendlyFieldName(k)}: '${formatFieldValue(k, v)}'`).join(', ');
-                    return `Updated ${friendlyTable} — ${summary}.`;
-                }
-            }
-            return getEmptyStateSentence(log);
-        }
-        case 'INSERT': {
-            if (newObj) {
-                const nameField = newObj.full_name || newObj.event_name || newObj.username || newObj.setting_key
-                    || (newObj.first_name && newObj.last_name ? `${newObj.first_name} ${newObj.last_name}` : null)
-                    || newObj.id_number || newObj.department_name || newObj.program_name || newObj.location_name;
-                if (nameField) return `Created new ${friendlyTable}: '${nameField}'.`;
-            }
-            return getEmptyStateSentence(log);
-        }
-        case 'DELETE': {
-            if (oldObj) {
-                const nameField = oldObj.full_name || oldObj.event_name || oldObj.username || oldObj.setting_key
-                    || (oldObj.first_name && oldObj.last_name ? `${oldObj.first_name} ${oldObj.last_name}` : null)
-                    || oldObj.id_number || oldObj.department_name || oldObj.program_name || oldObj.location_name;
-                if (nameField) return `Removed ${friendlyTable}: '${nameField}'.`;
-            }
-            return getEmptyStateSentence(log);
-        }
-        default:
-            return getEmptyStateSentence(log);
-    }
+    const summary = getShortSummary(log);
+    return summary.endsWith('.') ? summary : `${summary}.`;
 };
 
 // Produces an array of { field, oldValue, newValue } change items for the modal
@@ -972,15 +932,21 @@ export const AuditTrail = ({ branding, adminSession }) => {
                                                             {selectedLog.action_type === 'UPDATE' ? (
                                                                 <>
                                                                     <td className={`px-4 py-2 font-mono text-xs whitespace-nowrap ${change.changed ? 'text-rose-600 line-through' : 'text-slate-500'}`}>
-                                                                        {change.oldValue || '-'}
+                                                                        <div className="max-w-[150px] sm:max-w-[220px] overflow-x-auto pb-1 [scrollbar-width:thin]">
+                                                                            {change.oldValue || '-'}
+                                                                        </div>
                                                                     </td>
                                                                     <td className={`px-4 py-2 font-mono text-xs whitespace-nowrap ${change.changed ? 'text-emerald-600 font-semibold' : 'text-slate-500'}`}>
-                                                                        {change.newValue || '-'}
+                                                                        <div className="max-w-[150px] sm:max-w-[220px] overflow-x-auto pb-1 [scrollbar-width:thin]">
+                                                                            {change.newValue || '-'}
+                                                                        </div>
                                                                     </td>
                                                                 </>
                                                             ) : (
                                                                 <td className="px-4 py-2 font-mono text-xs text-slate-700 whitespace-nowrap">
-                                                                    {change.newValue || change.oldValue || '-'}
+                                                                    <div className="max-w-[150px] sm:max-w-[300px] overflow-x-auto pb-1 [scrollbar-width:thin]">
+                                                                        {change.newValue || change.oldValue || '-'}
+                                                                    </div>
                                                                 </td>
                                                             )}
                                                         </tr>

@@ -231,8 +231,8 @@ export const AcademicStructure = ({ branding, adminSession }) => {
                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/50 font-medium appearance-none cursor-pointer"
                             >
                                 <option value="">All Departments</option>
-                                {departments.map(d => (
-                                    <option key={d.department_id} value={d.department_id}>
+                                {departments.map((d, idx) => (
+                                    <option key={`${d.department_id || 'dept'}-${idx}`} value={d.department_id}>
                                         {d.department_code} - {d.department_name}
                                     </option>
                                 ))}
@@ -279,7 +279,7 @@ export const AcademicStructure = ({ branding, adminSession }) => {
                                     </td>
                                 </tr>
                             ) : (
-                                filteredData.map((item) => {
+                                filteredData.map((item, index) => {
                                     const itemId = activeTab === 'department' ? item.department_id : item.program_id;
                                     const code = activeTab === 'department' ? item.department_code : item.program_code;
                                     const name = activeTab === 'department' ? item.department_name : item.program_name;
@@ -290,7 +290,7 @@ export const AcademicStructure = ({ branding, adminSession }) => {
                                     }
 
                                     return (
-                                        <tr key={`${activeTab}-${itemId}`} className="hover:bg-slate-50 even:bg-slate-50/50 transition-colors group">
+                                        <tr key={`${activeTab}-${itemId || 'missing'}-${index}`} className="hover:bg-slate-50 even:bg-slate-50/50 transition-colors group">
                                             <td className="px-6 py-4 font-mono font-medium text-slate-900">{code}</td>
                                             <td className="px-6 py-4 font-medium text-slate-900">{name}</td>
                                             {activeTab === 'program' && <td className="px-6 py-4 text-slate-600">{deptName}</td>}
@@ -354,8 +354,8 @@ export const AcademicStructure = ({ branding, adminSession }) => {
                                             className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none appearance-none"
                                         >
                                             <option value="" disabled>Select a Department</option>
-                                            {departments.map(d => (
-                                                <option key={d.department_id} value={d.department_id} className="bg-slate-900">{d.department_code} - {d.department_name}</option>
+                                            {departments.map((d, idx) => (
+                                                <option key={`${d.department_id || 'dept'}-${idx}`} value={d.department_id} className="bg-slate-900">{d.department_code} - {d.department_name}</option>
                                             ))}
                                         </select>
                                     </div>

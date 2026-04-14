@@ -50,7 +50,8 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
                 yearLevel: null,
                 departmentId: null,
                 positionTitle: null,
-                idPresented: generatedId
+                purpose: visitorForm.purpose,
+                personToVisit: visitorForm.personToVisit
             });
             
             const result = await invoke('manual_id_entry', {

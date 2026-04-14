@@ -53,6 +53,7 @@ pub fn run() {
             commands::update_admin_credentials,
             commands::get_dashboard_stats,
             commands::get_visitors,
+            commands::bulk_import_users_from_excel,
             commands::register_user,
             commands::manual_id_entry,
             commands::update_user,
