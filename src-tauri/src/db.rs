@@ -127,6 +127,27 @@ fn cell_to_string(cell: &Data) -> String {
     }
 }
 
+fn role_matches_event_requirement(required_roles: &str, person_role: &str) -> bool {
+    let normalized_person = person_role.trim().to_lowercase();
+    if normalized_person.is_empty() {
+        return false;
+    }
+
+    let normalized_required = required_roles
+        .split(',')
+        .map(|role| role.trim().to_lowercase())
+        .filter(|role| !role.is_empty())
+        .collect::<Vec<String>>();
+
+    if normalized_required.is_empty() || normalized_required.iter().any(|role| role == "all") {
+        return true;
+    }
+
+    normalized_required
+        .iter()
+        .any(|required| required == &normalized_person)
+}
+
 pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
     // Determine the path to the database file
     let app_dir = app_handle
@@ -280,6 +301,63 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
             params![],
         )
         .map_err(|e| format!("Failed to add end_date col to events: {}", e))?;
+    }
+    if !table_has_column(&conn, "events", "description")? {
+        conn.execute(
+            "ALTER TABLE events ADD COLUMN description TEXT NULL",
+            params![],
+        )
+        .map_err(|e| format!("Failed to add description col to events: {}", e))?;
+    }
+    if !table_has_column(&conn, "event_attendance", "status")? {
+        conn.execute(
+            "ALTER TABLE event_attendance ADD COLUMN status TEXT NOT NULL DEFAULT 'On Time'",
+            params![],
+        )
+        .map_err(|e| format!("Failed to add status col to event_attendance: {}", e))?;
+    }
+    conn.execute(
+        "UPDATE event_attendance
+         SET status = 'On Time'
+         WHERE status IS NULL OR status NOT IN ('On Time', 'Late')",
+        params![],
+    )
+    .map_err(|e| format!("Failed to normalize event_attendance.status: {}", e))?;
+
+    let events_sql: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='events'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or_default();
+
+    if events_sql.contains("required_role IN ('all', 'student', 'staff', 'professor')") {
+        conn.execute_batch(
+            "
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE IF NOT EXISTS events_new (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_name VARCHAR UNIQUE NOT NULL,
+                description TEXT NULL,
+                schedule_type VARCHAR NULL DEFAULT 'weekly',
+                event_date VARCHAR NOT NULL,
+                start_date VARCHAR NULL,
+                end_date VARCHAR NULL,
+                start_time TIME NOT NULL,
+                end_time TIME NOT NULL,
+                required_role TEXT NOT NULL,
+                is_enabled BOOLEAN NOT NULL DEFAULT 1
+            );
+            INSERT INTO events_new (event_id, event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled)
+            SELECT event_id, event_name, NULL, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled
+            FROM events;
+            DROP TABLE events;
+            ALTER TABLE events_new RENAME TO events;
+            PRAGMA foreign_keys = ON;
+        ",
+        )
+        .map_err(|e| format!("Failed to migrate events.required_role constraint: {}", e))?;
     }
 
     if !table_has_column(&conn, "accounts", "full_name")? {
@@ -1579,7 +1657,7 @@ pub fn get_event_attendance_logs(
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let mut base_query = "
-        SELECT a.attendance_id, p.first_name, p.last_name, p.id_number, p.role, e.event_name, a.scanned_at
+        SELECT a.attendance_id, p.first_name, p.last_name, p.id_number, p.role, e.event_name, a.scanned_at, a.status
         FROM event_attendance a
         JOIN persons p ON a.person_id = p.person_id
         JOIN events e ON a.event_id = e.event_id
@@ -1611,6 +1689,7 @@ pub fn get_event_attendance_logs(
                     role: row.get(4)?,
                     event_name: row.get(5)?,
                     scanned_at: row.get(6)?,
+                    status: row.get(7)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -1629,6 +1708,7 @@ pub fn get_event_attendance_logs(
                     role: row.get(4)?,
                     event_name: row.get(5)?,
                     scanned_at: row.get(6)?,
+                    status: row.get(7)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -1647,6 +1727,7 @@ pub fn get_event_attendance_logs(
                     role: row.get(4)?,
                     event_name: row.get(5)?,
                     scanned_at: row.get(6)?,
+                    status: row.get(7)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -1664,10 +1745,11 @@ pub fn add_event(pool: &DbPool, event: Event, active_admin_id: i64) -> Result<i6
     let is_enabled = if event.is_enabled { 1 } else { 0 };
 
     conn.execute(
-        "INSERT INTO events (event_name, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO events (event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             event.event_name,
+            event.description,
             event.schedule_type,
             event.event_date,
             event.start_date,
@@ -1690,6 +1772,7 @@ pub fn add_event(pool: &DbPool, event: Event, active_admin_id: i64) -> Result<i6
         None,
         Some(json!({
             "event_name": event.event_name,
+            "description": event.description,
             "event_date": event.event_date
         }).to_string()),
     );
@@ -1700,7 +1783,7 @@ pub fn add_event(pool: &DbPool, event: Event, active_admin_id: i64) -> Result<i6
 pub fn get_events(pool: &DbPool) -> Result<Vec<Event>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT event_id, event_name, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled FROM events")
+    let mut stmt = conn.prepare("SELECT event_id, event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled FROM events")
         .map_err(|e| e.to_string())?;
 
     let iter = stmt
@@ -1708,14 +1791,15 @@ pub fn get_events(pool: &DbPool) -> Result<Vec<Event>, String> {
             Ok(Event {
                 event_id: row.get(0)?,
                 event_name: row.get(1)?,
-                schedule_type: row.get(2)?,
-                event_date: row.get(3)?,
-                start_date: row.get(4)?,
-                end_date: row.get(5)?,
-                start_time: row.get(6)?,
-                end_time: row.get(7)?,
-                required_role: row.get(8)?,
-                is_enabled: row.get::<_, i32>(9)? == 1,
+                description: row.get(2)?,
+                schedule_type: row.get(3)?,
+                event_date: row.get(4)?,
+                start_date: row.get(5)?,
+                end_date: row.get(6)?,
+                start_time: row.get(7)?,
+                end_time: row.get(8)?,
+                required_role: row.get(9)?,
+                is_enabled: row.get::<_, i32>(10)? == 1,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -1732,19 +1816,20 @@ pub fn update_event(pool: &DbPool, event_id: i64, event: Event, active_admin_id:
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let old_data: Option<serde_json::Value> = conn.query_row(
-        "SELECT event_name, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled FROM events WHERE event_id = ?1",
+        "SELECT event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled FROM events WHERE event_id = ?1",
         params![event_id],
         |row| {
            Ok(json!({
                "event_name": row.get::<_, String>(0)?,
-               "schedule_type": row.get::<_, String>(1)?,
-               "event_date": row.get::<_, Option<String>>(2)?,
-               "start_date": row.get::<_, Option<String>>(3)?,
-               "end_date": row.get::<_, Option<String>>(4)?,
-               "start_time": row.get::<_, String>(5)?,
-               "end_time": row.get::<_, String>(6)?,
-               "required_role": row.get::<_, String>(7)?,
-               "is_enabled": row.get::<_, i32>(8)? == 1
+               "description": row.get::<_, Option<String>>(1)?,
+               "schedule_type": row.get::<_, String>(2)?,
+               "event_date": row.get::<_, Option<String>>(3)?,
+               "start_date": row.get::<_, Option<String>>(4)?,
+               "end_date": row.get::<_, Option<String>>(5)?,
+               "start_time": row.get::<_, String>(6)?,
+               "end_time": row.get::<_, String>(7)?,
+               "required_role": row.get::<_, String>(8)?,
+               "is_enabled": row.get::<_, i32>(9)? == 1
            }))
         }
     ).ok();
@@ -1752,9 +1837,10 @@ pub fn update_event(pool: &DbPool, event_id: i64, event: Event, active_admin_id:
     let is_enabled = if event.is_enabled { 1 } else { 0 };
 
     conn.execute(
-        "UPDATE events SET event_name = ?1, schedule_type = ?2, event_date = ?3, start_date = ?4, end_date = ?5, start_time = ?6, end_time = ?7, required_role = ?8, is_enabled = ?9 WHERE event_id = ?10",
+        "UPDATE events SET event_name = ?1, description = ?2, schedule_type = ?3, event_date = ?4, start_date = ?5, end_date = ?6, start_time = ?7, end_time = ?8, required_role = ?9, is_enabled = ?10 WHERE event_id = ?11",
         params![
             event.event_name,
+            event.description,
             event.schedule_type,
             event.event_date,
             event.start_date,
@@ -1769,6 +1855,7 @@ pub fn update_event(pool: &DbPool, event_id: i64, event: Event, active_admin_id:
 
     let new_data = json!({
         "event_name": event.event_name,
+        "description": event.description,
         "schedule_type": event.schedule_type,
         "event_date": event.event_date,
         "start_date": event.start_date,
@@ -1796,19 +1883,20 @@ pub fn delete_event(pool: &DbPool, event_id: i64, active_admin_id: i64) -> Resul
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let old_data: Option<serde_json::Value> = conn.query_row(
-        "SELECT event_name, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled FROM events WHERE event_id = ?1",
+        "SELECT event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled FROM events WHERE event_id = ?1",
         params![event_id],
         |row| {
            Ok(json!({
                "event_name": row.get::<_, String>(0)?,
-               "schedule_type": row.get::<_, String>(1)?,
-               "event_date": row.get::<_, Option<String>>(2)?,
-               "start_date": row.get::<_, Option<String>>(3)?,
-               "end_date": row.get::<_, Option<String>>(4)?,
-               "start_time": row.get::<_, String>(5)?,
-               "end_time": row.get::<_, String>(6)?,
-               "required_role": row.get::<_, String>(7)?,
-               "is_enabled": row.get::<_, i32>(8)? == 1
+               "description": row.get::<_, Option<String>>(1)?,
+               "schedule_type": row.get::<_, String>(2)?,
+               "event_date": row.get::<_, Option<String>>(3)?,
+               "start_date": row.get::<_, Option<String>>(4)?,
+               "end_date": row.get::<_, Option<String>>(5)?,
+               "start_time": row.get::<_, String>(6)?,
+               "end_time": row.get::<_, String>(7)?,
+               "required_role": row.get::<_, String>(8)?,
+               "is_enabled": row.get::<_, i32>(9)? == 1
            }))
         }
     ).ok();
@@ -1905,6 +1993,10 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
         } else if scanner_function == "entrance" {
             // Visitor Expiration Check
             if role == "visitor" && !is_created_today {
+                let _ = conn.execute(
+                    "UPDATE persons SET is_active = 0 WHERE person_id = ?1",
+                    params![person_id],
+                );
                 return Ok(ScanResult {
                      success: false,
                      message: "Access Denied: This Visitor Pass expired at 11:59 PM yesterday. Please re-register.".to_string(),
@@ -2042,6 +2134,10 @@ pub fn manual_id_entry(
         } else if scanner_function == "entrance" {
             // Visitor Expiration Check
             if role == "visitor" && !is_created_today {
+                let _ = conn.execute(
+                    "UPDATE persons SET is_active = 0 WHERE person_id = ?1",
+                    params![person_id],
+                );
                 return Ok(ScanResult {
                      success: false,
                      message: "Access Denied: This Visitor Pass expired at 11:59 PM yesterday. Please re-register.".to_string(),
@@ -2290,13 +2386,14 @@ pub fn update_admin_credentials(
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let mut stmt = conn
-        .prepare("SELECT password_hash FROM accounts WHERE account_id = ?1")
+        .prepare("SELECT username, password_hash FROM accounts WHERE account_id = ?1")
         .map_err(|e| e.to_string())?;
 
     let mut rows = stmt.query(params![account_id]).map_err(|e| e.to_string())?;
 
     if let Some(row) = rows.next().map_err(|e| e.to_string())? {
-        let stored_hash: String = row.get(0).map_err(|e| e.to_string())?;
+        let username: String = row.get(0).map_err(|e| e.to_string())?;
+        let stored_hash: String = row.get(1).map_err(|e| e.to_string())?;
         if stored_hash == current_password {
             conn.execute(
                 "UPDATE accounts
@@ -2306,6 +2403,26 @@ pub fn update_admin_credentials(
                      activation_otp_expires_at = NULL
                  WHERE account_id = ?2",
                 params![new_password, account_id],
+            )
+            .map_err(|e| e.to_string())?;
+
+            conn.execute(
+                "INSERT INTO audit_logs (admin_id, action_type, target_table, target_id, old_values, new_values)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    account_id,
+                    "UPDATE",
+                    "accounts",
+                    account_id,
+                    None::<String>,
+                    Some(
+                        json!({
+                            "summary": format!("Password changed for account: {}.", username),
+                            "password_hash": "(updated)"
+                        })
+                        .to_string()
+                    )
+                ],
             )
             .map_err(|e| e.to_string())?;
             return Ok(true);
@@ -2431,6 +2548,14 @@ pub fn reset_admin_password(
     active_admin_id: i64,
 ) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
+    let account_name: String = conn
+        .query_row(
+            "SELECT full_name FROM accounts WHERE account_id = ?1",
+            params![account_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+
     conn.execute(
         "UPDATE accounts
          SET password_hash = ?1,
@@ -2449,7 +2574,13 @@ pub fn reset_admin_password(
         "accounts", 
         account_id, 
         Some(json!({"password_hash": "(old)"}).to_string()), 
-        Some(json!({"password_hash": "(new)"}).to_string())
+        Some(
+            json!({
+                "summary": format!("Password reset for account: {}.", account_name),
+                "password_hash": "(new)"
+            })
+            .to_string()
+        )
     );
     Ok(())
 }
@@ -2870,20 +3001,21 @@ pub fn log_event_attendance(
 
     // 1. Fetch Event and Validate Date/Time
     let event: Event = conn.query_row(
-        "SELECT event_id, event_name, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled FROM events WHERE event_id = ?1",
+        "SELECT event_id, event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled FROM events WHERE event_id = ?1",
         params![event_id],
         |row| {
             Ok(Event {
                 event_id: row.get(0)?,
                 event_name: row.get(1)?,
-                schedule_type: row.get(2)?,
-                event_date: row.get(3)?,
-                start_date: row.get(4)?,
-                end_date: row.get(5)?,
-                start_time: row.get(6)?,
-                end_time: row.get(7)?,
-                required_role: row.get(8)?,
-                is_enabled: row.get::<_, i32>(9)? == 1,
+                description: row.get(2)?,
+                schedule_type: row.get(3)?,
+                event_date: row.get(4)?,
+                start_date: row.get(5)?,
+                end_date: row.get(6)?,
+                start_time: row.get(7)?,
+                end_time: row.get(8)?,
+                required_role: row.get(9)?,
+                is_enabled: row.get::<_, i32>(10)? == 1,
             })
         }
     ).map_err(|_| "Event not found.")?;
@@ -2920,19 +3052,17 @@ pub fn log_event_attendance(
         })
     };
 
-    let is_valid_time = current_time >= event.start_time && current_time <= event.end_time;
-
-    if !is_valid_day || !is_valid_time {
+    if !is_valid_day || current_time > event.end_time {
         return Ok(ScanResult {
             success: false,
-            message: "Attendance Closed: No active event at this time.".to_string(),
+            message: "Event has already ended or is not scheduled for today.".to_string(),
             person_name: None,
             role: None,
         });
     }
 
     // 2. Check if person exists and is active
-    let mut stmt = conn.prepare("SELECT person_id, first_name, last_name, role, is_active, created_at FROM persons WHERE id_number = ?1")
+    let mut stmt = conn.prepare("SELECT person_id, first_name, last_name, role, is_active, DATE(created_at, 'localtime') == DATE('now', 'localtime') as is_created_today FROM persons WHERE id_number = ?1")
         .map_err(|e| e.to_string())?;
 
     let mut person_iter = stmt
@@ -2943,14 +3073,14 @@ pub fn log_event_attendance(
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, i32>(4)? == 1,
-                row.get::<_, Option<String>>(5)?,
+                row.get::<_, i32>(5)? == 1,
             ))
         })
         .map_err(|e| e.to_string())?;
 
     let person_data = person_iter.next();
 
-    if let Some(Ok((person_id, first_name, last_name, role, is_active, created_at))) = person_data {
+    if let Some(Ok((person_id, first_name, last_name, role, is_active, is_created_today))) = person_data {
         if !is_active {
             return Ok(ScanResult {
                 success: false,
@@ -2961,27 +3091,27 @@ pub fn log_event_attendance(
         }
 
         if role == "visitor" {
-            // Check if created_at is strictly today. If it spans back yesterday, deny.
-            if let Some(created_time) = created_at {
-                let created_date = created_time.split(' ').next().unwrap_or("");
-                if created_date != chrono::Local::now().format("%Y-%m-%d").to_string() {
-                    return Ok(ScanResult {
-                        success: false,
-                        message: "Access Denied: This Visitor Pass expired at 11:59 PM yesterday. Please re-register.".to_string(),
-                        person_name: Some(format!("{} {}", first_name, last_name)),
-                        role: Some(role),
-                    });
-                }
+            // Visitor pass is valid only for the local calendar day it was created.
+            if !is_created_today {
+                let _ = conn.execute(
+                    "UPDATE persons SET is_active = 0 WHERE person_id = ?1",
+                    params![person_id],
+                );
+                return Ok(ScanResult {
+                    success: false,
+                    message: "Access Denied: This Visitor Pass expired at 11:59 PM yesterday. Please re-register.".to_string(),
+                    person_name: Some(format!("{} {}", first_name, last_name)),
+                    role: Some(role),
+                });
             }
         }
 
-        // Check if role matches Required Role (unless "all")
-        if event.required_role != "all" && event.required_role.to_lowercase() != role.to_lowercase()
-        {
+        // Check if role matches required role(s).
+        if !role_matches_event_requirement(&event.required_role, &role) {
             return Ok(ScanResult {
                 success: false,
                 message: format!(
-                    "Access Denied: Event requires {} role.",
+                    "Access Denied: Event requires one of the allowed roles ({}).",
                     event.required_role
                 ),
                 person_name: Some(format!("{} {}", first_name, last_name)),
@@ -3008,11 +3138,16 @@ pub fn log_event_attendance(
             });
         }
 
-        // 4. Insert into event_attendance
+        // 4. Insert into event_attendance with punctuality status.
+        let attendance_status = if current_time <= event.start_time {
+            "On Time"
+        } else {
+            "Late"
+        };
         let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         conn.execute(
-            "INSERT INTO event_attendance (event_id, person_id, scanned_at) VALUES (?1, ?2, ?3)",
-            params![event_id, person_id, now],
+            "INSERT INTO event_attendance (event_id, person_id, scanned_at, status) VALUES (?1, ?2, ?3, ?4)",
+            params![event_id, person_id, now, attendance_status],
         )
         .map_err(|e| e.to_string())?;
 

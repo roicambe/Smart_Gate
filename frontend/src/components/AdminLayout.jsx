@@ -20,7 +20,7 @@ export const AdminLayout = ({ view, setView, setIsAdminLoggedIn, adminSession, b
         { id: 'admin_events', label: 'Event Management', icon: Calendar, reqSuper: true },
         { id: 'admin_face', label: 'Face Recognition', icon: ScanFace, reqSuper: true },
         { id: 'admin_audit', label: 'Audit Trail', icon: ShieldAlert, reqSuper: true },
-        { id: 'admin_settings', label: 'System Settings', icon: Settings, reqSuper: true },
+        { id: 'admin_settings', label: 'System Settings', icon: Settings },
     ];
 
     const navItems = rawNavItems.filter(item => !item.reqSuper || isSystemAdministrator);

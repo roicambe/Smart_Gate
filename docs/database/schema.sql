@@ -71,13 +71,14 @@ CREATE TABLE IF NOT EXISTS entry_logs (
 CREATE TABLE IF NOT EXISTS events (
     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_name VARCHAR UNIQUE NOT NULL,
+    description TEXT NULL,
     schedule_type VARCHAR NULL DEFAULT 'weekly',
     event_date VARCHAR NOT NULL,
     start_date VARCHAR NULL,
     end_date VARCHAR NULL,
     start_time TIME NOT NULL,
     end_time TIME NOT NULL,
-    required_role TEXT CHECK(required_role IN ('all', 'student', 'staff', 'professor')) NOT NULL,
+    required_role TEXT NOT NULL,
     is_enabled BOOLEAN NOT NULL DEFAULT 1
 );
 
@@ -86,6 +87,7 @@ CREATE TABLE IF NOT EXISTS event_attendance (
     event_id INTEGER NOT NULL,
     person_id INTEGER NOT NULL,
     scanned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status TEXT CHECK(status IN ('On Time', 'Late')) NOT NULL DEFAULT 'On Time',
     FOREIGN KEY (event_id) REFERENCES events(event_id),
     FOREIGN KEY (person_id) REFERENCES persons(person_id)
 );

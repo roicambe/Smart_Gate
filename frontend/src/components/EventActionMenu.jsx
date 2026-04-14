@@ -17,6 +17,20 @@ export const EventActionMenu = ({ setView }) => {
 
     const isModalOpen = showManualModal || showQrScanner;
 
+    const getLocalDateKey = (date) => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
+
+    const toDateOnly = (dateText) => {
+        if (!dateText || typeof dateText !== 'string') return null;
+        const [year, month, day] = dateText.split('-').map((part) => parseInt(part, 10));
+        if (!year || !month || !day) return null;
+        return new Date(year, month - 1, day);
+    };
+
     const playSuccessBeep = () => {
         try {
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -40,17 +54,26 @@ export const EventActionMenu = ({ setView }) => {
                 const data = await invoke('get_events');
                 const now = new Date();
                 const currentDay = now.toLocaleDateString('en-US', { weekday: 'long' });
-                const currentDate = now.toISOString().split('T')[0];
+                const currentDate = getLocalDateKey(now);
                 const hours = String(now.getHours()).padStart(2, '0');
                 const minutes = String(now.getMinutes()).padStart(2, '0');
                 const currentTime = `${hours}:${minutes}`;
+                const currentDateObj = toDateOnly(currentDate);
 
                 const activeEvents = data.filter(e => {
                     if (!e.is_enabled) return false;
                     
                     let isCorrectDay = false;
                     if (e.schedule_type === 'date_range') {
-                        isCorrectDay = currentDate >= (e.start_date || '') && currentDate <= (e.end_date || '');
+                        const startDateObj = toDateOnly(e.start_date);
+                        const endDateObj = toDateOnly(e.end_date);
+                        isCorrectDay = Boolean(
+                            currentDateObj &&
+                            startDateObj &&
+                            endDateObj &&
+                            currentDateObj >= startDateObj &&
+                            currentDateObj <= endDateObj
+                        );
                     } else {
                         const days = e.event_date ? e.event_date.split(',').map(d => d.trim().toLowerCase()) : [];
                         isCorrectDay = 
