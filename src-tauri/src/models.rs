@@ -127,6 +127,7 @@ pub struct VisitorDetails {
     pub purpose_of_visit: String,
     pub person_to_visit: String,
     pub contact_number: Option<String>,
+    pub created_at: Option<String>,
     pub time_in: Option<String>,
     pub time_out: Option<String>,
 }
@@ -231,5 +232,13 @@ pub struct AuditLogDetails {
 pub struct SystemBranding {
     pub system_name: String,
     pub system_logo: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct BulkImportResult {
+    pub success_count: i64,
+    pub failed_count: i64,
+    pub imported_ids: Vec<String>,
+    pub error_logs: Vec<String>,
 }
 

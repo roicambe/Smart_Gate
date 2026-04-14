@@ -1,4 +1,5 @@
 use crate::models::*;
+use calamine::{open_workbook_auto, Data, Reader};
 use serde_json::json;
 use chrono::{Duration, Local, NaiveDateTime};
 use r2d2::Pool;
@@ -98,6 +99,32 @@ fn generate_six_digit_otp(account_id: i64) -> String {
     let account_bias = (account_id.unsigned_abs() as u128).wrapping_mul(1_103_515_245_u128);
 
     format!("{:06}", ((now ^ account_bias) % 1_000_000) as u32)
+}
+
+fn normalize_lookup_key(value: &str) -> String {
+    value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect()
+}
+
+fn cell_to_string(cell: &Data) -> String {
+    match cell {
+        Data::String(s) => s.trim().to_string(),
+        Data::Float(n) => {
+            if n.fract() == 0.0 {
+                format!("{}", *n as i64)
+            } else {
+                n.to_string()
+            }
+        }
+        Data::Int(n) => n.to_string(),
+        Data::Bool(b) => b.to_string(),
+        Data::Empty => String::new(),
+        _ => cell.to_string().trim().to_string(),
+    }
 }
 
 pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
@@ -820,7 +847,7 @@ pub fn register_user(
     position_title: Option<String>,
     purpose: Option<String>,
     person_to_visit: Option<String>,
-    active_admin_id: i64,
+    active_admin_id: Option<i64>,
 ) -> Result<i64, String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -858,22 +885,313 @@ pub fn register_user(
 
     tx.commit().map_err(|e| e.to_string())?;
 
-    let _ = log_audit_action(
-        pool,
-        active_admin_id,
-        "INSERT",
-        "persons",
-        person_id,
-        None,
-        Some(json!({
-            "id_number": id_number,
-            "role": role,
-            "first_name": first_name,
-            "last_name": last_name
-        }).to_string()),
-    );
+    if let Some(admin_id) = active_admin_id {
+        let _ = log_audit_action(
+            pool,
+            admin_id,
+            "INSERT",
+            "persons",
+            person_id,
+            None,
+            Some(json!({
+                "id_number": id_number,
+                "role": role,
+                "first_name": first_name,
+                "last_name": last_name
+            }).to_string()),
+        );
+    }
 
     Ok(person_id)
+}
+
+pub fn bulk_import_users_from_excel(
+    pool: &DbPool,
+    file_path: &str,
+    role: &str,
+    active_admin_id: i64,
+) -> Result<BulkImportResult, String> {
+    if !matches!(role, "student" | "professor" | "staff") {
+        return Err("Excel import is only supported for students, professors, and staff.".to_string());
+    }
+
+    let mut workbook = open_workbook_auto(file_path)
+        .map_err(|e| format!("Failed to open Excel file: {e}"))?;
+    let first_sheet_name = workbook
+        .sheet_names()
+        .first()
+        .cloned()
+        .ok_or_else(|| "No worksheet found in the selected Excel file.".to_string())?;
+    let range = workbook
+        .worksheet_range(&first_sheet_name)
+        .map_err(|e| format!("Failed to read worksheet: {e}"))?;
+
+    let mut rows = range.rows();
+    let header_row = rows
+        .next()
+        .ok_or_else(|| "The Excel file is empty. Please include a header row.".to_string())?;
+
+    let mut header_index: HashMap<String, usize> = HashMap::new();
+    for (idx, cell) in header_row.iter().enumerate() {
+        let normalized = normalize_lookup_key(&cell_to_string(cell));
+        if !normalized.is_empty() {
+            header_index.insert(normalized, idx);
+        }
+    }
+
+    let require_col = |keys: &[&str]| -> Result<usize, String> {
+        for key in keys {
+            if let Some(idx) = header_index.get(&normalize_lookup_key(key)) {
+                return Ok(*idx);
+            }
+        }
+        Err(format!("Missing required column. Expected one of: {}", keys.join(", ")))
+    };
+
+    let optional_col = |keys: &[&str]| -> Option<usize> {
+        for key in keys {
+            if let Some(idx) = header_index.get(&normalize_lookup_key(key)) {
+                return Some(*idx);
+            }
+        }
+        None
+    };
+
+    let idx_id_number = require_col(&["id_number", "id number"])?;
+    let idx_first_name = require_col(&["first_name", "first name"])?;
+    let idx_last_name = require_col(&["last_name", "last name"])?;
+    let idx_middle_name = optional_col(&["middle_name", "middle name"]);
+    let idx_email = optional_col(&["email"]);
+    let idx_contact = optional_col(&["contact_number", "contact number"]);
+
+    let idx_program_name = optional_col(&["program_name", "program name"]);
+    let idx_program_code = optional_col(&["program_code", "program code"]);
+    let idx_year_level = optional_col(&["year_level", "year level"]);
+
+    let idx_department_name = optional_col(&["department_name", "department name"]);
+    let idx_department_code = optional_col(&["department_code", "department code"]);
+    let idx_position_title = optional_col(&["position_title", "position title"]);
+
+    if role == "student" && idx_program_name.is_none() && idx_program_code.is_none() {
+        return Err("Student import requires either program_name or program_code column.".to_string());
+    }
+    if (role == "professor" || role == "staff")
+        && idx_department_name.is_none()
+        && idx_department_code.is_none()
+    {
+        return Err("Employee import requires either department_name or department_code column.".to_string());
+    }
+
+    let mut conn = pool.get().map_err(|e| e.to_string())?;
+
+    let mut program_lookup: HashMap<String, i64> = HashMap::new();
+    let mut department_lookup: HashMap<String, i64> = HashMap::new();
+
+    if role == "student" {
+        let mut stmt = conn
+            .prepare("SELECT program_id, program_name, program_code FROM programs")
+            .map_err(|e| e.to_string())?;
+        let iter = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        for item in iter {
+            let (program_id, program_name, program_code) = item.map_err(|e| e.to_string())?;
+            program_lookup.insert(normalize_lookup_key(&program_name), program_id);
+            program_lookup.insert(normalize_lookup_key(&program_code), program_id);
+        }
+    }
+
+    if role == "professor" || role == "staff" {
+        let mut stmt = conn
+            .prepare("SELECT department_id, department_name, department_code FROM departments")
+            .map_err(|e| e.to_string())?;
+        let iter = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        for item in iter {
+            let (department_id, department_name, department_code) = item.map_err(|e| e.to_string())?;
+            department_lookup.insert(normalize_lookup_key(&department_name), department_id);
+            department_lookup.insert(normalize_lookup_key(&department_code), department_id);
+        }
+    }
+
+    let mut success_count = 0_i64;
+    let mut failed_count = 0_i64;
+    let mut imported_ids: Vec<String> = Vec::new();
+    let mut error_logs: Vec<String> = Vec::new();
+
+    for (row_idx, row) in rows.enumerate() {
+        let line_number = row_idx + 2;
+        let get_col = |idx_opt: Option<usize>| -> String {
+            idx_opt
+                .and_then(|idx| row.get(idx))
+                .map(cell_to_string)
+                .unwrap_or_default()
+                .trim()
+                .to_string()
+        };
+        let id_number = get_col(Some(idx_id_number));
+        let first_name = get_col(Some(idx_first_name));
+        let last_name = get_col(Some(idx_last_name));
+        let middle_name = get_col(idx_middle_name);
+        let email = get_col(idx_email);
+        let contact_number = get_col(idx_contact);
+
+        if id_number.is_empty() || first_name.is_empty() || last_name.is_empty() {
+            failed_count += 1;
+            error_logs.push(format!("Row {line_number}: Missing required fields (id_number, first_name, or last_name)."));
+            continue;
+        }
+
+        let duplicate_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM persons WHERE id_number = ?1",
+                params![id_number],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if duplicate_count > 0 {
+            failed_count += 1;
+            error_logs.push(format!("Row {line_number}: Duplicate ID Number '{}' already exists.", id_number));
+            continue;
+        }
+
+        let row_result: Result<(), String> = (|| {
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
+            tx.execute(
+                "INSERT INTO persons (id_number, role, first_name, middle_name, last_name, email, contact_number, is_active, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, CURRENT_TIMESTAMP)",
+                params![
+                    id_number,
+                    role,
+                    first_name,
+                    if middle_name.is_empty() { None::<String> } else { Some(middle_name.clone()) },
+                    last_name,
+                    if email.is_empty() { None::<String> } else { Some(email.clone()) },
+                    if contact_number.is_empty() { None::<String> } else { Some(contact_number.clone()) },
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+
+            let person_id = tx.last_insert_rowid();
+
+            if role == "student" {
+                let program_name_value = get_col(idx_program_name);
+                let program_code_value = get_col(idx_program_code);
+                let year_level_value = get_col(idx_year_level);
+                let program_id = [&program_name_value, &program_code_value]
+                    .iter()
+                    .map(|v| normalize_lookup_key(v))
+                    .find_map(|k| program_lookup.get(&k).copied())
+                    .ok_or_else(|| {
+                        format!(
+                            "Row {line_number}: Unable to resolve program from '{}' / '{}'.",
+                            program_name_value, program_code_value
+                        )
+                    })?;
+
+                let year_level = if year_level_value.is_empty() {
+                    None
+                } else {
+                    Some(
+                        year_level_value
+                            .parse::<i64>()
+                            .map_err(|_| format!("Row {line_number}: Invalid year_level '{}'.", year_level_value))?,
+                    )
+                };
+
+                tx.execute(
+                    "INSERT INTO students (person_id, program_id, year_level) VALUES (?1, ?2, ?3)",
+                    params![person_id, program_id, year_level],
+                )
+                .map_err(|e| e.to_string())?;
+            } else {
+                let department_name_value = get_col(idx_department_name);
+                let department_code_value = get_col(idx_department_code);
+                let position_title = get_col(idx_position_title);
+                if position_title.is_empty() {
+                    return Err(format!("Row {line_number}: position_title is required."));
+                }
+
+                let department_id = [&department_name_value, &department_code_value]
+                    .iter()
+                    .map(|v| normalize_lookup_key(v))
+                    .find_map(|k| department_lookup.get(&k).copied())
+                    .ok_or_else(|| {
+                        format!(
+                            "Row {line_number}: Unable to resolve department from '{}' / '{}'.",
+                            department_name_value, department_code_value
+                        )
+                    })?;
+
+                tx.execute(
+                    "INSERT INTO employees (person_id, department_id, position_title) VALUES (?1, ?2, ?3)",
+                    params![person_id, department_id, position_title],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+
+            tx.commit().map_err(|e| e.to_string())?;
+            Ok(())
+        })();
+
+        match row_result {
+            Ok(()) => {
+                success_count += 1;
+                imported_ids.push(id_number);
+            }
+            Err(err) => {
+                failed_count += 1;
+                error_logs.push(err);
+            }
+        }
+    }
+
+    if success_count > 0 {
+        let role_label = match role {
+            "student" => "Student",
+            "professor" => "Professor",
+            "staff" => "Staff",
+            _ => "User",
+        };
+        let summary = format!("Bulk Imported {} {} Profiles via Excel.", success_count, role_label);
+        let _ = log_audit_action(
+            pool,
+            active_admin_id,
+            "INSERT",
+            "persons",
+            0,
+            None,
+            Some(
+                json!({
+                    "summary": summary,
+                    "role": role,
+                    "count": success_count,
+                    "id_numbers": imported_ids
+                })
+                .to_string(),
+            ),
+        );
+    }
+
+    Ok(BulkImportResult {
+        success_count,
+        failed_count,
+        imported_ids,
+        error_logs,
+    })
 }
 
 pub fn update_user(
@@ -1084,17 +1402,30 @@ pub fn get_employees(pool: &DbPool) -> Result<Vec<EmployeeDetails>, String> {
     Ok(list)
 }
 
-pub fn get_visitors(pool: &DbPool) -> Result<Vec<VisitorDetails>, String> {
+pub fn get_visitors(pool: &DbPool, sort_order: Option<String>) -> Result<Vec<VisitorDetails>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
+    let order_direction = match sort_order
+        .unwrap_or_else(|| "desc".to_string())
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "asc" => "ASC",
+        _ => "DESC",
+    };
 
     // Simplistic approach: get the first entry today as time_in, and the last exit today as time_out
-    let mut stmt = conn.prepare(
-        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.email, p.contact_number, v.purpose_of_visit, v.person_to_visit,
+    let query = format!(
+        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.email, p.contact_number, v.purpose_of_visit, v.person_to_visit, p.created_at,
             (SELECT MIN(e.scanned_at) FROM entry_logs e JOIN scanners s ON e.scanner_id = s.scanner_id WHERE e.person_id = p.person_id AND s.function = 'entrance') as time_in,
             (SELECT MAX(e.scanned_at) FROM entry_logs e JOIN scanners s ON e.scanner_id = s.scanner_id WHERE e.person_id = p.person_id AND s.function = 'exit') as time_out
          FROM persons p
          JOIN visitors v ON p.person_id = v.person_id
-         WHERE p.role = 'visitor'"
+         WHERE p.role = 'visitor'
+         ORDER BY p.created_at {order_direction}"
+    );
+
+    let mut stmt = conn.prepare(
+        &query
     ).map_err(|e| e.to_string())?;
 
     let iter = stmt
@@ -1109,8 +1440,9 @@ pub fn get_visitors(pool: &DbPool) -> Result<Vec<VisitorDetails>, String> {
                 contact_number: row.get(6).unwrap_or(None),
                 purpose_of_visit: row.get(7)?,
                 person_to_visit: row.get(8)?,
-                time_in: row.get(9).unwrap_or(None),
-                time_out: row.get(10).unwrap_or(None),
+                created_at: row.get(9).unwrap_or(None),
+                time_in: row.get(10).unwrap_or(None),
+                time_out: row.get(11).unwrap_or(None),
             })
         })
         .map_err(|e| e.to_string())?;
