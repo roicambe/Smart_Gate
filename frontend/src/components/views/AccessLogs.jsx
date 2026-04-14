@@ -163,6 +163,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                         'ID Number': log.id_number,
                         'Role': log.role,
                         'Event Name': log.event_name,
+                        'Status': log.status || 'On Time',
                     };
                 }
             });
@@ -276,7 +277,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
             // Table Data
             const tableColumn = activeTab === 'gateLogs' 
                 ? ["Timestamp", "Name", "ID Number", "Role", "Location", "Action"]
-                : ["Timestamp", "Name", "ID Number", "Role", "Event Name"];
+                : ["Timestamp", "Name", "ID Number", "Role", "Event Name", "Status"];
                 
             const tableRows = [];
 
@@ -296,7 +297,8 @@ export const AccessLogs = ({ branding, adminSession }) => {
                         log.person_name,
                         log.id_number,
                         log.role,
-                        log.event_name
+                        log.event_name,
+                        log.status || 'On Time'
                     ]);
                 }
             });
@@ -555,7 +557,10 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                         <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px] text-center">Action</th>
                                     </>
                                 ) : (
-                                    <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Event Name</th>
+                                    <>
+                                        <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Event Name</th>
+                                        <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Status</th>
+                                    </>
                                 )}
                             </tr>
                         </thead>
@@ -605,9 +610,20 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                 </td>
                                             </>
                                         ) : (
-                                            <td className="px-3 py-1.5 text-slate-600 text-xs font-semibold">
-                                                {log.event_name}
-                                            </td>
+                                            <>
+                                                <td className="px-3 py-1.5 text-slate-600 text-xs font-semibold">
+                                                    {log.event_name}
+                                                </td>
+                                                <td className="px-3 py-1.5">
+                                                    <span className={`px-2 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wider border ${
+                                                        (log.status || 'On Time') === 'Late'
+                                                            ? 'bg-rose-100 text-rose-700 border-rose-200'
+                                                            : 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                                                    }`}>
+                                                        {log.status || 'On Time'}
+                                                    </span>
+                                                </td>
+                                            </>
                                         )}
                                     </tr>
                                 ))
