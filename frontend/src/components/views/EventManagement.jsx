@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Plus, Search, Edit2, Trash2, X, Check, AlertTriangle, Eye } from 'lucide-react';
+import { Calendar, Plus, Search, Edit2, Trash2, X, Check, AlertTriangle, Eye, Filter } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from '../toast/ToastProvider';
 
@@ -9,6 +9,13 @@ const EVENT_ROLE_OPTIONS = [
     { value: 'staff', label: 'Staff' },
     { value: 'professor', label: 'Professor' },
     { value: 'visitor', label: 'Visitor' },
+];
+
+const YEAR_LEVEL_OPTIONS = [
+    { value: 1, label: '1st Year' },
+    { value: 2, label: '2nd Year' },
+    { value: 3, label: '3rd Year' },
+    { value: 4, label: '4th Year' },
 ];
 
 const parseRequiredRoles = (requiredRole) => {
@@ -44,10 +51,32 @@ const formatScheduleLabel = (event) => (
         : (event.event_date || 'N/A')
 );
 
+const formatRequiredPrograms = (programsStr, programsList) => {
+    if (!programsStr) return 'All Programs';
+    const ids = programsStr.split(',');
+    return ids.map(id => {
+        const prog = programsList.find(p => p.program_id.toString() === id);
+        return prog ? prog.program_code : id;
+    }).join(', ');
+};
+
+const formatRequiredYearLevels = (yearLevelsStr) => {
+    if (!yearLevelsStr) return 'All Year Levels';
+    return yearLevelsStr.split(',').map(y => {
+        const option = YEAR_LEVEL_OPTIONS.find(o => o.value.toString() === y.trim());
+        return option ? option.label : y;
+    }).join(', ');
+};
+
 export const EventManagement = ({ branding, adminSession }) => {
     const [events, setEvents] = useState([]);
+    const [programs, setPrograms] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [isLoading, setIsLoading] = useState(true);
+
+    // Filter states
+    const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'enabled', 'disabled'
+    const [filterScheduleType, setFilterScheduleType] = useState('all'); // 'all', 'weekly', 'date_range'
 
     const [showRegisterModal, setShowRegisterModal] = useState(false);
     const [showEditModal, setShowEditModal] = useState(false);
@@ -55,6 +84,8 @@ export const EventManagement = ({ branding, adminSession }) => {
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [selectedEvent, setSelectedEvent] = useState(null);
     const [selectedRoles, setSelectedRoles] = useState(['all']);
+    const [selectedPrograms, setSelectedPrograms] = useState(['all']);
+    const [selectedYearLevels, setSelectedYearLevels] = useState([1, 2, 3, 4]);
     const { showSuccess, showError } = useToast();
 
     const [formData, setFormData] = useState({
@@ -67,6 +98,8 @@ export const EventManagement = ({ branding, adminSession }) => {
         start_time: '',
         end_time: '',
         required_role: 'all',
+        required_programs: null,
+        required_year_levels: null,
         is_enabled: true
     });
 
@@ -83,26 +116,40 @@ export const EventManagement = ({ branding, adminSession }) => {
         }
     };
 
+    const fetchPrograms = async () => {
+        try {
+            const data = await invoke('get_programs');
+            setPrograms(data);
+        } catch (error) {
+            console.error(error);
+            showError('Failed to fetch programs.');
+        }
+    };
+
     useEffect(() => {
         fetchEvents();
+        fetchPrograms();
     }, []);
 
     const handleRegisterSubmit = async (e) => {
         e.preventDefault();
         try {
             const requiredRole = rolesToRequiredRoleValue(selectedRoles);
+            const requiredPrograms = selectedPrograms.includes('all') ? null : selectedPrograms.join(',');
+            const requiredYearLevels = selectedYearLevels.length === 4 ? null : selectedYearLevels.join(',');
             await invoke('add_event', {
                 event: {
                     event_id: 0,
                     ...formData,
-                    required_role: requiredRole
+                    required_role: requiredRole,
+                    required_programs: requiredPrograms,
+                    required_year_levels: requiredYearLevels
                 },
                 activeAdminId: adminSession?.account_id
             });
             showSuccess('Event Created: Event added successfully!');
             setShowRegisterModal(false);
-            setFormData({ event_name: '', description: '', schedule_type: 'weekly', event_date: '', start_date: '', end_date: '', start_time: '', end_time: '', required_role: 'all', is_enabled: true });
-            setSelectedRoles(['all']);
+            resetForm();
             fetchEvents();
         } catch (error) {
             console.error(error);
@@ -122,9 +169,13 @@ export const EventManagement = ({ branding, adminSession }) => {
             start_time: event.start_time || '',
             end_time: event.end_time || '',
             required_role: event.required_role || 'all',
+            required_programs: event.required_programs || null,
+            required_year_levels: event.required_year_levels || null,
             is_enabled: event.is_enabled
         });
         setSelectedRoles(parseRequiredRoles(event.required_role));
+        setSelectedPrograms(event.required_programs ? event.required_programs.split(',') : ['all']);
+        setSelectedYearLevels(event.required_year_levels ? event.required_year_levels.split(',').map(Number) : [1, 2, 3, 4]);
         setShowEditModal(true);
     };
 
@@ -132,12 +183,17 @@ export const EventManagement = ({ branding, adminSession }) => {
         e.preventDefault();
         try {
             const requiredRole = rolesToRequiredRoleValue(selectedRoles);
+            const requiredPrograms = selectedPrograms.includes('all') ? null : selectedPrograms.join(',');
+            const requiredYearLevels = selectedYearLevels.length === 4 ? null : selectedYearLevels.join(',');
+
             await invoke('update_event', {
                 eventId: selectedEvent.event_id,
                 event: {
                     event_id: selectedEvent.event_id,
                     ...formData,
-                    required_role: requiredRole
+                    required_role: requiredRole,
+                    required_programs: requiredPrograms,
+                    required_year_levels: requiredYearLevels
                 },
                 activeAdminId: adminSession?.account_id
             });
@@ -173,8 +229,10 @@ export const EventManagement = ({ branding, adminSession }) => {
     };
 
     const handleRegisterClick = () => {
-        setFormData({ event_name: '', description: '', schedule_type: 'weekly', event_date: '', start_date: '', end_date: '', start_time: '', end_time: '', required_role: 'all', is_enabled: true });
+        setFormData({ event_name: '', description: '', schedule_type: 'weekly', event_date: '', start_date: '', end_date: '', start_time: '', end_time: '', required_role: 'all', required_programs: null, required_year_levels: null, is_enabled: true });
         setSelectedRoles(['all']);
+        setSelectedPrograms(['all']);
+        setSelectedYearLevels([1, 2, 3, 4]);
         setShowRegisterModal(true);
     };
 
@@ -194,9 +252,35 @@ export const EventManagement = ({ branding, adminSession }) => {
         setSelectedRoles([...current, role]);
     };
 
-    const filteredEvents = events.filter(event =>
-        event.event_name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const filteredEvents = events.filter(event => {
+        const matchSearch = event.event_name.toLowerCase().includes(searchQuery.toLowerCase());
+        const matchStatus = filterStatus === 'all' ? true : filterStatus === 'enabled' ? event.is_enabled : !event.is_enabled;
+        const matchType = filterScheduleType === 'all' ? true : event.schedule_type === filterScheduleType;
+        return matchSearch && matchStatus && matchType;
+    });
+
+    const toggleProgram = (val) => {
+        if (val === 'all') {
+            setSelectedPrograms(['all']);
+            return;
+        }
+        const current = selectedPrograms.filter(p => p !== 'all');
+        if (current.includes(val)) {
+            const next = current.filter(p => p !== val);
+            setSelectedPrograms(next.length > 0 ? next : ['all']);
+        } else {
+            setSelectedPrograms([...current, val]);
+        }
+    };
+
+    const toggleYearLevel = (val) => {
+        if (selectedYearLevels.includes(val)) {
+            const next = selectedYearLevels.filter(y => y !== val);
+            setSelectedYearLevels(next.length > 0 ? next : [1, 2, 3, 4]);
+        } else {
+            setSelectedYearLevels([...selectedYearLevels, val].sort());
+        }
+    };
 
     return (
         <div className="w-full h-full min-h-0 space-y-6 animate-in slide-in-from-bottom-4 duration-500 relative flex flex-col">
@@ -213,16 +297,45 @@ export const EventManagement = ({ branding, adminSession }) => {
                 </button>
             </div>
 
-            <div className="p-3 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col lg:flex-row justify-between items-center gap-4">
-                <div className="relative w-full lg:w-1/3">
-                    <Search className="w-5 h-5 absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400" />
-                    <input
-                        type="text"
-                        placeholder="Search Events..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-2.5 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all font-medium"
-                    />
+            <div className="p-3 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row justify-end items-center gap-4">
+                <div className="flex flex-col sm:flex-row gap-2 items-center w-full sm:w-auto">
+                    {/* Filtering: Left side of search bar */}
+                    <div className="flex items-center gap-2 px-3 py-2.5 bg-slate-50 rounded-xl border border-slate-200 w-full sm:w-48">
+                        <Filter className="w-4 h-4 text-slate-400 shrink-0" />
+                        <select
+                            value={filterStatus}
+                            onChange={(e) => setFilterStatus(e.target.value)}
+                            className="bg-transparent text-sm font-medium text-slate-700 outline-none cursor-pointer w-full"
+                        >
+                            <option value="all">Status: All</option>
+                            <option value="enabled">Status: Enabled</option>
+                            <option value="disabled">Status: Disabled</option>
+                        </select>
+                    </div>
+                    <div className="flex items-center gap-2 px-3 py-2.5 bg-slate-50 rounded-xl border border-slate-200 w-full sm:w-48">
+                        <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
+                        <select
+                            value={filterScheduleType}
+                            onChange={(e) => setFilterScheduleType(e.target.value)}
+                            className="bg-transparent text-sm font-medium text-slate-700 outline-none cursor-pointer w-full"
+                        >
+                            <option value="all">Type: All</option>
+                            <option value="weekly">Type: Weekly</option>
+                            <option value="date_range">Type: Date Range</option>
+                        </select>
+                    </div>
+
+                    {/* Search Bar: Right side */}
+                    <div className="relative w-full sm:w-80">
+                        <Search className="w-5 h-5 absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400" />
+                        <input
+                            type="text"
+                            placeholder="Search Events..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-2.5 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all font-medium"
+                        />
+                    </div>
                 </div>
             </div>
 
@@ -291,8 +404,8 @@ export const EventManagement = ({ branding, adminSession }) => {
 
             {(showRegisterModal || showEditModal) && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in">
-                    <div className="bg-black/90 backdrop-blur-3xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-3xl animate-in zoom-in-95 duration-200">
-                        <div className="px-6 py-4 border-b border-white/10 flex justify-between items-center bg-black/50 backdrop-blur-md">
+                    <div className="bg-black/90 backdrop-blur-3xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-5xl animate-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[90vh]">
+                        <div className="px-6 py-4 border-b border-white/10 flex justify-between items-center bg-black/50 backdrop-blur-md shrink-0">
                             <div className="flex items-center gap-3">
                                 <div className="p-2 bg-white/10 rounded-lg border border-white/20">
                                     {showEditModal ? <Edit2 className="w-5 h-5 text-amber-400" /> : <Plus className="w-5 h-5 text-emerald-400" />}
@@ -302,103 +415,177 @@ export const EventManagement = ({ branding, adminSession }) => {
                             <button onClick={() => { setShowRegisterModal(false); setShowEditModal(false); }} className="text-white/50 hover:text-white transition-colors bg-white/5 p-2 rounded-xl hover:bg-white/10"><X className="w-5 h-5" /></button>
                         </div>
 
-                        <form onSubmit={showEditModal ? handleEditSubmit : handleRegisterSubmit} className="p-6 space-y-4">
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                                <div className="lg:col-span-2">
-                                    <label className="block text-xs text-white/60 mb-1 font-medium">Event Name <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                    <input required type="text" value={formData.event_name} onChange={e => setFormData({ ...formData, event_name: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:ring-2 focus:ring-white/20 focus:outline-none" placeholder="e.g. Flag Ceremony" />
-                                </div>
-                                <div className="lg:col-span-2">
-                                    <label className="block text-xs text-white/60 mb-1 font-medium">Description</label>
-                                    <textarea rows={2} value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:ring-2 focus:ring-white/20 focus:outline-none resize-none" placeholder="Describe what the event is about." />
-                                </div>
-                                <div className="lg:col-span-2">
-                                    <div className="flex gap-3 p-1 bg-white/5 rounded-xl border border-white/10 w-fit">
-                                        <button type="button" onClick={() => setFormData({ ...formData, schedule_type: 'weekly' })} className={`px-4 py-2 rounded-lg font-medium transition-all text-sm ${formData.schedule_type === 'weekly' ? 'bg-white text-black shadow-sm' : 'text-white/60 hover:text-white hover:bg-white/10'}`}>Weekly Recurrence</button>
-                                        <button type="button" onClick={() => setFormData({ ...formData, schedule_type: 'date_range' })} className={`px-4 py-2 rounded-lg font-medium transition-all text-sm ${formData.schedule_type === 'date_range' ? 'bg-white text-black shadow-sm' : 'text-white/60 hover:text-white hover:bg-white/10'}`}>Date Range</button>
-                                    </div>
-                                </div>
-
-                                {formData.schedule_type === 'weekly' ? (
-                                    <div className="lg:col-span-2">
-                                        <label className="block text-xs text-white/60 mb-2 font-medium">Select Days <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                        <div className="flex flex-wrap gap-2 p-3 bg-black/40 border border-white/10 rounded-xl">
-                                            {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => {
-                                                const currentDays = formData.event_date ? formData.event_date.split(',').map(d => d.trim()) : [];
-                                                const isChecked = currentDays.includes(day);
-                                                return (
-                                                    <label key={day} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition-all ${isChecked ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-100' : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10 hover:text-white'}`}>
-                                                        <input
-                                                            type="checkbox"
-                                                            className="hidden"
-                                                            checked={isChecked}
-                                                            onChange={(e) => {
-                                                                let newDays = [...currentDays];
-                                                                if (e.target.checked && !newDays.includes(day)) {
-                                                                    newDays.push(day);
-                                                                } else if (!e.target.checked) {
-                                                                    newDays = newDays.filter((d) => d !== day);
-                                                                }
-                                                                setFormData({ ...formData, event_date: newDays.join(', ') });
-                                                            }}
-                                                        />
-                                                        <span className="text-sm font-semibold">{day.substr(0, 3)}</span>
-                                                    </label>
-                                                );
-                                            })}
+                        <form onSubmit={showEditModal ? handleEditSubmit : handleRegisterSubmit} className="flex flex-col flex-1 overflow-hidden">
+                            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                    {/* Left Column: Basic Info & Schedule */}
+                                    <div className="space-y-5">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <div className="w-1 h-4 bg-emerald-500 rounded-full"></div>
+                                            <h3 className="text-sm font-bold text-white/90 uppercase tracking-wider">Basic Information</h3>
                                         </div>
-                                    </div>
-                                ) : (
-                                    <>
+
                                         <div>
-                                            <label className="block text-xs text-white/60 mb-1 font-medium">Start Date <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                            <input required={formData.schedule_type === 'date_range'} type="date" value={formData.start_date || ''} onChange={e => setFormData({ ...formData, start_date: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" style={{ colorScheme: 'dark' }} />
+                                            <label className="block text-xs text-white/60 mb-1 font-medium">Event Name <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                            <input required type="text" value={formData.event_name} onChange={e => setFormData({ ...formData, event_name: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:ring-2 focus:ring-white/20 focus:outline-none" placeholder="e.g. Flag Ceremony" />
                                         </div>
                                         <div>
-                                            <label className="block text-xs text-white/60 mb-1 font-medium">End Date <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                            <input required={formData.schedule_type === 'date_range'} type="date" value={formData.end_date || ''} onChange={e => setFormData({ ...formData, end_date: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" style={{ colorScheme: 'dark' }} />
+                                            <label className="block text-xs text-white/60 mb-1 font-medium">Description</label>
+                                            <textarea rows={2} value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:ring-2 focus:ring-white/20 focus:outline-none resize-none" placeholder="Describe what the event is about." />
                                         </div>
-                                    </>
-                                )}
 
-                                <div className="lg:col-span-2">
-                                    <label className="block text-xs text-white/60 mb-1 font-medium">Required Role <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 p-3 bg-black/40 border border-white/10 rounded-xl">
-                                        {EVENT_ROLE_OPTIONS.map((option) => {
-                                            const active = selectedRoles.includes(option.value);
-                                            return (
-                                                <button
-                                                    key={option.value}
-                                                    type="button"
-                                                    onClick={() => toggleRole(option.value)}
-                                                    className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
-                                                >
-                                                    {option.label}
-                                                </button>
-                                            );
-                                        })}
+                                        <div className="pt-2">
+                                            <label className="block text-xs text-white/60 mb-2 font-medium">Schedule Logic</label>
+                                            <div className="flex gap-3 p-1 bg-white/5 rounded-xl border border-white/10 w-fit">
+                                                <button type="button" onClick={() => setFormData({ ...formData, schedule_type: 'weekly' })} className={`px-4 py-2 rounded-lg font-medium transition-all text-sm ${formData.schedule_type === 'weekly' ? 'bg-white text-black shadow-sm' : 'text-white/60 hover:text-white hover:bg-white/10'}`}>Weekly Recurrence</button>
+                                                <button type="button" onClick={() => setFormData({ ...formData, schedule_type: 'date_range' })} className={`px-4 py-2 rounded-lg font-medium transition-all text-sm ${formData.schedule_type === 'date_range' ? 'bg-white text-black shadow-sm' : 'text-white/60 hover:text-white hover:bg-white/10'}`}>Date Range</button>
+                                            </div>
+                                        </div>
+
+                                        {formData.schedule_type === 'weekly' ? (
+                                            <div>
+                                                <label className="block text-xs text-white/60 mb-2 font-medium">Select Days <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                                <div className="flex flex-wrap gap-2 p-3 bg-black/40 border border-white/10 rounded-xl">
+                                                    {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => {
+                                                        const currentDays = formData.event_date ? formData.event_date.split(',').map(d => d.trim()) : [];
+                                                        const isChecked = currentDays.includes(day);
+                                                        return (
+                                                            <label key={day} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition-all ${isChecked ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-100' : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10 hover:text-white'}`}>
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="hidden"
+                                                                    checked={isChecked}
+                                                                    onChange={(e) => {
+                                                                        let newDays = [...currentDays];
+                                                                        if (e.target.checked && !newDays.includes(day)) {
+                                                                            newDays.push(day);
+                                                                        } else if (!e.target.checked) {
+                                                                            newDays = newDays.filter((d) => d !== day);
+                                                                        }
+                                                                        setFormData({ ...formData, event_date: newDays.join(', ') });
+                                                                    }}
+                                                                />
+                                                                <span className="text-sm font-semibold">{day.substr(0, 3)}</span>
+                                                            </label>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div>
+                                                    <label className="block text-xs text-white/60 mb-1 font-medium">Start Date <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                                    <input required={formData.schedule_type === 'date_range'} type="date" value={formData.start_date || ''} onChange={e => setFormData({ ...formData, start_date: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" style={{ colorScheme: 'dark' }} />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-xs text-white/60 mb-1 font-medium">End Date <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                                    <input required={formData.schedule_type === 'date_range'} type="date" value={formData.end_date || ''} onChange={e => setFormData({ ...formData, end_date: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" style={{ colorScheme: 'dark' }} />
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="block text-xs text-white/60 mb-1 font-medium">Start Time <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                                <input required type="time" value={formData.start_time} onChange={e => setFormData({ ...formData, start_time: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" style={{ colorScheme: 'dark' }} />
+                                            </div>
+                                            <div>
+                                                <label className="block text-xs text-white/60 mb-1 font-medium">End Time <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                                <input required type="time" value={formData.end_time} onChange={e => setFormData({ ...formData, end_time: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" style={{ colorScheme: 'dark' }} />
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-3 p-3 bg-white/5 border border-white/10 rounded-xl">
+                                            <input type="checkbox" id="isEnabled" checked={formData.is_enabled} onChange={e => setFormData({ ...formData, is_enabled: e.target.checked })} className="w-5 h-5 text-emerald-500 bg-black/50 border-white/20 rounded focus:ring-emerald-500/50" />
+                                            <label htmlFor="isEnabled" className="text-sm font-medium text-white">Event Is Enabled</label>
+                                        </div>
                                     </div>
-                                    <p className="mt-2 text-xs text-white/50">
-                                        Select one or more roles. Choose <span className="font-semibold text-white/70">All Roles</span> to allow everyone.
-                                    </p>
-                                </div>
-                                <div>
-                                    <label className="block text-xs text-white/60 mb-1 font-medium">Start Time <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                    <input required type="time" value={formData.start_time} onChange={e => setFormData({ ...formData, start_time: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" style={{ colorScheme: 'dark' }} />
-                                </div>
-                                <div>
-                                    <label className="block text-xs text-white/60 mb-1 font-medium">End Time <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                    <input required type="time" value={formData.end_time} onChange={e => setFormData({ ...formData, end_time: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" style={{ colorScheme: 'dark' }} />
-                                </div>
-                                <div className="lg:col-span-2 flex items-center gap-3 p-3 bg-white/5 border border-white/10 rounded-xl">
-                                    <input type="checkbox" id="isEnabled" checked={formData.is_enabled} onChange={e => setFormData({ ...formData, is_enabled: e.target.checked })} className="w-5 h-5 text-emerald-500 bg-black/50 border-white/20 rounded focus:ring-emerald-500/50" />
-                                    <label htmlFor="isEnabled" className="text-sm font-medium text-white">Event Is Enabled</label>
+
+                                    {/* Right Column: Targeting & Requirements */}
+                                    <div className="lg:pl-8 space-y-5">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <div className="w-1 h-4 bg-blue-500 rounded-full"></div>
+                                            <h3 className="text-sm font-bold text-white/90 uppercase tracking-wider">Targeting & Requirements</h3>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-xs text-white/60 mb-2 font-medium">Required Role <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                            <div className="grid grid-cols-2 gap-2 p-3 bg-black/40 border border-white/10 rounded-xl">
+                                                {EVENT_ROLE_OPTIONS.map((option) => {
+                                                    const active = selectedRoles.includes(option.value);
+                                                    return (
+                                                        <button
+                                                            key={option.value}
+                                                            type="button"
+                                                            onClick={() => toggleRole(option.value)}
+                                                            className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                        >
+                                                            {option.label}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            <p className="mt-2 text-[10px] text-white/40 leading-relaxed italic">
+                                                * Select 'All Roles' to bypass strict role checking.
+                                            </p>
+                                        </div>
+
+                                        {(selectedRoles.includes('all') || selectedRoles.includes('student')) && (
+                                            <>
+                                                <div>
+                                                    <label className="block text-xs text-white/60 mb-2 font-medium">Specific Programs</label>
+                                                    <div className="flex flex-wrap gap-2 p-3 bg-black/40 border border-white/10 rounded-xl max-h-48 overflow-y-auto custom-scrollbar">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => toggleProgram('all')}
+                                                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${selectedPrograms.includes('all') ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                        >
+                                                            All Programs
+                                                        </button>
+                                                        {programs.map((prog) => {
+                                                            const active = selectedPrograms.includes(prog.program_id.toString());
+                                                            return (
+                                                                <button
+                                                                    key={prog.program_id}
+                                                                    type="button"
+                                                                    onClick={() => toggleProgram(prog.program_id.toString())}
+                                                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all truncate max-w-[150px] ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                                    title={prog.program_name}
+                                                                >
+                                                                    {prog.program_code}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+
+                                                <div>
+                                                    <label className="block text-xs text-white/60 mb-2 font-medium">Specific Year Levels</label>
+                                                    <div className="grid grid-cols-2 gap-2 p-3 bg-black/40 border border-white/10 rounded-xl">
+                                                        {YEAR_LEVEL_OPTIONS.map((option) => {
+                                                            const active = selectedYearLevels.includes(option.value);
+                                                            return (
+                                                                <button
+                                                                    key={option.value}
+                                                                    type="button"
+                                                                    onClick={() => toggleYearLevel(option.value)}
+                                                                    className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                                >
+                                                                    {option.label}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
 
-                            <div className="pt-2">
+                            <div className="p-6 pt-2 border-t border-white/10 bg-black/30 shrink-0">
                                 <button type="submit" className={`w-full ${showEditModal ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-[0_0_20px_rgba(245,158,11,0.2)]' : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_20px_rgba(16,185,129,0.2)]'} font-bold text-lg py-4 rounded-xl transition-all focus:outline-none focus:ring-4 focus:ring-white/40 flex justify-center items-center gap-2 hover:scale-[1.01]`}>
-                                    <Check className="w-6 h-6" /> {showEditModal ? 'Save Event' : 'Add Event'}
+                                    <Check className="w-6 h-6" /> {showEditModal ? 'Save Event Configuration' : 'Create New Event'}
                                 </button>
                             </div>
                         </form>
@@ -440,6 +627,18 @@ export const EventManagement = ({ branding, adminSession }) => {
                                     <p className="text-xs uppercase tracking-wider text-slate-500">Allowed Roles</p>
                                     <p className="text-slate-800 font-medium">{formatRequiredRoleLabel(selectedEvent.required_role)}</p>
                                 </div>
+                                {(selectedEvent.required_role.includes('all') || selectedEvent.required_role.includes('student')) && (
+                                    <>
+                                        <div>
+                                            <p className="text-xs uppercase tracking-wider text-slate-500">Target Programs</p>
+                                            <p className="text-slate-800 font-medium">{formatRequiredPrograms(selectedEvent.required_programs, programs)}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-xs uppercase tracking-wider text-slate-500">Target Year Levels</p>
+                                            <p className="text-slate-800 font-medium">{formatRequiredYearLevels(selectedEvent.required_year_levels)}</p>
+                                        </div>
+                                    </>
+                                )}
                                 <div>
                                     <p className="text-xs uppercase tracking-wider text-slate-500">Status</p>
                                     <p className="text-slate-800 font-medium">{selectedEvent.is_enabled ? 'Enabled' : 'Disabled'}</p>

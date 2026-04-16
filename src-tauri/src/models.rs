@@ -34,6 +34,7 @@ pub struct Student {
     pub person_id: i64,
     pub program_id: i64,
     pub year_level: Option<i64>,
+    pub is_irregular: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -62,6 +63,8 @@ pub struct Event {
     pub start_time: String,
     pub end_time: String,
     pub required_role: String,
+    pub required_programs: Option<String>,
+    pub required_year_levels: Option<String>,
     pub is_enabled: bool,
 }
 
@@ -100,6 +103,7 @@ pub struct StudentDetails {
     pub program_id: i64,
     pub program_name: String,
     pub year_level: Option<i64>,
+    pub is_irregular: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -235,6 +239,12 @@ pub struct AuditLogDetails {
 pub struct SystemBranding {
     pub system_name: String,
     pub system_logo: String,
+    pub primary_logo: Option<String>,
+    pub secondary_logo_1: Option<String>,
+    pub secondary_logo_2: Option<String>,
+    pub primary_circle: bool,
+    pub secondary1_circle: bool,
+    pub secondary2_circle: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

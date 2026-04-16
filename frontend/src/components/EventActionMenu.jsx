@@ -10,6 +10,7 @@ export const EventActionMenu = ({ setView }) => {
     const [showQrScanner, setShowQrScanner] = useState(false);
     const [manualId, setManualId] = useState("");
     const [events, setEvents] = useState([]);
+    const [programs, setPrograms] = useState([]);
     const [selectedEventId, setSelectedEventId] = useState(null);
     const [isProcessingScanner, setIsProcessingScanner] = useState(false);
     const [flashGreen, setFlashGreen] = useState(false);
@@ -83,8 +84,11 @@ export const EventActionMenu = ({ setView }) => {
                             days.includes('everyday');
                     }
                     
-                    const isCorrectTime = currentTime >= e.start_time && currentTime <= e.end_time;
-                    return isCorrectDay && isCorrectTime;
+                    const isToday = isCorrectDay;
+                    const hasEnded = currentTime > e.end_time;
+                    
+                    // Show all events that are for today and haven't ended yet
+                    return isToday && !hasEnded;
                 });
                 
                 setEvents(activeEvents);
@@ -98,7 +102,16 @@ export const EventActionMenu = ({ setView }) => {
                 console.error("Failed to fetch events", error);
             }
         };
+        const fetchPrograms = async () => {
+            try {
+                const data = await invoke('get_programs');
+                setPrograms(data);
+            } catch (error) {
+                console.error(error);
+            }
+        };
         fetchEvents();
+        fetchPrograms();
     }, []);
 
     const handleManualSubmit = async (e) => {
@@ -240,6 +253,30 @@ export const EventActionMenu = ({ setView }) => {
         };
     }, [isProcessingScanner, isModalOpen, selectedEventId, events]);
 
+    const currentEvent = events.find(e => e.event_id === parseInt(selectedEventId, 10));
+
+    const getFormatRole = (role) => {
+        if (!role || role.toLowerCase().includes('all')) return 'All Roles';
+        return role.split(',').map(r => r.trim().charAt(0).toUpperCase() + r.trim().slice(1)).join(', ');
+    };
+
+    const getFormatPrograms = (programsStr) => {
+        if (!programsStr || programsStr.toLowerCase().includes('all')) return 'All Programs';
+        const ids = programsStr.split(',').map(id => id.trim());
+        return ids.map(id => {
+            const prog = programs.find(p => p.program_id.toString() === id);
+            return prog ? prog.program_code : id;
+        }).join(', ');
+    };
+
+    const getFormatYearLevels = (ylStr) => {
+        if (!ylStr || ylStr.toLowerCase().includes('all')) return 'All Year Levels';
+        return ylStr.split(',').map(y => {
+            const val = y.trim();
+            return `${val}${['st', 'nd', 'rd', 'th'][parseInt(val, 10) - 1] || 'th'} Year`;
+        }).join(', ');
+    };
+
     return (
         <div className="flex-1 flex flex-col w-full h-full p-8 max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
             
@@ -270,24 +307,61 @@ export const EventActionMenu = ({ setView }) => {
 
             {/* Event Selection Dropdown */}
             {events.length > 0 ? (
-                <div className="w-full max-w-xl mx-auto mb-10 pointer-events-auto">
-                    <label className="block text-sm font-semibold text-white mb-2 pl-1 drop-shadow-sm">Select Active Event</label>
-                    <div className="relative">
-                        <select
-                            value={selectedEventId || ''}
-                            onChange={(e) => setSelectedEventId(e.target.value ? parseInt(e.target.value, 10) : null)}
-                            className="w-full appearance-none bg-white border-2 border-slate-300 text-slate-900 rounded-xl px-6 py-4 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 hover:border-slate-400 transition-all text-lg font-bold shadow-sm cursor-pointer"
-                        >
-                            {events.map(ev => (
-                                <option key={ev.event_id} value={ev.event_id} className="bg-white text-slate-900 font-medium py-2">
-                                    {ev.event_name}
-                                </option>
-                            ))}
-                        </select>
-                        <div className="absolute inset-y-0 right-0 flex items-center px-6 pointer-events-none">
-                            <ArrowRight className="w-6 h-6 rotate-90 text-slate-400" />
+                <div className="w-full max-w-xl mx-auto mb-10 pointer-events-auto space-y-4">
+                    <div>
+                        <label className="block text-sm font-semibold text-white mb-2 pl-1 drop-shadow-sm">Select Active Event</label>
+                        <div className="relative">
+                            <select
+                                value={selectedEventId || ''}
+                                onChange={(e) => setSelectedEventId(e.target.value ? parseInt(e.target.value, 10) : null)}
+                                className="w-full appearance-none bg-white border-2 border-slate-300 text-slate-900 rounded-xl px-6 py-4 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 hover:border-slate-400 transition-all text-lg font-bold shadow-sm cursor-pointer"
+                            >
+                                {events.map(ev => {
+                                    const now = new Date();
+                                    const hours = String(now.getHours()).padStart(2, '0');
+                                    const minutes = String(now.getMinutes()).padStart(2, '0');
+                                    const currentTime = `${hours}:${minutes}`;
+                                    const isActive = currentTime >= ev.start_time && currentTime <= ev.end_time;
+                                    
+                                    return (
+                                        <option key={ev.event_id} value={ev.event_id} className="bg-white text-slate-900 font-medium py-2">
+                                            {isActive ? '🟢 [ACTIVE] ' : '🕒 [UPCOMING] '} {ev.event_name} ({ev.start_time} - {ev.end_time})
+                                        </option>
+                                    );
+                                })}
+                            </select>
+                            <div className="absolute inset-y-0 right-0 flex items-center px-6 pointer-events-none">
+                                <ArrowRight className="w-6 h-6 rotate-90 text-slate-400" />
+                            </div>
                         </div>
                     </div>
+                    
+                    {currentEvent && (
+                        <div className="bg-black/20 backdrop-blur-md border border-white/10 rounded-2xl p-5 animate-in slide-in-from-top-2 duration-300">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                                <div className="space-y-1">
+                                    <p className="text-white/50 font-medium uppercase tracking-wider text-[10px]">Required Roles</p>
+                                    <p className="text-white font-bold">{getFormatRole(currentEvent.required_role)}</p>
+                                </div>
+                                <div className="space-y-1">
+                                    <p className="text-white/50 font-medium uppercase tracking-wider text-[10px]">Schedule</p>
+                                    <p className="text-white font-bold">{currentEvent.start_time} - {currentEvent.end_time}</p>
+                                </div>
+                                {(currentEvent.required_role.includes('all') || currentEvent.required_role.includes('student')) && (
+                                    <>
+                                        <div className="space-y-1">
+                                            <p className="text-white/50 font-medium uppercase tracking-wider text-[10px]">Target Programs</p>
+                                            <p className="text-white font-medium text-xs bg-white/5 px-2 py-1 rounded inline-block">{getFormatPrograms(currentEvent.required_programs)}</p>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <p className="text-white/50 font-medium uppercase tracking-wider text-[10px]">Target Year Levels</p>
+                                            <p className="text-white font-medium text-xs bg-white/5 px-2 py-1 rounded inline-block">{getFormatYearLevels(currentEvent.required_year_levels)}</p>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    )}
                 </div>
             ) : (
                 <div className="w-full max-w-xl mx-auto mb-10 text-center p-4 bg-rose-500/20 border border-rose-500/30 rounded-2xl backdrop-blur-sm shadow-xl">

@@ -381,6 +381,56 @@ pub fn activate_admin_first_login(
 }
 
 #[tauri::command]
+pub async fn forgot_password_request(
+    pool: State<'_, DbPool>,
+    email: String,
+) -> Result<serde_json::Value, String> {
+    let (account_id, _username, full_name, masked_email, otp_code) =
+        db::forgot_password_request(&pool, &email)?;
+
+    // Send the OTP email
+    email::send_password_reset_otp_email(&email, &full_name, &otp_code)
+        .await
+        .map_err(|e| format!("Failed to send email: {}", e))?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "account_id": account_id,
+        "masked_email": masked_email,
+        "message": "Verification code sent successfully"
+    }))
+}
+
+#[tauri::command]
+pub fn verify_forgot_password_otp(
+    pool: State<'_, DbPool>,
+    account_id: i64,
+    otp_code: String,
+) -> Result<serde_json::Value, String> {
+    let is_valid = db::verify_forgot_password_otp(&pool, account_id, &otp_code)?;
+
+    Ok(serde_json::json!({
+        "success": is_valid,
+        "message": if is_valid { "OTP verified" } else { "Invalid verification code" }
+    }))
+}
+
+#[tauri::command]
+pub fn reset_password_with_otp(
+    pool: State<'_, DbPool>,
+    account_id: i64,
+    otp_code: String,
+    new_password: String,
+) -> Result<serde_json::Value, String> {
+    let success = db::reset_password_with_otp(&pool, account_id, &otp_code, &new_password)?;
+
+    Ok(serde_json::json!({
+        "success": success,
+        "message": if success { "Password reset successful" } else { "Failed to reset password" }
+    }))
+}
+
+#[tauri::command]
 pub fn get_dashboard_stats(pool: State<'_, DbPool>) -> Result<DashboardData, String> {
     db::get_dashboard_stats(&pool)
 }
@@ -412,6 +462,7 @@ pub fn register_user(
     contact_number: Option<String>,
     program_id: Option<i64>,
     year_level: Option<i64>,
+    is_irregular: Option<bool>,
     department_id: Option<i64>,
     position_title: Option<String>,
     purpose: Option<String>,
@@ -429,6 +480,7 @@ pub fn register_user(
         contact_number,
         program_id,
         year_level,
+        is_irregular,
         department_id,
         position_title,
         purpose,
@@ -459,6 +511,7 @@ pub fn update_user(
     contact_number: Option<String>,
     program_id: Option<i64>,
     year_level: Option<i64>,
+    is_irregular: Option<bool>,
     department_id: Option<i64>,
     position_title: Option<String>,
     purpose: Option<String>,
@@ -477,6 +530,7 @@ pub fn update_user(
         contact_number,
         program_id,
         year_level,
+        is_irregular,
         department_id,
         position_title,
         purpose,
@@ -510,8 +564,25 @@ pub fn update_system_branding(
     admin_id: i64,
     name: String,
     logo_base64: String,
+    primary_logo: Option<String>,
+    secondary_logo_1: Option<String>,
+    secondary_logo_2: Option<String>,
+    primary_circle: Option<bool>,
+    secondary1_circle: Option<bool>,
+    secondary2_circle: Option<bool>,
 ) -> Result<(), String> {
-    db::update_system_branding(&pool, admin_id, &name, &logo_base64)
+    db::update_system_branding(
+        &pool,
+        admin_id,
+        &name,
+        &logo_base64,
+        primary_logo,
+        secondary_logo_1,
+        secondary_logo_2,
+        primary_circle.unwrap_or(false),
+        secondary1_circle.unwrap_or(false),
+        secondary2_circle.unwrap_or(false),
+    )
 }
 
 #[derive(Serialize)]
