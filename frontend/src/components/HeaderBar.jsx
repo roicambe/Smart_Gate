@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { X, Minus, AlertTriangle, Lock, Eye, EyeOff, ShieldCheck, RotateCcw } from "lucide-react";
+import { X, Minus, AlertTriangle, Lock, Eye, EyeOff, ShieldCheck, RotateCcw, Mail, KeyRound, ArrowLeft } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import logoImage from "../../imgs/plp-logo.png";
+import pasigSeal from "../../imgs/pasig_seal.png";
+import pasigUmaagos from "../../imgs/pasig_umaagos.png";
 import { useToast } from "./toast/ToastProvider";
 
 const appWindow = getCurrentWindow();
@@ -30,13 +32,28 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
     const [showActivationConfirmPassword, setShowActivationConfirmPassword] = useState(false);
     const { showSuccess } = useToast();
 
+    // Forgot Password States
+    const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
+    const [forgotPasswordStep, setForgotPasswordStep] = useState('email'); // 'email', 'otp', 'reset'
+    const [forgotEmail, setForgotEmail] = useState('');
+    const [forgotOtp, setForgotOtp] = useState('');
+    const [forgotAccountId, setForgotAccountId] = useState(null);
+    const [forgotMaskedEmail, setForgotMaskedEmail] = useState('');
+    const [forgotNewPassword, setForgotNewPassword] = useState('');
+    const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
+    const [forgotError, setForgotError] = useState('');
+    const [forgotNotice, setForgotNotice] = useState('');
+    const [isProcessingForgot, setIsProcessingForgot] = useState(false);
+    const [showForgotPassword, setShowForgotPassword] = useState(false);
+    const [showForgotConfirmPassword, setShowForgotConfirmPassword] = useState(false);
+
     useEffect(() => {
         if (typeof onAdminOverlayChange !== "function") {
             return undefined;
         }
 
-        onAdminOverlayChange(showAdminModal || Boolean(pendingActivation));
-    }, [showAdminModal, pendingActivation, onAdminOverlayChange]);
+        onAdminOverlayChange(showAdminModal || Boolean(pendingActivation) || showForgotPasswordModal);
+    }, [showAdminModal, pendingActivation, showForgotPasswordModal, onAdminOverlayChange]);
 
     useEffect(() => () => {
         if (typeof onAdminOverlayChange === "function") {
@@ -189,15 +206,145 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
         }
     };
 
-    const logoSrc = (branding && branding.system_logo && branding.system_logo !== "") ? branding.system_logo : logoImage;
-    const systemName = (branding && branding.system_name) ? branding.system_name : "Pamantasan ng Lungsod ni Roi";
+    // Forgot Password Handlers
+    const resetForgotPasswordState = () => {
+        setShowForgotPasswordModal(false);
+        setForgotPasswordStep('email');
+        setForgotEmail('');
+        setForgotOtp('');
+        setForgotAccountId(null);
+        setForgotMaskedEmail('');
+        setForgotNewPassword('');
+        setForgotConfirmPassword('');
+        setForgotError('');
+        setForgotNotice('');
+        setShowForgotPassword(false);
+        setShowForgotConfirmPassword(false);
+    };
+
+    const handleForgotPasswordEmailSubmit = async (e) => {
+        e.preventDefault();
+        setForgotError('');
+        setForgotNotice('');
+
+        if (!forgotEmail.trim()) {
+            setForgotError('Please enter your email address.');
+            return;
+        }
+
+        setIsProcessingForgot(true);
+
+        try {
+            const response = await invoke('forgot_password_request', { email: forgotEmail.trim() });
+            if (response.success) {
+                setForgotAccountId(response.account_id);
+                setForgotMaskedEmail(response.masked_email);
+                setForgotNotice(`Verification code sent to ${response.masked_email}`);
+                setForgotPasswordStep('otp');
+            } else {
+                setForgotError(response.message || 'Email not found in our records.');
+            }
+        } catch (error) {
+            console.error(error);
+            setForgotError(typeof error === 'string' ? error : 'Failed to process request.');
+        } finally {
+            setIsProcessingForgot(false);
+        }
+    };
+
+    const handleForgotPasswordOtpSubmit = async (e) => {
+        e.preventDefault();
+        setForgotError('');
+
+        if (forgotOtp.length !== 6) {
+            setForgotError('Enter the 6-digit OTP code.');
+            return;
+        }
+
+        setIsProcessingForgot(true);
+
+        try {
+            const response = await invoke('verify_forgot_password_otp', {
+                accountId: forgotAccountId,
+                otpCode: forgotOtp
+            });
+            if (response.success) {
+                setForgotPasswordStep('reset');
+            } else {
+                setForgotError(response.message || 'Invalid verification code.');
+            }
+        } catch (error) {
+            console.error(error);
+            setForgotError(typeof error === 'string' ? error : 'Verification failed.');
+        } finally {
+            setIsProcessingForgot(false);
+        }
+    };
+
+    const handleForgotPasswordResetSubmit = async (e) => {
+        e.preventDefault();
+        setForgotError('');
+
+        if (forgotNewPassword !== forgotConfirmPassword) {
+            setForgotError('Passwords do not match.');
+            return;
+        }
+
+        if (forgotNewPassword.length < 6) {
+            setForgotError('Password must be at least 6 characters.');
+            return;
+        }
+
+        setIsProcessingForgot(true);
+
+        try {
+            const response = await invoke('reset_password_with_otp', {
+                accountId: forgotAccountId,
+                otpCode: forgotOtp,
+                newPassword: forgotNewPassword
+            });
+            if (response.success) {
+                showSuccess('Password reset successfully! Please login with your new password.');
+                resetForgotPasswordState();
+                setShowAdminModal(true);
+            } else {
+                setForgotError(response.message || 'Failed to reset password.');
+            }
+        } catch (error) {
+            console.error(error);
+            setForgotError(typeof error === 'string' ? error : 'Password reset failed.');
+        } finally {
+            setIsProcessingForgot(false);
+        }
+    };
+
+    // Resolve logos: use DB-saved value OR fall back to bundled assets
+    const logoSrc = (branding && branding.primary_logo && branding.primary_logo !== "") ? branding.primary_logo : logoImage;
+    const secondaryLogo1 = (branding && branding.secondary_logo_1 && branding.secondary_logo_1 !== "") ? branding.secondary_logo_1 : pasigSeal;
+    const secondaryLogo2 = (branding && branding.secondary_logo_2 && branding.secondary_logo_2 !== "") ? branding.secondary_logo_2 : pasigUmaagos;
+    const systemName = (branding && branding.system_name) ? branding.system_name : "Smart Gate System";
+    
+    // Individual Circle Formatting
+    const primaryCircleClass = branding?.primary_circle ? "rounded-full" : "rounded-none";
+    const secondary1CircleClass = branding?.secondary1_circle ? "rounded-full" : "rounded-none";
+    const secondary2CircleClass = branding?.secondary2_circle ? "rounded-full" : "rounded-none";
 
     return (
         <>
             <div className="flex h-16 w-full select-none items-center justify-between border-b border-white/10 bg-black/20 px-6 text-white backdrop-blur-md">
                 <div className="pointer-events-none flex items-center gap-4">
-                    <img src={logoSrc} alt="System Logo" className="h-12 w-12 rounded-full object-cover drop-shadow-md" />
-                    <span className="text-xl font-bold tracking-wide drop-shadow-sm">{systemName}</span>
+                    <div className="flex items-center gap-2">
+                        <div className={`h-11 w-11 flex items-center justify-center overflow-hidden flex-shrink-0 ${secondary1CircleClass}`}>
+                            <img src={secondaryLogo1} alt="Secondary Logo 1" className={`w-full h-full ${branding?.secondary1_circle ? 'object-cover' : 'object-contain'} drop-shadow-md`} />
+                        </div>
+                        <div className={`h-11 w-11 flex items-center justify-center overflow-hidden flex-shrink-0 ${secondary2CircleClass}`}>
+                            <img src={secondaryLogo2} alt="Secondary Logo 2" className={`w-full h-full ${branding?.secondary2_circle ? 'object-cover' : 'object-contain'} drop-shadow-md`} />
+                        </div>
+                        <div className={`h-11 w-11 flex items-center justify-center overflow-hidden flex-shrink-0 ${primaryCircleClass}`}>
+                            <img src={logoSrc} alt="Primary Logo" className={`w-full h-full ${branding?.primary_circle ? 'object-cover' : 'object-contain'} drop-shadow-md`} />
+                        </div>
+                    </div>
+                    <span className="text-xl font-bold tracking-wide drop-shadow-sm line-clamp-1">{systemName}</span>
                 </div>
 
                 <div className="flex items-center space-x-6">
@@ -314,6 +461,15 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
                                 )}
                             </div>
                             {loginError && <div className="mb-4 text-center text-sm text-rose-400">{loginError}</div>}
+                            <div className="mb-4 text-center">
+                                <button
+                                    type="button"
+                                    onClick={() => { setShowAdminModal(false); setShowForgotPasswordModal(true); }}
+                                    className="text-sm text-brand-400 hover:text-brand-300 transition-colors focus:outline-none"
+                                >
+                                    Forgot Password?
+                                </button>
+                            </div>
                             <div className="mt-4 flex gap-3">
                                 <button
                                     type="button"
@@ -443,6 +599,185 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
                                 {isActivating ? 'Activating Account...' : 'Secure & Activate Account'}
                             </button>
                         </form>
+                    </div>
+                </div>
+            )}
+
+            {/* Forgot Password Modal */}
+            {showForgotPasswordModal && (
+                <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <div className="w-full max-w-md overflow-hidden rounded-2xl border border-white/20 bg-slate-900/80 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-200">
+                        {/* Step 1: Email Verification */}
+                        {forgotPasswordStep === 'email' && (
+                            <>
+                                <div className="flex flex-col items-center border-b border-white/10 p-6">
+                                    <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-brand-500/30 bg-brand-500/20 text-brand-400">
+                                        <Mail className="h-7 w-7" />
+                                    </div>
+                                    <h2 className="text-center text-xl font-bold tracking-wide text-white">Forgot Password?</h2>
+                                    <p className="mt-2 text-center text-sm text-white/60">
+                                        Enter your email address to receive a verification code.
+                                    </p>
+                                </div>
+                                <form onSubmit={handleForgotPasswordEmailSubmit} className="p-6 space-y-4">
+                                    <div>
+                                        <label className="block text-sm text-white/60 mb-2 font-medium">Email Address</label>
+                                        <input
+                                            type="email"
+                                            placeholder="Enter your email..."
+                                            value={forgotEmail}
+                                            onChange={(e) => setForgotEmail(e.target.value)}
+                                            className="w-full rounded-lg border border-white/10 bg-black/40 px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+                                            autoFocus
+                                            required
+                                        />
+                                    </div>
+                                    {forgotError && <div className="text-center text-sm text-rose-400">{forgotError}</div>}
+                                    {forgotNotice && <div className="text-center text-sm text-emerald-400">{forgotNotice}</div>}
+                                    <div className="flex gap-3 pt-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => { resetForgotPasswordState(); setShowAdminModal(true); }}
+                                            className="flex-1 rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 font-medium text-white/80 transition-all hover:bg-white/10 hover:text-white focus:outline-none"
+                                        >
+                                            Back to Login
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            disabled={isProcessingForgot}
+                                            className="flex-1 rounded-lg bg-brand-600 px-4 py-2.5 font-medium text-white shadow-lg shadow-brand-500/25 transition-all hover:bg-brand-500 focus:outline-none disabled:opacity-70"
+                                        >
+                                            {isProcessingForgot ? 'Sending...' : 'Send Code'}
+                                        </button>
+                                    </div>
+                                </form>
+                            </>
+                        )}
+
+                        {/* Step 2: OTP Entry */}
+                        {forgotPasswordStep === 'otp' && (
+                            <>
+                                <div className="flex flex-col items-center border-b border-white/10 p-6">
+                                    <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-brand-500/30 bg-brand-500/20 text-brand-400">
+                                        <KeyRound className="h-7 w-7" />
+                                    </div>
+                                    <h2 className="text-center text-xl font-bold tracking-wide text-white">Enter Verification Code</h2>
+                                    <p className="mt-2 text-center text-sm text-white/60">
+                                        Enter the 6-digit code sent to <span className="font-semibold text-white">{forgotMaskedEmail}</span>
+                                    </p>
+                                </div>
+                                <form onSubmit={handleForgotPasswordOtpSubmit} className="p-6 space-y-4">
+                                    <div>
+                                        <label className="block text-sm text-white/60 mb-2 font-medium">6-Digit Code</label>
+                                        <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            maxLength={6}
+                                            placeholder="123456"
+                                            value={forgotOtp}
+                                            onChange={(e) => setForgotOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                            className="w-full rounded-lg border border-white/10 bg-black/40 px-4 py-3 text-center font-mono text-lg tracking-[0.35em] text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+                                            autoFocus
+                                            required
+                                        />
+                                    </div>
+                                    {forgotError && <div className="text-center text-sm text-rose-400">{forgotError}</div>}
+                                    <div className="flex gap-3 pt-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setForgotPasswordStep('email')}
+                                            className="flex items-center justify-center gap-1 rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 font-medium text-white/80 transition-all hover:bg-white/10 hover:text-white focus:outline-none"
+                                        >
+                                            <ArrowLeft className="h-4 w-4" /> Back
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            disabled={isProcessingForgot}
+                                            className="flex-1 rounded-lg bg-brand-600 px-4 py-2.5 font-medium text-white shadow-lg shadow-brand-500/25 transition-all hover:bg-brand-500 focus:outline-none disabled:opacity-70"
+                                        >
+                                            {isProcessingForgot ? 'Verifying...' : 'Verify Code'}
+                                        </button>
+                                    </div>
+                                </form>
+                            </>
+                        )}
+
+                        {/* Step 3: Password Reset */}
+                        {forgotPasswordStep === 'reset' && (
+                            <>
+                                <div className="flex flex-col items-center border-b border-white/10 p-6">
+                                    <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-emerald-500/30 bg-emerald-500/20 text-emerald-400">
+                                        <Lock className="h-7 w-7" />
+                                    </div>
+                                    <h2 className="text-center text-xl font-bold tracking-wide text-white">Reset Password</h2>
+                                    <p className="mt-2 text-center text-sm text-white/60">
+                                        Create a new password for your account.
+                                    </p>
+                                </div>
+                                <form onSubmit={handleForgotPasswordResetSubmit} className="p-6 space-y-4">
+                                    <div>
+                                        <label className="block text-sm text-white/60 mb-2 font-medium">New Password</label>
+                                        <div className="relative">
+                                            <input
+                                                type={showForgotPassword ? "text" : "password"}
+                                                placeholder="Enter new password..."
+                                                value={forgotNewPassword}
+                                                onChange={(e) => setForgotNewPassword(e.target.value)}
+                                                className="w-full rounded-lg border border-white/10 bg-black/40 px-4 py-3 pr-12 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+                                                required
+                                                minLength={6}
+                                                autoFocus
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowForgotPassword(!showForgotPassword)}
+                                                className="absolute inset-y-0 right-0 flex items-center px-3 text-white/60 hover:text-white"
+                                            >
+                                                {showForgotPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm text-white/60 mb-2 font-medium">Confirm Password</label>
+                                        <div className="relative">
+                                            <input
+                                                type={showForgotConfirmPassword ? "text" : "password"}
+                                                placeholder="Confirm new password..."
+                                                value={forgotConfirmPassword}
+                                                onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                                                className="w-full rounded-lg border border-white/10 bg-black/40 px-4 py-3 pr-12 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+                                                required
+                                                minLength={6}
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowForgotConfirmPassword(!showForgotConfirmPassword)}
+                                                className="absolute inset-y-0 right-0 flex items-center px-3 text-white/60 hover:text-white"
+                                            >
+                                                {showForgotConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {forgotError && <div className="text-center text-sm text-rose-400">{forgotError}</div>}
+                                    <div className="flex gap-3 pt-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => setForgotPasswordStep('otp')}
+                                            className="flex items-center justify-center gap-1 rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 font-medium text-white/80 transition-all hover:bg-white/10 hover:text-white focus:outline-none"
+                                        >
+                                            <ArrowLeft className="h-4 w-4" /> Back
+                                        </button>
+                                        <button
+                                            type="submit"
+                                            disabled={isProcessingForgot}
+                                            className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 font-medium text-white shadow-lg shadow-emerald-500/25 transition-all hover:bg-emerald-500 focus:outline-none disabled:opacity-70"
+                                        >
+                                            {isProcessingForgot ? 'Resetting...' : 'Reset Password'}
+                                        </button>
+                                    </div>
+                                </form>
+                            </>
+                        )}
                     </div>
                 </div>
             )}

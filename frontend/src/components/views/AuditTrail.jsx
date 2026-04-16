@@ -673,31 +673,27 @@ export const AuditTrail = ({ branding, adminSession }) => {
             </div>
 
             {/* Filter Section  */}
-            <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col lg:flex-row gap-4">
+            <div className="p-3 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col lg:flex-row gap-4">
                 {/* Search & Action (Upper row on small screens) */}
-                <div className="flex flex-col sm:flex-row gap-4 flex-1">
-                    <div className="relative w-full sm:max-w-xs">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <Search className="h-5 w-5 text-slate-400" />
-                        </div>
+                <div className="flex flex-col sm:flex-row gap-2 items-center flex-1">
+                    <div className="relative w-full sm:w-80">
+                        <Search className="w-5 h-5 absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400" />
                         <input
                             type="text"
-                            className="block w-full pl-10 pr-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 sm:text-sm transition-all font-medium"
+                            className="block w-full pl-11 pr-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all font-medium"
                             placeholder="Search Admin, Table, or Action..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
                     </div>
-                    <div className="relative w-full sm:w-48">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <Filter className="h-4 w-4 text-slate-400" />
-                        </div>
+                    <div className="flex items-center gap-2 px-3 py-2.5 bg-slate-50 rounded-xl border border-slate-200 w-full sm:w-48">
+                        <Filter className="w-4 h-4 text-slate-400 shrink-0" />
                         <select
                             value={actionFilter}
                             onChange={(e) => setActionFilter(e.target.value)}
-                            className="block w-full pl-9 pr-8 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 sm:text-sm transition-all appearance-none cursor-pointer font-medium"
+                            className="bg-transparent text-sm font-medium text-slate-700 outline-none cursor-pointer w-full"
                         >
-                            <option value="All">All Actions</option>
+                            <option value="All">Action: All</option>
                             <option value="INSERT">INSERT</option>
                             <option value="UPDATE">UPDATE</option>
                             <option value="DELETE">DELETE</option>
