@@ -235,3 +235,62 @@ pub async fn send_verification_otp(
         challenge.masked_email
     ))
 }
+
+pub async fn send_password_reset_otp_email(
+    email: &str,
+    full_name: &str,
+    otp_code: &str,
+) -> Result<(), String> {
+    let requested_at = Local::now();
+    let requested_at_display = requested_at.format("%B %d, %Y at %I:%M:%S %p").to_string();
+    let requested_at_subject = requested_at.format("%I:%M %p").to_string();
+    let transaction_id = format!("RESET-{}-OTP", requested_at.format("%Y%m%d%H%M%S"));
+
+    let html_content = format!(
+        "<html>\
+        <body style=\"margin: 0; padding: 0; background-color: #f8fafc; font-family: Arial, sans-serif; color: #0f172a;\">\
+            <div style=\"max-width: 640px; margin: 0 auto; padding: 24px 16px;\">\
+                <div style=\"background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; overflow: hidden;\">\
+                    <div style=\"background-color: #0f172a; padding: 24px 28px; text-align: center;\">\
+                        <div style=\"font-size: 24px; font-weight: 700; color: #ffffff; margin-bottom: 6px;\">Smart Gate - Password Reset</div>\
+                        <div style=\"font-size: 13px; color: #cbd5e1; letter-spacing: 0.06em; text-transform: uppercase;\">Password Recovery</div>\
+                    </div>\
+                    <div style=\"padding: 28px;\">\
+                        <p style=\"margin: 0 0 16px; font-size: 18px; font-weight: 700; color: #0f172a;\">Hello {},</p>\
+                        <p style=\"margin: 0 0 18px; font-size: 15px; line-height: 1.7; color: #334155;\">You requested a password reset. Use the verification code below to reset your password.</p>\
+                        <div style=\"margin: 0 0 22px; border-radius: 16px; background-color: #1e293b; border: 1px solid #0f172a; padding: 22px; text-align: center;\">\
+                            <div style=\"margin: 0 0 10px; font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #cbd5e1;\">6-Digit Verification Code</div>\
+                            <div style=\"font-size: 34px; font-weight: 700; letter-spacing: 0.22em; color: #ffffff;\">{}</div>\
+                        </div>\
+                        <div style=\"margin: 0 0 18px; padding: 16px 18px; border-radius: 14px; background-color: #f8fafc; border: 1px solid #cbd5e1;\">\
+                            <p style=\"margin: 0; font-size: 14px; line-height: 1.7; color: #334155;\">This code was requested at <span style=\"font-weight: 700; color: #0f172a;\">{}</span> and will expire in <span style=\"font-weight: 700; color: #0f172a;\">15 minutes</span>.</p>\
+                        </div>\
+                        <p style=\"margin: 0 0 18px; font-size: 14px; line-height: 1.7; color: #475569;\">If you did not request this password reset, please contact your System Administrator immediately.</p>\
+                        <div style=\"margin-top: 22px; padding-top: 16px; border-top: 1px solid #e2e8f0; font-size: 12px; line-height: 1.6; color: #64748b; text-align: center;\">\
+                            Transaction ID: {} | Processed at: {}\
+                        </div>\
+                    </div>\
+                </div>\
+            </div>\
+        </body>\
+        </html>",
+        full_name, otp_code, requested_at_display, transaction_id, requested_at_display
+    );
+
+    let payload = json!({
+        "sender": {
+            "name": "Smart Gate Security",
+            "email": "roicambe02@gmail.com"
+        },
+        "to": [
+            {
+                "email": email,
+                "name": full_name
+            }
+        ],
+        "subject": format!("Password Reset Code [{}]", requested_at_subject),
+        "htmlContent": html_content
+    });
+
+    send_brevo_email(payload).await
+}

@@ -44,7 +44,7 @@ export const SystemSettings = ({ setIsAdminLoggedIn, setView, adminSession, bran
                                     : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/50'
                                     }`}
                             >
-                                System Branding
+                                Institutional Branding
                             </button>
                             <button
                                 onClick={() => setActiveTab('admin_accounts')}

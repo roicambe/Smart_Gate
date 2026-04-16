@@ -148,6 +148,25 @@ fn role_matches_event_requirement(required_roles: &str, person_role: &str) -> bo
         .any(|required| required == &normalized_person)
 }
 
+fn id_matches_requirement(requirement_str: &Option<String>, id_to_check: &str) -> bool {
+    if let Some(req_str) = requirement_str {
+        if req_str.is_empty() {
+            return true;
+        }
+        let normalized_req = req_str
+            .split(',')
+            .map(|s| s.trim())
+            .collect::<Vec<&str>>();
+
+        if normalized_req.is_empty() || normalized_req.iter().any(|&s| s.to_lowercase() == "all") {
+            return true;
+        }
+
+        return normalized_req.iter().any(|&s| s == id_to_check);
+    }
+    true
+}
+
 pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
     // Determine the path to the database file
     let app_dir = app_handle
@@ -280,6 +299,19 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
         .map_err(|e| format!("Failed to migrate visitors id_presented: {}", e))?;
     }
 
+    if !table_has_column(&conn, "students", "is_irregular")? {
+        conn.execute(
+            "ALTER TABLE students ADD COLUMN is_irregular BOOLEAN NOT NULL DEFAULT 0",
+            params![],
+        )
+        .map_err(|e| format!("Failed to add is_irregular col to students: {}", e))?;
+    }
+
+    // Add new branding settings
+    let _ = conn.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('primary_logo', '')", params![]);
+    let _ = conn.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('secondary_logo_1', '')", params![]);
+    let _ = conn.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('secondary_logo_2', '')", params![]);
+
     // Admin RBAC updates and role normalization.
     if !table_has_column(&conn, "events", "schedule_type")? {
         conn.execute(
@@ -308,6 +340,20 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
             params![],
         )
         .map_err(|e| format!("Failed to add description col to events: {}", e))?;
+    }
+    if !table_has_column(&conn, "events", "required_programs")? {
+        conn.execute(
+            "ALTER TABLE events ADD COLUMN required_programs TEXT NULL",
+            params![],
+        )
+        .map_err(|e| format!("Failed to add required_programs col to events: {}", e))?;
+    }
+    if !table_has_column(&conn, "events", "required_year_levels")? {
+        conn.execute(
+            "ALTER TABLE events ADD COLUMN required_year_levels TEXT NULL",
+            params![],
+        )
+        .map_err(|e| format!("Failed to add required_year_levels col to events: {}", e))?;
     }
     if !table_has_column(&conn, "event_attendance", "status")? {
         conn.execute(
@@ -865,7 +911,7 @@ pub fn get_students(pool: &DbPool) -> Result<Vec<StudentDetails>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.email, p.contact_number, p.is_active,
-                s.program_id, pr.program_name, s.year_level
+                s.program_id, pr.program_name, s.year_level, s.is_irregular
          FROM persons p
          JOIN students s ON p.person_id = s.person_id
          JOIN programs pr ON s.program_id = pr.program_id"
@@ -885,6 +931,7 @@ pub fn get_students(pool: &DbPool) -> Result<Vec<StudentDetails>, String> {
                 program_id: row.get(8)?,
                 program_name: row.get(9)?,
                 year_level: row.get(10).unwrap_or(None),
+                is_irregular: row.get(11).unwrap_or(Some(false)),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -921,6 +968,7 @@ pub fn register_user(
     contact_number: Option<String>,
     program_id: Option<i64>,
     year_level: Option<i64>,
+    is_irregular: Option<bool>,
     department_id: Option<i64>,
     position_title: Option<String>,
     purpose: Option<String>,
@@ -941,8 +989,8 @@ pub fn register_user(
     match role {
         "student" => {
             tx.execute(
-                "INSERT INTO students (person_id, program_id, year_level) VALUES (?1, ?2, ?3)",
-                params![person_id, program_id.unwrap_or(1), year_level],
+                "INSERT INTO students (person_id, program_id, year_level, is_irregular) VALUES (?1, ?2, ?3, ?4)",
+                params![person_id, program_id.unwrap_or(1), year_level, is_irregular.unwrap_or(false)],
             )
             .map_err(|e| e.to_string())?;
         }
@@ -1284,6 +1332,7 @@ pub fn update_user(
     contact_number: Option<String>,
     program_id: Option<i64>,
     year_level: Option<i64>,
+    is_irregular: Option<bool>,
     department_id: Option<i64>,
     position_title: Option<String>,
     purpose: Option<String>,
@@ -1320,8 +1369,8 @@ pub fn update_user(
     match role {
         "student" => {
             tx.execute(
-                "UPDATE students SET program_id = ?1, year_level = ?2 WHERE person_id = ?3",
-                params![program_id.unwrap_or(1), year_level, person_id],
+                "UPDATE students SET program_id = ?1, year_level = ?2, is_irregular = ?3 WHERE person_id = ?4",
+                params![program_id.unwrap_or(1), year_level, is_irregular.unwrap_or(false), person_id],
             )
             .map_err(|e| e.to_string())?;
         }
@@ -1745,8 +1794,8 @@ pub fn add_event(pool: &DbPool, event: Event, active_admin_id: i64) -> Result<i6
     let is_enabled = if event.is_enabled { 1 } else { 0 };
 
     conn.execute(
-        "INSERT INTO events (event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO events (event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, required_programs, required_year_levels, is_enabled)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             event.event_name,
             event.description,
@@ -1757,6 +1806,8 @@ pub fn add_event(pool: &DbPool, event: Event, active_admin_id: i64) -> Result<i6
             event.start_time,
             event.end_time,
             event.required_role,
+            event.required_programs,
+            event.required_year_levels,
             is_enabled
         ],
     ).map_err(|e| e.to_string())?;
@@ -1783,7 +1834,7 @@ pub fn add_event(pool: &DbPool, event: Event, active_admin_id: i64) -> Result<i6
 pub fn get_events(pool: &DbPool) -> Result<Vec<Event>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT event_id, event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled FROM events")
+    let mut stmt = conn.prepare("SELECT event_id, event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, required_programs, required_year_levels, is_enabled FROM events")
         .map_err(|e| e.to_string())?;
 
     let iter = stmt
@@ -1799,7 +1850,9 @@ pub fn get_events(pool: &DbPool) -> Result<Vec<Event>, String> {
                 start_time: row.get(7)?,
                 end_time: row.get(8)?,
                 required_role: row.get(9)?,
-                is_enabled: row.get::<_, i32>(10)? == 1,
+                required_programs: row.get(10)?,
+                required_year_levels: row.get(11)?,
+                is_enabled: row.get::<_, i32>(12)? == 1,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -1816,7 +1869,7 @@ pub fn update_event(pool: &DbPool, event_id: i64, event: Event, active_admin_id:
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let old_data: Option<serde_json::Value> = conn.query_row(
-        "SELECT event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled FROM events WHERE event_id = ?1",
+        "SELECT event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, required_programs, required_year_levels, is_enabled FROM events WHERE event_id = ?1",
         params![event_id],
         |row| {
            Ok(json!({
@@ -1829,7 +1882,9 @@ pub fn update_event(pool: &DbPool, event_id: i64, event: Event, active_admin_id:
                "start_time": row.get::<_, String>(6)?,
                "end_time": row.get::<_, String>(7)?,
                "required_role": row.get::<_, String>(8)?,
-               "is_enabled": row.get::<_, i32>(9)? == 1
+               "required_programs": row.get::<_, Option<String>>(9)?,
+               "required_year_levels": row.get::<_, Option<String>>(10)?,
+               "is_enabled": row.get::<_, i32>(11)? == 1
            }))
         }
     ).ok();
@@ -1837,7 +1892,7 @@ pub fn update_event(pool: &DbPool, event_id: i64, event: Event, active_admin_id:
     let is_enabled = if event.is_enabled { 1 } else { 0 };
 
     conn.execute(
-        "UPDATE events SET event_name = ?1, description = ?2, schedule_type = ?3, event_date = ?4, start_date = ?5, end_date = ?6, start_time = ?7, end_time = ?8, required_role = ?9, is_enabled = ?10 WHERE event_id = ?11",
+        "UPDATE events SET event_name = ?1, description = ?2, schedule_type = ?3, event_date = ?4, start_date = ?5, end_date = ?6, start_time = ?7, end_time = ?8, required_role = ?9, required_programs = ?10, required_year_levels = ?11, is_enabled = ?12 WHERE event_id = ?13",
         params![
             event.event_name,
             event.description,
@@ -1848,6 +1903,8 @@ pub fn update_event(pool: &DbPool, event_id: i64, event: Event, active_admin_id:
             event.start_time,
             event.end_time,
             event.required_role,
+            event.required_programs,
+            event.required_year_levels,
             is_enabled,
             event_id
         ],
@@ -1863,6 +1920,8 @@ pub fn update_event(pool: &DbPool, event_id: i64, event: Event, active_admin_id:
         "start_time": event.start_time,
         "end_time": event.end_time,
         "required_role": event.required_role,
+        "required_programs": event.required_programs,
+        "required_year_levels": event.required_year_levels,
         "is_enabled": event.is_enabled
     });
 
@@ -1883,7 +1942,7 @@ pub fn delete_event(pool: &DbPool, event_id: i64, active_admin_id: i64) -> Resul
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let old_data: Option<serde_json::Value> = conn.query_row(
-        "SELECT event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled FROM events WHERE event_id = ?1",
+        "SELECT event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, required_programs, required_year_levels, is_enabled FROM events WHERE event_id = ?1",
         params![event_id],
         |row| {
            Ok(json!({
@@ -1896,7 +1955,9 @@ pub fn delete_event(pool: &DbPool, event_id: i64, active_admin_id: i64) -> Resul
                "start_time": row.get::<_, String>(6)?,
                "end_time": row.get::<_, String>(7)?,
                "required_role": row.get::<_, String>(8)?,
-               "is_enabled": row.get::<_, i32>(9)? == 1
+               "required_programs": row.get::<_, Option<String>>(9)?,
+               "required_year_levels": row.get::<_, Option<String>>(10)?,
+               "is_enabled": row.get::<_, i32>(11)? == 1
            }))
         }
     ).ok();
@@ -3001,7 +3062,7 @@ pub fn log_event_attendance(
 
     // 1. Fetch Event and Validate Date/Time
     let event: Event = conn.query_row(
-        "SELECT event_id, event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled FROM events WHERE event_id = ?1",
+        "SELECT event_id, event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled, required_programs, required_year_levels FROM events WHERE event_id = ?1",
         params![event_id],
         |row| {
             Ok(Event {
@@ -3016,6 +3077,8 @@ pub fn log_event_attendance(
                 end_time: row.get(8)?,
                 required_role: row.get(9)?,
                 is_enabled: row.get::<_, i32>(10)? == 1,
+                required_programs: row.get(11)?,
+                required_year_levels: row.get(12)?,
             })
         }
     ).map_err(|_| "Event not found.")?;
@@ -3061,8 +3124,21 @@ pub fn log_event_attendance(
         });
     }
 
-    // 2. Check if person exists and is active
-    let mut stmt = conn.prepare("SELECT person_id, first_name, last_name, role, is_active, DATE(created_at, 'localtime') == DATE('now', 'localtime') as is_created_today FROM persons WHERE id_number = ?1")
+    // 2. Check if person exists and is active (including student-specific data if applicable)
+    let mut stmt = conn.prepare("
+        SELECT 
+            p.person_id, 
+            p.first_name, 
+            p.last_name, 
+            p.role, 
+            p.is_active, 
+            DATE(p.created_at, 'localtime') == DATE('now', 'localtime') as is_created_today,
+            s.program_id,
+            s.year_level
+        FROM persons p
+        LEFT JOIN students s ON p.person_id = s.person_id
+        WHERE p.id_number = ?1
+    ")
         .map_err(|e| e.to_string())?;
 
     let mut person_iter = stmt
@@ -3074,13 +3150,15 @@ pub fn log_event_attendance(
                 row.get::<_, String>(3)?,
                 row.get::<_, i32>(4)? == 1,
                 row.get::<_, i32>(5)? == 1,
+                row.get::<_, Option<i64>>(6)?, // program_id
+                row.get::<_, Option<i64>>(7)?, // year_level
             ))
         })
         .map_err(|e| e.to_string())?;
 
     let person_data = person_iter.next();
 
-    if let Some(Ok((person_id, first_name, last_name, role, is_active, is_created_today))) = person_data {
+    if let Some(Ok((person_id, first_name, last_name, role, is_active, is_created_today, program_id, year_level))) = person_data {
         if !is_active {
             return Ok(ScanResult {
                 success: false,
@@ -3117,6 +3195,32 @@ pub fn log_event_attendance(
                 person_name: Some(format!("{} {}", first_name, last_name)),
                 role: Some(role),
             });
+        }
+
+        // 2.1 Enforce Program and Year Level for Students
+        if role == "student" {
+            // Check Program
+            if let Some(p_id) = program_id {
+                if !id_matches_requirement(&event.required_programs, &p_id.to_string()) {
+                    return Ok(ScanResult {
+                        success: false,
+                        message: "Access Denied: Not in a required program for this event.".to_string(),
+                        person_name: Some(format!("{} {}", first_name, last_name)),
+                        role: Some(role),
+                    });
+                }
+            }
+            // Check Year Level
+            if let Some(y_lvl) = year_level {
+                if !id_matches_requirement(&event.required_year_levels, &y_lvl.to_string()) {
+                    return Ok(ScanResult {
+                        success: false,
+                        message: "Access Denied: Not in a required year level for this event.".to_string(),
+                        person_name: Some(format!("{} {}", first_name, last_name)),
+                        role: Some(role),
+                    });
+                }
+            }
         }
 
         // 3. Check if already recorded for this event
@@ -3172,6 +3276,12 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
 
     let mut system_name = "Pamantasan ng Lungsod ni Roi".to_string();
     let mut system_logo = "".to_string();
+    let mut primary_logo: Option<String> = None;
+    let mut secondary_logo_1: Option<String> = None;
+    let mut secondary_logo_2: Option<String> = None;
+    let mut primary_circle: bool = false;
+    let mut secondary1_circle: bool = false;
+    let mut secondary2_circle: bool = false;
 
     let mut stmt = conn
         .prepare("SELECT setting_key, setting_value FROM settings")
@@ -3190,6 +3300,16 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
             match key.as_str() {
                 "system_name" => system_name = value,
                 "system_logo" => system_logo = value,
+                "primary_logo" => primary_logo = Some(value).filter(|v| !v.is_empty()),
+                "secondary_logo_1" => secondary_logo_1 = Some(value).filter(|v| !v.is_empty()),
+                "secondary_logo_2" => secondary_logo_2 = Some(value).filter(|v| !v.is_empty()),
+                "primary_circle" => primary_circle = value == "1" || value.to_lowercase() == "true",
+                "secondary1_circle" => secondary1_circle = value == "1" || value.to_lowercase() == "true",
+                "secondary2_circle" => secondary2_circle = value == "1" || value.to_lowercase() == "true",
+                "circle_logo_format" => {
+                    // Legacy support: if individual ones aren't set yet, they could inherit this
+                    // but we'll prioritize individual ones.
+                }
                 _ => {}
             }
         }
@@ -3198,6 +3318,12 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
     Ok(SystemBranding {
         system_name,
         system_logo,
+        primary_logo,
+        secondary_logo_1,
+        secondary_logo_2,
+        primary_circle,
+        secondary1_circle,
+        secondary2_circle,
     })
 }
 
@@ -3206,36 +3332,18 @@ pub fn update_system_branding(
     admin_id: i64,
     name: &str,
     logo_base64: &str,
+    primary_logo: Option<String>,
+    secondary_logo_1: Option<String>,
+    secondary_logo_2: Option<String>,
+    primary_circle: bool,
+    secondary1_circle: bool,
+    secondary2_circle: bool,
 ) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    // Get old values for audit logging
-    let mut old_system_name = "Pamantasan ng Lungsod ni Roi".to_string();
-    let mut old_system_logo = "".to_string();
-
-    {
-        let mut stmt = tx.prepare("SELECT setting_key, setting_value FROM settings WHERE setting_key IN ('system_name', 'system_logo')")
-            .map_err(|e| e.to_string())?;
-
-        let iter = stmt
-            .query_map([], |row| {
-                let key: String = row.get(0)?;
-                let value: String = row.get(1)?;
-                Ok((key, value))
-            })
-            .map_err(|e| e.to_string())?;
-
-        for item in iter {
-            if let Ok((key, value)) = item {
-                match key.as_str() {
-                    "system_name" => old_system_name = value,
-                    "system_logo" => old_system_logo = value,
-                    _ => {}
-                }
-            }
-        }
-    }
+    // We'll skip extensive audit logging for the 3 new logos to prevent massive bloat unless necessary, 
+    // but we'll do the standard inserts.
 
     // Insert or update system_name
     tx.execute(
@@ -3245,21 +3353,6 @@ pub fn update_system_branding(
     )
     .map_err(|e| e.to_string())?;
 
-    // Log audit for system_name change if it changed
-    if old_system_name != name {
-        let old_values = format!(
-            r#"{{"system_name":"{}"}}"#,
-            old_system_name.replace("\"", "\\\"")
-        );
-        let new_values = format!(r#"{{"system_name":"{}"}}"#, name.replace("\"", "\\\""));
-
-        tx.execute(
-            "INSERT INTO audit_logs (admin_id, action_type, target_table, target_id, old_values, new_values) 
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![admin_id, "UPDATE", "settings", 1_i64, old_values, new_values],
-        ).map_err(|e| e.to_string())?;
-    }
-
     // Insert or update system_logo
     tx.execute(
         "INSERT INTO settings (setting_key, setting_value) VALUES ('system_logo', ?1)
@@ -3268,37 +3361,152 @@ pub fn update_system_branding(
     )
     .map_err(|e| e.to_string())?;
 
-    // Log audit for system_logo change if it changed
-    if old_system_logo != logo_base64 {
-        let old_logo_preview = if old_system_logo.len() > 100 {
-            format!("{}...", &old_system_logo[..100])
-        } else {
-            old_system_logo.clone()
-        };
-        let new_logo_preview = if logo_base64.len() > 100 {
-            format!("{}...", &logo_base64[..100])
-        } else {
-            logo_base64.to_string()
-        };
+    // Insert or update primary_logo
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('primary_logo', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![primary_logo.unwrap_or_default()],
+    )
+    .map_err(|e| e.to_string())?;
 
-        let old_values = format!(
-            r#"{{"system_logo":"{}"}}"#,
-            old_logo_preview.replace("\"", "\\\"")
-        );
-        let new_values = format!(
-            r#"{{"system_logo":"{}"}}"#,
-            new_logo_preview.replace("\"", "\\\"")
-        );
+    // Insert or update secondary_logo_1
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary_logo_1', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![secondary_logo_1.unwrap_or_default()],
+    )
+    .map_err(|e| e.to_string())?;
 
-        tx.execute(
-            "INSERT INTO audit_logs (admin_id, action_type, target_table, target_id, old_values, new_values) 
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![admin_id, "UPDATE", "settings", 2_i64, old_values, new_values],
-        ).map_err(|e| e.to_string())?;
-    }
+    // Insert or update secondary_logo_2
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary_logo_2', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![secondary_logo_2.unwrap_or_default()],
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Insert or update individual circle formats
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('primary_circle', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![if primary_circle { "1" } else { "0" }],
+    ).map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary1_circle', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![if secondary1_circle { "1" } else { "0" }],
+    ).map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary2_circle', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![if secondary2_circle { "1" } else { "0" }],
+    ).map_err(|e| e.to_string())?;
 
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// Forgot Password Functions
+
+pub fn forgot_password_request(pool: &DbPool, email: &str) -> Result<(i64, String, String, String, String), String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    let email_lower = email.trim().to_lowercase();
+
+    let row = conn.query_row(
+        "SELECT account_id, username, full_name, email
+         FROM accounts
+         WHERE LOWER(email) = ?1",
+        params![email_lower],
+        |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        },
+    ).map_err(|_| "Email address not found in our records.".to_string())?;
+
+    let (account_id, username, full_name, actual_email) = row;
+
+    // Generate OTP
+    let otp_code = generate_six_digit_otp(account_id);
+    let expires_at = (Local::now() + Duration::minutes(15)).naive_local().format("%Y-%m-%d %H:%M:%S").to_string();
+
+    conn.execute(
+        "UPDATE accounts
+         SET activation_otp = ?1,
+             activation_otp_expires_at = ?2
+         WHERE account_id = ?3",
+        params![&otp_code, &expires_at, account_id],
+    ).map_err(|e| format!("Failed to store verification code: {}", e))?;
+
+    let masked_email = mask_email(&actual_email);
+
+    Ok((account_id, username, full_name, masked_email, otp_code))
+}
+
+pub fn verify_forgot_password_otp(pool: &DbPool, account_id: i64, otp_code: &str) -> Result<bool, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let row = conn.query_row(
+        "SELECT activation_otp, activation_otp_expires_at
+         FROM accounts
+         WHERE account_id = ?1",
+        params![account_id],
+        |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+            ))
+        },
+    ).map_err(|_| "Account not found.".to_string())?;
+
+    let (stored_otp, otp_expires_at) = row;
+
+    let stored_otp = stored_otp.ok_or_else(|| "No verification code is currently active.".to_string())?;
+    if stored_otp != otp_code {
+        return Ok(false);
+    }
+
+    let otp_expires_at = otp_expires_at.ok_or_else(|| "Verification code has expired.".to_string())?;
+    let parsed_expiry = NaiveDateTime::parse_from_str(&otp_expires_at, "%Y-%m-%d %H:%M:%S")
+        .map_err(|_| "Unable to validate verification code expiry.".to_string())?;
+
+    if Local::now().naive_local() > parsed_expiry {
+        return Err("The verification code has expired. Please request a new one.".to_string());
+    }
+
+    Ok(true)
+}
+
+pub fn reset_password_with_otp(
+    pool: &DbPool,
+    account_id: i64,
+    otp_code: &str,
+    new_password: &str,
+) -> Result<bool, String> {
+    // First verify the OTP is still valid
+    let is_valid = verify_forgot_password_otp(pool, account_id, otp_code)?;
+    if !is_valid {
+        return Ok(false);
+    }
+
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "UPDATE accounts
+         SET password_hash = ?1,
+             activation_otp = NULL,
+             activation_otp_expires_at = NULL
+         WHERE account_id = ?2",
+        params![new_password, account_id],
+    )
+    .map_err(|e| format!("Failed to reset password: {}", e))?;
+
+    Ok(true)
 }
 
 #[cfg(test)]

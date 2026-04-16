@@ -205,8 +205,8 @@ export const AcademicStructure = ({ branding, adminSession }) => {
             </div>
 
             {/* Controls: Tabs, Filter by Department (Programs only), Search */}
-            <div className="p-3 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col lg:flex-row justify-between items-center gap-4">
-                <div className="flex gap-2 p-1 bg-slate-100 rounded-xl">
+            <div className="p-3 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row justify-between items-center gap-4">
+                <div className="flex gap-2 p-1 bg-slate-100 rounded-xl shrink-0">
                     {['department', 'program'].map((tab) => (
                         <button
                             key={tab}
@@ -221,25 +221,25 @@ export const AcademicStructure = ({ branding, adminSession }) => {
                     ))}
                 </div>
 
-                <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-2/3">
+                <div className="flex flex-col sm:flex-row gap-2 items-center w-full sm:w-auto justify-end">
                     {activeTab === 'program' && (
-                        <div className="relative w-full sm:w-56">
-                            <Filter className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                        <div className="flex items-center gap-2 px-3 py-2.5 bg-slate-50 rounded-xl border border-slate-200 w-full sm:w-64">
+                            <Filter className="w-4 h-4 text-slate-400 shrink-0" />
                             <select
                                 value={departmentFilter}
                                 onChange={(e) => setDepartmentFilter(e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/50 font-medium appearance-none cursor-pointer"
+                                className="bg-transparent text-sm font-medium text-slate-700 outline-none cursor-pointer w-full"
                             >
-                                <option value="">All Departments</option>
+                                <option value="">Department: All</option>
                                 {departments.map((d, idx) => (
                                     <option key={`${d.department_id || 'dept'}-${idx}`} value={d.department_id}>
-                                        {d.department_code} - {d.department_name}
+                                        {d.department_code}
                                     </option>
                                 ))}
                             </select>
                         </div>
                     )}
-                    <div className="relative flex-1">
+                    <div className="relative w-full sm:w-80">
                         <Search className="w-5 h-5 absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400" />
                         <input
                             type="text"
