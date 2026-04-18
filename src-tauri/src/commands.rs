@@ -384,9 +384,10 @@ pub fn activate_admin_first_login(
 pub async fn forgot_password_request(
     pool: State<'_, DbPool>,
     email: String,
+    username: String,
 ) -> Result<serde_json::Value, String> {
     let (account_id, _username, full_name, masked_email, otp_code) =
-        db::forgot_password_request(&pool, &email)?;
+        db::forgot_password_request(&pool, &email, &username)?;
 
     // Send the OTP email
     email::send_password_reset_otp_email(&email, &full_name, &otp_code)
