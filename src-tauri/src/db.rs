@@ -184,12 +184,29 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
         r2d2::Pool::new(manager).map_err(|e| format!("Failed to create database pool: {}", e))?;
 
     // Initialize the database with schema.sql
+    let schema = include_str!("../../docs/database/schema.sql");
     let conn = pool
         .get()
         .map_err(|e| format!("Failed to get connection from pool: {}", e))?;
-    let schema = include_str!("../../docs/database/schema.sql");
     conn.execute_batch(schema)
         .map_err(|e| format!("Failed to execute schema: {}", e))?;
+
+    // One-time migration: Convert existing UTC timestamps to Local time strings for consistent display.
+    // We check if this migration has run by looking for a 'timezone_migration_v1' key in settings.
+    let migration_check: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM settings WHERE setting_key = 'timezone_migration_v1'",
+        [],
+        |row| row.get(0)
+    ).unwrap_or(0);
+
+    if migration_check == 0 {
+        let _ = conn.execute_batch("
+            UPDATE audit_logs SET created_at = datetime(created_at, 'localtime');
+            UPDATE accounts SET created_at = datetime(created_at, 'localtime');
+            UPDATE persons SET created_at = datetime(created_at, 'localtime');
+            INSERT INTO settings (setting_key, setting_value) VALUES ('timezone_migration_v1', 'completed');
+        ");
+    }
 
     // Normalize legacy person schema to the current id_number/email/contact_number layout.
     if table_has_column(&conn, "persons", "school_id_number")?
@@ -824,9 +841,10 @@ pub fn add_person(pool: &DbPool, person: Person) -> Result<i64, String> {
 
     let is_active = if person.is_active { 1 } else { 0 };
 
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     conn.execute(
         "INSERT INTO persons (id_number, role, first_name, middle_name, last_name, email, contact_number, face_template_path, is_active, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, CURRENT_TIMESTAMP)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             person.id_number,
             person.role,
@@ -836,7 +854,8 @@ pub fn add_person(pool: &DbPool, person: Person) -> Result<i64, String> {
             person.email,
             person.contact_number,
             person.face_template_path,
-            is_active
+            is_active,
+            now
         ],
     ).map_err(|e| e.to_string())?;
 
@@ -978,10 +997,11 @@ pub fn register_user(
     let mut conn = pool.get().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     tx.execute(
         "INSERT INTO persons (id_number, role, first_name, middle_name, last_name, email, contact_number, is_active, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, CURRENT_TIMESTAMP)",
-        params![id_number, role, first_name, middle_name, last_name, email, contact_number],
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8)",
+        params![id_number, role, first_name, middle_name, last_name, email, contact_number, now],
     ).map_err(|e| e.to_string())?;
 
     let person_id = tx.last_insert_rowid();
@@ -1196,9 +1216,10 @@ pub fn bulk_import_users_from_excel(
 
         let row_result: Result<(), String> = (|| {
             let tx = conn.transaction().map_err(|e| e.to_string())?;
+            let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
             tx.execute(
                 "INSERT INTO persons (id_number, role, first_name, middle_name, last_name, email, contact_number, is_active, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, CURRENT_TIMESTAMP)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8)",
                 params![
                     id_number,
                     role,
@@ -1207,6 +1228,7 @@ pub fn bulk_import_users_from_excel(
                     last_name,
                     if email.is_empty() { None::<String> } else { Some(email.clone()) },
                     if contact_number.is_empty() { None::<String> } else { Some(contact_number.clone()) },
+                    now
                 ],
             )
             .map_err(|e| e.to_string())?;
@@ -2290,10 +2312,11 @@ pub fn log_audit_action(
     }
 
     let conn = pool.get().map_err(|e| e.to_string())?;
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
     conn.execute(
-        "INSERT INTO audit_logs (admin_id, action_type, target_table, target_id, old_values, new_values) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![admin_id, action_type, target_table, target_id, old_values, new_values],
+        "INSERT INTO audit_logs (admin_id, action_type, target_table, target_id, old_values, new_values, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![admin_id, action_type, target_table, target_id, old_values, new_values, now],
     ).map_err(|e| e.to_string())?;
 
     Ok(())
@@ -2546,10 +2569,11 @@ pub fn add_admin_account(
     }
 
     let conn = pool.get().map_err(|e| e.to_string())?;
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     conn.execute(
-        "INSERT INTO accounts (username, password_hash, full_name, email, role, is_first_login, activation_otp, activation_otp_expires_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 1, NULL, NULL)",
-        params![username, normalized_password, full_name, email, role],
+        "INSERT INTO accounts (username, password_hash, full_name, email, role, is_first_login, activation_otp, activation_otp_expires_at, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 1, NULL, NULL, ?6)",
+        params![username, normalized_password, full_name, email, role, now],
     ).map_err(|e| e.to_string())?;
     let target_id = conn.last_insert_rowid();
 
@@ -2756,6 +2780,14 @@ pub fn delete_admin_account(
         params![account_id], 
         |row| row.get(0)
     ).unwrap_or_else(|_| "Unknown".to_string());
+
+    // Reassign audit_logs that reference the to-be-deleted account to the
+    // active admin, so the FK constraint is satisfied without losing history.
+    conn.execute(
+        "UPDATE audit_logs SET admin_id = ?1 WHERE admin_id = ?2",
+        params![active_admin_id, account_id],
+    )
+    .map_err(|e| format!("Failed to reassign audit logs: {}", e))?;
 
     conn.execute(
         "DELETE FROM accounts WHERE account_id = ?1",
@@ -3329,7 +3361,7 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
 
 pub fn update_system_branding(
     pool: &DbPool,
-    admin_id: i64,
+    _admin_id: i64,
     name: &str,
     logo_base64: &str,
     primary_logo: Option<String>,
@@ -3410,15 +3442,16 @@ pub fn update_system_branding(
 
 // Forgot Password Functions
 
-pub fn forgot_password_request(pool: &DbPool, email: &str) -> Result<(i64, String, String, String, String), String> {
+pub fn forgot_password_request(pool: &DbPool, email: &str, username: &str) -> Result<(i64, String, String, String, String), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     let email_lower = email.trim().to_lowercase();
+    let username_lower = username.trim().to_lowercase();
 
     let row = conn.query_row(
         "SELECT account_id, username, full_name, email
          FROM accounts
-         WHERE LOWER(email) = ?1",
-        params![email_lower],
+         WHERE LOWER(email) = ?1 AND LOWER(username) = ?2",
+        params![email_lower, username_lower],
         |row| {
             Ok((
                 row.get::<_, i64>(0)?,
@@ -3427,7 +3460,7 @@ pub fn forgot_password_request(pool: &DbPool, email: &str) -> Result<(i64, Strin
                 row.get::<_, String>(3)?,
             ))
         },
-    ).map_err(|_| "Email address not found in our records.".to_string())?;
+    ).map_err(|_| "No account found matching that username and email address.".to_string())?;
 
     let (account_id, username, full_name, actual_email) = row;
 
@@ -3496,6 +3529,15 @@ pub fn reset_password_with_otp(
 
     let conn = pool.get().map_err(|e| e.to_string())?;
 
+    // Fetch username for the audit entry before the update
+    let account_username: String = conn
+        .query_row(
+            "SELECT username FROM accounts WHERE account_id = ?1",
+            params![account_id],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|_| "Unknown".to_string());
+
     conn.execute(
         "UPDATE accounts
          SET password_hash = ?1,
@@ -3505,6 +3547,23 @@ pub fn reset_password_with_otp(
         params![new_password, account_id],
     )
     .map_err(|e| format!("Failed to reset password: {}", e))?;
+
+    // Audit: actor is the account itself (they are not yet in a session)
+    let _ = log_audit_action(
+        pool,
+        account_id,
+        "UPDATE",
+        "accounts",
+        account_id,
+        Some(json!({ "password_hash": "(old)" }).to_string()),
+        Some(
+            json!({
+                "summary": format!("Password reset via Forgot Password for account: {}.", account_username),
+                "password_hash": "(new)"
+            })
+            .to_string(),
+        ),
+    );
 
     Ok(true)
 }

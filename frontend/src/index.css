@@ -19,6 +19,66 @@
         @apply bg-slate-900 text-slate-100 select-none overflow-hidden m-0 p-0;
     }
 
+    /* ── Cursor rules ──────────────────────────────────────────────────────── */
+
+    /* Pointer cursor for all clickable interactive elements */
+    button,
+    [role="button"],
+    a,
+    label[for],
+    summary,
+    select,
+    [type="checkbox"],
+    [type="radio"],
+    [type="submit"],
+    [type="reset"],
+    [type="file"],
+    [type="color"],
+    [type="range"] {
+        cursor: pointer;
+        pointer-events: auto;
+    }
+
+    /* Text / caret cursor for editable fields */
+    input:not([type="checkbox"]):not([type="radio"]):not([type="submit"])
+        :not([type="reset"]):not([type="button"]):not([type="file"])
+        :not([type="color"]):not([type="range"]),
+    textarea,
+    [contenteditable="true"] {
+        cursor: text;
+        pointer-events: auto;
+    }
+
+    /* Shorthand for the most common text input types */
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    input[type="search"],
+    input[type="tel"],
+    input[type="url"],
+    input[type="number"],
+    input[type="date"],
+    input[type="time"],
+    input[type="datetime-local"],
+    input[type="month"],
+    input[type="week"],
+    textarea {
+        cursor: text;
+        pointer-events: auto;
+    }
+
+    /* Not-allowed for disabled / readonly interactive elements */
+    button:disabled,
+    input:disabled,
+    select:disabled,
+    textarea:disabled,
+    [aria-disabled="true"] {
+        cursor: not-allowed;
+        pointer-events: auto; /* keep auto so the cursor still shows */
+    }
+
+    /* ─────────────────────────────────────────────────────────────────────── */
+
     input[data-password-toggle="custom"]::-ms-reveal,
     input[data-password-toggle="custom"]::-ms-clear {
         display: none;
