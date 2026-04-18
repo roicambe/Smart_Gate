@@ -36,6 +36,7 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
     const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
     const [forgotPasswordStep, setForgotPasswordStep] = useState('email'); // 'email', 'otp', 'reset'
     const [forgotEmail, setForgotEmail] = useState('');
+    const [forgotUsername, setForgotUsername] = useState('');
     const [forgotOtp, setForgotOtp] = useState('');
     const [forgotAccountId, setForgotAccountId] = useState(null);
     const [forgotMaskedEmail, setForgotMaskedEmail] = useState('');
@@ -211,6 +212,7 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
         setShowForgotPasswordModal(false);
         setForgotPasswordStep('email');
         setForgotEmail('');
+        setForgotUsername('');
         setForgotOtp('');
         setForgotAccountId(null);
         setForgotMaskedEmail('');
@@ -227,6 +229,10 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
         setForgotError('');
         setForgotNotice('');
 
+        if (!forgotUsername.trim()) {
+            setForgotError('Please enter your username.');
+            return;
+        }
         if (!forgotEmail.trim()) {
             setForgotError('Please enter your email address.');
             return;
@@ -235,14 +241,17 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
         setIsProcessingForgot(true);
 
         try {
-            const response = await invoke('forgot_password_request', { email: forgotEmail.trim() });
+            const response = await invoke('forgot_password_request', {
+                email: forgotEmail.trim(),
+                username: forgotUsername.trim()
+            });
             if (response.success) {
                 setForgotAccountId(response.account_id);
                 setForgotMaskedEmail(response.masked_email);
                 setForgotNotice(`Verification code sent to ${response.masked_email}`);
                 setForgotPasswordStep('otp');
             } else {
-                setForgotError(response.message || 'Email not found in our records.');
+                setForgotError(response.message || 'Account not found. Check your username and email.');
             }
         } catch (error) {
             console.error(error);
@@ -512,6 +521,7 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
                                         type={showActivationPassword ? "text" : "password"}
                                         value={activationForm.newPassword}
                                         onChange={(e) => setActivationForm({ ...activationForm, newPassword: e.target.value })}
+                                        data-password-toggle="custom"
                                         className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 pr-12 text-white focus:outline-none focus:ring-2 focus:ring-white/20"
                                     />
                                     <button
@@ -533,6 +543,7 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
                                         type={showActivationConfirmPassword ? "text" : "password"}
                                         value={activationForm.confirmPassword}
                                         onChange={(e) => setActivationForm({ ...activationForm, confirmPassword: e.target.value })}
+                                        data-password-toggle="custom"
                                         className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 pr-12 text-white focus:outline-none focus:ring-2 focus:ring-white/20"
                                     />
                                     <button
@@ -607,7 +618,7 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
             {showForgotPasswordModal && (
                 <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm">
                     <div className="w-full max-w-md overflow-hidden rounded-2xl border border-white/20 bg-slate-900/80 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-200">
-                        {/* Step 1: Email Verification */}
+                        {/* Step 1: Email + Username Verification */}
                         {forgotPasswordStep === 'email' && (
                             <>
                                 <div className="flex flex-col items-center border-b border-white/10 p-6">
@@ -616,10 +627,22 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
                                     </div>
                                     <h2 className="text-center text-xl font-bold tracking-wide text-white">Forgot Password?</h2>
                                     <p className="mt-2 text-center text-sm text-white/60">
-                                        Enter your email address to receive a verification code.
+                                        Enter your username and email address to receive a verification code.
                                     </p>
                                 </div>
                                 <form onSubmit={handleForgotPasswordEmailSubmit} className="p-6 space-y-4">
+                                    <div>
+                                        <label className="block text-sm text-white/60 mb-2 font-medium">Username</label>
+                                        <input
+                                            type="text"
+                                            placeholder="Enter your username..."
+                                            value={forgotUsername}
+                                            onChange={(e) => setForgotUsername(e.target.value)}
+                                            className="w-full rounded-lg border border-white/10 bg-black/40 px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+                                            autoFocus
+                                            required
+                                        />
+                                    </div>
                                     <div>
                                         <label className="block text-sm text-white/60 mb-2 font-medium">Email Address</label>
                                         <input
@@ -628,7 +651,6 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
                                             value={forgotEmail}
                                             onChange={(e) => setForgotEmail(e.target.value)}
                                             className="w-full rounded-lg border border-white/10 bg-black/40 px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50"
-                                            autoFocus
                                             required
                                         />
                                     </div>
@@ -723,6 +745,7 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
                                                 placeholder="Enter new password..."
                                                 value={forgotNewPassword}
                                                 onChange={(e) => setForgotNewPassword(e.target.value)}
+                                                data-password-toggle="custom"
                                                 className="w-full rounded-lg border border-white/10 bg-black/40 px-4 py-3 pr-12 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50"
                                                 required
                                                 minLength={6}
@@ -730,8 +753,16 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
                                             />
                                             <button
                                                 type="button"
-                                                onClick={() => setShowForgotPassword(!showForgotPassword)}
-                                                className="absolute inset-y-0 right-0 flex items-center px-3 text-white/60 hover:text-white"
+                                                onMouseDown={(e) => { e.preventDefault(); setShowForgotPassword(true); }}
+                                                onMouseUp={() => setShowForgotPassword(false)}
+                                                onMouseLeave={() => setShowForgotPassword(false)}
+                                                onTouchStart={() => setShowForgotPassword(true)}
+                                                onTouchEnd={() => setShowForgotPassword(false)}
+                                                onTouchCancel={() => setShowForgotPassword(false)}
+                                                onBlur={() => setShowForgotPassword(false)}
+                                                tabIndex={-1}
+                                                className="absolute inset-y-0 right-0 flex items-center px-3 text-white/60 hover:text-white focus:outline-none"
+                                                aria-label={showForgotPassword ? "Hide password" : "Show password"}
                                             >
                                                 {showForgotPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                                             </button>
@@ -745,14 +776,23 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
                                                 placeholder="Confirm new password..."
                                                 value={forgotConfirmPassword}
                                                 onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                                                data-password-toggle="custom"
                                                 className="w-full rounded-lg border border-white/10 bg-black/40 px-4 py-3 pr-12 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50"
                                                 required
                                                 minLength={6}
                                             />
                                             <button
                                                 type="button"
-                                                onClick={() => setShowForgotConfirmPassword(!showForgotConfirmPassword)}
-                                                className="absolute inset-y-0 right-0 flex items-center px-3 text-white/60 hover:text-white"
+                                                onMouseDown={(e) => { e.preventDefault(); setShowForgotConfirmPassword(true); }}
+                                                onMouseUp={() => setShowForgotConfirmPassword(false)}
+                                                onMouseLeave={() => setShowForgotConfirmPassword(false)}
+                                                onTouchStart={() => setShowForgotConfirmPassword(true)}
+                                                onTouchEnd={() => setShowForgotConfirmPassword(false)}
+                                                onTouchCancel={() => setShowForgotConfirmPassword(false)}
+                                                onBlur={() => setShowForgotConfirmPassword(false)}
+                                                tabIndex={-1}
+                                                className="absolute inset-y-0 right-0 flex items-center px-3 text-white/60 hover:text-white focus:outline-none"
+                                                aria-label={showForgotConfirmPassword ? "Hide password" : "Show password"}
                                             >
                                                 {showForgotConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                                             </button>
