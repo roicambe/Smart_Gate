@@ -13,10 +13,10 @@ import { useToast } from '../toast/ToastProvider';
 
 export const AccessLogs = ({ branding, adminSession }) => {
     const [activeTab, setActiveTab] = useState('gateLogs'); // 'gateLogs' | 'eventLogs'
-    
+
     // Gate Logs state
     const [logs, setLogs] = useState([]);
-    
+
     // Event Logs state
     const [eventLogs, setEventLogs] = useState([]);
 
@@ -30,6 +30,13 @@ export const AccessLogs = ({ branding, adminSession }) => {
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
 
+    // Academic Filtering State (For Event Attendance)
+    const [departments, setDepartments] = useState([]);
+    const [allPrograms, setAllPrograms] = useState([]);
+    const [departmentFilter, setDepartmentFilter] = useState('All');
+    const [programFilter, setProgramFilter] = useState('All');
+    const [yearFilter, setYearFilter] = useState('All');
+
     // Pagination
     const ITEMS_PER_PAGE = 15;
     const [currentPage, setCurrentPage] = useState(1);
@@ -39,6 +46,23 @@ export const AccessLogs = ({ branding, adminSession }) => {
     const [isExporting, setIsExporting] = useState(false);
     const exportMenuRef = useRef(null);
     const { showSuccess, showError, showWarning, showProcessing } = useToast();
+
+    // Fetch academic structure for filters
+    useEffect(() => {
+        const loadAcademicData = async () => {
+            try {
+                const [depts, progs] = await Promise.all([
+                    invoke('get_departments'),
+                    invoke('get_programs')
+                ]);
+                setDepartments(depts || []);
+                setAllPrograms(progs || []);
+            } catch (err) {
+                console.error("Failed to load academic data:", err);
+            }
+        };
+        loadAcademicData();
+    }, []);
 
     // Close export menu when clicking outside
     useEffect(() => {
@@ -60,17 +84,23 @@ export const AccessLogs = ({ branding, adminSession }) => {
         setLoading(true);
         try {
             if (activeTab === 'gateLogs') {
-                const data = await invoke('get_access_logs', { 
-                    roleFilter: roleFilter === 'All' ? null : roleFilter.toLowerCase(), 
-                    actionType: actionFilter === 'All' ? null : actionFilter.toLowerCase(), 
+                const data = await invoke('get_access_logs', {
+                    roleFilter: roleFilter === 'All' ? null : roleFilter.toLowerCase(),
+                    actionType: actionFilter === 'All' ? null : actionFilter.toLowerCase(),
                     locationName: locationFilter === 'All' ? null : locationFilter,
                     searchTerm: searchTerm.trim() === '' ? null : searchTerm.trim(),
-                    startDate: startDate || null, 
-                    endDate: endDate || null 
+                    startDate: startDate || null,
+                    endDate: endDate || null
                 });
                 setLogs(data);
             } else {
-                const data = await invoke('get_event_attendance_logs', { startDate: startDate || null, endDate: endDate || null });
+                const data = await invoke('get_event_attendance_logs', {
+                    startDate: startDate || null,
+                    endDate: endDate || null,
+                    departmentId: departmentFilter === 'All' ? null : parseInt(departmentFilter),
+                    programId: programFilter === 'All' ? null : parseInt(programFilter),
+                    yearLevel: yearFilter === 'All' ? null : parseInt(yearFilter)
+                });
                 setEventLogs(data);
             }
         } catch (error) {
@@ -87,23 +117,32 @@ export const AccessLogs = ({ branding, adminSession }) => {
         setLocationFilter('All');
         setStartDate('');
         setEndDate('');
+        setDepartmentFilter('All');
+        setProgramFilter('All');
+        setYearFilter('All');
 
         setLoading(true);
         try {
             if (activeTab === 'gateLogs') {
-                const data = await invoke('get_access_logs', { 
-                    roleFilter: null, actionType: null, locationName: null, searchTerm: null, startDate: null, endDate: null 
+                const data = await invoke('get_access_logs', {
+                    roleFilter: null, actionType: null, locationName: null, searchTerm: null, startDate: null, endDate: null
                 });
                 setLogs(data);
             } else {
-                const data = await invoke('get_event_attendance_logs', { startDate: null, endDate: null });
+                const data = await invoke('get_event_attendance_logs', {
+                    startDate: null,
+                    endDate: null,
+                    departmentId: null,
+                    programId: null,
+                    yearLevel: null
+                });
                 setEventLogs(data);
             }
         } catch (error) {
-             console.error("Failed to clear filters:", error);
-             showError("Failed to clear filters.");
+            console.error("Failed to clear filters:", error);
+            showError("Failed to clear filters.");
         } finally {
-             setLoading(false);
+            setLoading(false);
         }
     };
 
@@ -113,7 +152,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
 
     // Filter logic based on active tab
     const currentData = activeTab === 'gateLogs' ? logs : eventLogs;
-    
+
     // Gate logs are already filtered on backend. Event logs still rely on simple frontend filters for now.
     const filteredLogs = activeTab === 'gateLogs' ? currentData : currentData.filter(log => {
         const matchesSearch = log.person_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -125,7 +164,14 @@ export const AccessLogs = ({ branding, adminSession }) => {
     });
 
     // Pagination - reset to page 1 when filters change
-    useEffect(() => { setCurrentPage(1); }, [searchTerm, roleFilter, actionFilter, locationFilter, startDate, endDate, activeTab]);
+    useEffect(() => { setCurrentPage(1); }, [searchTerm, roleFilter, actionFilter, locationFilter, startDate, endDate, departmentFilter, programFilter, yearFilter, activeTab]);
+
+    // Filter programs based on selected department
+    const filteredPrograms = useMemo(() => {
+        if (departmentFilter === 'All') return [];
+        return allPrograms.filter(p => p.department_id === parseInt(departmentFilter));
+    }, [departmentFilter, allPrograms]);
+
     const totalPages = Math.ceil(filteredLogs.length / ITEMS_PER_PAGE);
     const paginatedLogs = useMemo(() => {
         const start = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -275,10 +321,10 @@ export const AccessLogs = ({ branding, adminSession }) => {
             drawHeader();
 
             // Table Data
-            const tableColumn = activeTab === 'gateLogs' 
+            const tableColumn = activeTab === 'gateLogs'
                 ? ["Timestamp", "Name", "ID Number", "Role", "Location", "Action"]
                 : ["Timestamp", "Name", "ID Number", "Role", "Event Name", "Status"];
-                
+
             const tableRows = [];
 
             filteredLogs.forEach(log => {
@@ -370,7 +416,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
     };
 
     return (
-        <div className="flex flex-col h-full min-h-0 gap-6 relative">
+        <div className="flex flex-col h-full min-h-0 relative">
 
             {/* Header Title Section */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
@@ -382,53 +428,69 @@ export const AccessLogs = ({ branding, adminSession }) => {
                         {activeTab === 'gateLogs' ? 'Real-time entry and exit monitoring.' : 'Tracking attendance for events and ceremonies.'}
                     </p>
                 </div>
-                <div className="flex items-center gap-3">
-                    {/* Export Dropdown */}
-                    <div className="relative shrink-0" ref={exportMenuRef}>
-                        <button
-                            onClick={() => setShowExportMenu(!showExportMenu)}
-                            disabled={isExporting}
-                            className={`flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors focus:outline-none shadow-sm ${isExporting ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        >
-                            {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                            <span className="font-semibold text-sm">
-                                {isExporting ? 'Wait' : 'Export'}
-                            </span>
-                        </button>
+                <div className="flex flex-col items-end gap-3">
+                    <div className="flex items-center gap-3">
+                        {/* Export Dropdown */}
+                        <div className="relative shrink-0" ref={exportMenuRef}>
+                            <button
+                                onClick={() => setShowExportMenu(!showExportMenu)}
+                                disabled={isExporting}
+                                className={`flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors focus:outline-none shadow-sm ${isExporting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            >
+                                {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                                <span className="font-semibold text-sm">
+                                    {isExporting ? 'Wait' : 'Export'}
+                                </span>
+                            </button>
 
-                        {showExportMenu && !isExporting && (
-                            <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-50 overflow-hidden">
-                                <button
-                                    onClick={handleExportPDF}
-                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors border-b border-slate-100"
-                                >
-                                    <FileText className="w-4 h-4 text-red-500" />
-                                    Export PDF
-                                </button>
-                                <button
-                                    onClick={handleExportExcel}
-                                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
-                                >
-                                    <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
-                                    Export Excel
-                                </button>
-                            </div>
-                        )}
+                            {showExportMenu && !isExporting && (
+                                <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-50 overflow-hidden">
+                                    <button
+                                        onClick={handleExportPDF}
+                                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors border-b border-slate-100"
+                                    >
+                                        <FileText className="w-4 h-4 text-red-500" />
+                                        Export PDF
+                                    </button>
+                                    <button
+                                        onClick={handleExportExcel}
+                                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                                    >
+                                        <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
+                                        Export Excel
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        <button
+                            onClick={fetchLogs}
+                            className="p-2 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-50 shadow-sm transition-all"
+                            title="Refresh Logs"
+                        >
+                            <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
+                        </button>
                     </div>
 
-                    <button
-                        onClick={fetchLogs}
-                        className="p-2 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-slate-900 hover:bg-slate-50 shadow-sm transition-all"
-                        title="Refresh Logs"
-                    >
-                        <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
-                    </button>
+                    {/* Search Input - Relocated here */}
+                    <div className="relative w-full sm:w-64 shrink-0">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Search className="h-4 w-4 text-slate-400" />
+                        </div>
+                        <input
+                            type="text"
+                            className="block w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg bg-white text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-slate-500 sm:text-sm shadow-sm transition-all"
+                            placeholder={activeTab === 'gateLogs' ? "Search Name or ID..." : "Search Event or Name..."}
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
                 </div>
             </div>
 
             {/* Filter Bar (Action Bar) Cleanup */}
-            <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col lg:flex-row items-center justify-between gap-4">
-                
+            <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col lg:flex-row items-center justify-between mb-6">
+
                 {/* Sub-Tab Navigation inside Filter Bar */}
                 <div className="flex gap-2 p-1 bg-slate-100 rounded-xl w-full lg:w-auto overflow-x-auto shrink-0">
                     <button
@@ -446,20 +508,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto flex-wrap lg:justify-end">
-                    
-                    {/* Search Input */}
-                    <div className="relative w-full sm:w-56 shrink-0">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <Search className="h-4 w-4 text-slate-400" />
-                        </div>
-                        <input
-                            type="text"
-                            className="block w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-slate-500 sm:text-sm transition-all"
-                            placeholder={activeTab === 'gateLogs' ? "Search Name or ID..." : "Search Event or Name..."}
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
-                    </div>
+                    {/* Academic filters and other selectors will be here */}
 
                     {/* Role Filter */}
                     <select
@@ -473,6 +522,57 @@ export const AccessLogs = ({ branding, adminSession }) => {
                         <option value="staff">Staff</option>
                         <option value="visitor">Visitor</option>
                     </select>
+
+                    {/* Academic Filters (Only for Event Logs) */}
+                    {activeTab === 'eventLogs' && (
+                        <>
+                            {/* Department Filter */}
+                            <select
+                                value={departmentFilter}
+                                onChange={(e) => {
+                                    setDepartmentFilter(e.target.value);
+                                    setProgramFilter('All'); // Reset program when department changes
+                                }}
+                                className="bg-slate-50 border border-slate-200 text-slate-700 sm:text-sm rounded-lg focus:ring-slate-500 focus:border-slate-500 block w-full sm:w-auto p-2 outline-none"
+                            >
+                                <option value="All">All Departments</option>
+                                {departments.map(dept => (
+                                    <option key={dept.department_id} value={dept.department_id}>
+                                        {dept.department_code}
+                                    </option>
+                                ))}
+                            </select>
+
+                            {/* Program Filter */}
+                            <select
+                                value={programFilter}
+                                onChange={(e) => setProgramFilter(e.target.value)}
+                                className="bg-slate-50 border border-slate-200 text-slate-700 sm:text-sm rounded-lg focus:ring-slate-500 focus:border-slate-500 block w-full sm:w-auto p-2 outline-none"
+                                disabled={departmentFilter === 'All'}
+                            >
+                                <option value="All">All Programs</option>
+                                {filteredPrograms.map(prog => (
+                                    <option key={prog.program_id} value={prog.program_id}>
+                                        {prog.program_code}
+                                    </option>
+                                ))}
+                            </select>
+
+                            {/* Year Filter */}
+                            <select
+                                value={yearFilter}
+                                onChange={(e) => setYearFilter(e.target.value)}
+                                className="bg-slate-50 border border-slate-200 text-slate-700 sm:text-sm rounded-lg focus:ring-slate-500 focus:border-slate-500 block w-full sm:w-auto p-2 outline-none"
+                            >
+                                <option value="All">All Years</option>
+                                <option value="1">1st Year</option>
+                                <option value="2">2nd Year</option>
+                                <option value="3">3rd Year</option>
+                                <option value="4">4th Year</option>
+                                <option value="5">5th Year</option>
+                            </select>
+                        </>
+                    )}
 
                     {/* Action Filter (Only for Gate Logs) */}
                     {activeTab === 'gateLogs' && (
@@ -538,8 +638,8 @@ export const AccessLogs = ({ branding, adminSession }) => {
                         </button>
                     </div>
 
-                    </div>
                 </div>
+            </div>
 
 
             {/* Solid Table View - scroll container with sticky headers */}
@@ -558,6 +658,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                     </>
                                 ) : (
                                     <>
+                                        <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Academic Info</th>
                                         <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Event Name</th>
                                         <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Status</th>
                                     </>
@@ -611,15 +712,24 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                             </>
                                         ) : (
                                             <>
+                                                <td className="px-3 py-1.5">
+                                                    <div className="flex flex-col">
+                                                        <span className="text-slate-900 font-medium text-xs">
+                                                            {log.department_name || "-"}
+                                                        </span>
+                                                        <span className="text-[10px] text-slate-500 uppercase tracking-tight">
+                                                            {log.program_name ? `${log.program_name} ${log.year_level ? `- Year ${log.year_level}` : ""}` : (log.role !== 'student' ? (log.department_name ? "Faculty/Staff" : "-") : "-")}
+                                                        </span>
+                                                    </div>
+                                                </td>
                                                 <td className="px-3 py-1.5 text-slate-600 text-xs font-semibold">
                                                     {log.event_name}
                                                 </td>
                                                 <td className="px-3 py-1.5">
-                                                    <span className={`px-2 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wider border ${
-                                                        (log.status || 'On Time') === 'Late'
-                                                            ? 'bg-rose-100 text-rose-700 border-rose-200'
-                                                            : 'bg-emerald-100 text-emerald-700 border-emerald-200'
-                                                    }`}>
+                                                    <span className={`px-2 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wider border ${(log.status || 'On Time') === 'Late'
+                                                        ? 'bg-rose-100 text-rose-700 border-rose-200'
+                                                        : 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                                                        }`}>
                                                         {log.status || 'On Time'}
                                                     </span>
                                                 </td>

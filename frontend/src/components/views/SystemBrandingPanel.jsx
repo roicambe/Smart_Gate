@@ -256,7 +256,7 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                         <h3 className="text-sm font-bold text-blue-800 uppercase tracking-widest mb-3 flex items-center gap-2">
                             <ImageIcon size={16} /> Header Layout
                         </h3>
-                        <p className="text-sm text-slate-600 leading-relaxed space-y-3">
+                        <div className="text-sm text-slate-600 leading-relaxed space-y-3">
                             <span>The logos in the application header are arranged from left to right as described below:</span>
                             <div className="mt-4 space-y-2">
                                 <div className="flex items-center gap-2">
@@ -277,7 +277,7 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                                     Max file size: 2MB (PNG/JPG). Toggles enable circular clipping for Each logo.
                                 </p>
                             </div>
-                        </p>
+                        </div>
                     </div>
                  </div>
              </div>

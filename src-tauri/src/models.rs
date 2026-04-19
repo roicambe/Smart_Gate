@@ -155,6 +155,9 @@ pub struct EventAttendanceLog {
     pub event_name: String,
     pub scanned_at: String,
     pub status: String,
+    pub department_name: Option<String>,
+    pub program_name: Option<String>,
+    pub year_level: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
