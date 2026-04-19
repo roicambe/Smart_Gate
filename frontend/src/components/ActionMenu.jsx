@@ -67,7 +67,9 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
                     name: normalizedVisitorName,
                     visitor_id: normalizedVisitorId,
                     visitor_name: normalizedVisitorName,
-                    email: visitorForm.email
+                    email: visitorForm.email,
+                    purpose: visitorForm.purpose,
+                    person_to_visit: visitorForm.personToVisit
                 };
                 showSuccess(`Registration Successful: ${visitorData.name} (${generatedId}).`);
                 setPrintPassData(visitorData);

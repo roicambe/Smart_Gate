@@ -154,8 +154,11 @@ pub fn get_event_attendance_logs(
     pool: State<'_, DbPool>,
     start_date: Option<String>,
     end_date: Option<String>,
+    department_id: Option<i64>,
+    program_id: Option<i64>,
+    year_level: Option<i64>,
 ) -> Result<Vec<EventAttendanceLog>, String> {
-    db::get_event_attendance_logs(&pool, start_date, end_date)
+    db::get_event_attendance_logs(&pool, start_date, end_date, department_id, program_id, year_level)
 }
 
 #[tauri::command]

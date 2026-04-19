@@ -1724,89 +1724,92 @@ pub fn get_event_attendance_logs(
     pool: &DbPool,
     start_date: Option<String>,
     end_date: Option<String>,
+    department_id: Option<i64>,
+    program_id: Option<i64>,
+    year_level: Option<i64>,
 ) -> Result<Vec<EventAttendanceLog>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let mut base_query = "
-        SELECT a.attendance_id, p.first_name, p.last_name, p.id_number, p.role, e.event_name, a.scanned_at, a.status
+        SELECT 
+            a.attendance_id, 
+            p.first_name, 
+            p.last_name, 
+            p.id_number, 
+            p.role, 
+            e.event_name, 
+            a.scanned_at, 
+            a.status,
+            COALESCE(d_s.department_name, d_e.department_name) as department_name,
+            prog.program_name,
+            s.year_level
         FROM event_attendance a
         JOIN persons p ON a.person_id = p.person_id
         JOIN events e ON a.event_id = e.event_id
+        LEFT JOIN students s ON p.person_id = s.person_id
+        LEFT JOIN programs prog ON s.program_id = prog.program_id
+        LEFT JOIN departments d_s ON prog.department_id = d_s.department_id
+        LEFT JOIN employees emp ON p.person_id = emp.person_id
+        LEFT JOIN departments d_e ON emp.department_id = d_e.department_id
+        WHERE 1=1
     ".to_string();
 
-    if start_date.is_some() && end_date.is_some() {
-        base_query.push_str(" WHERE DATE(a.scanned_at) BETWEEN DATE(?1) AND DATE(?2)");
-    } else if start_date.is_some() {
-        base_query.push_str(" WHERE DATE(a.scanned_at) >= DATE(?1)");
-    } else if end_date.is_some() {
-        base_query.push_str(" WHERE DATE(a.scanned_at) <= DATE(?1)");
-    }
-
-    base_query.push_str(" ORDER BY a.scanned_at DESC LIMIT 100");
-
-    let mut stmt = conn.prepare(&base_query).map_err(|e| e.to_string())?;
-
-    let mut list = Vec::new();
+    let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
     if let (Some(start), Some(end)) = (&start_date, &end_date) {
-        let iter = stmt
-            .query_map(params![start, end], |row| {
-                let first_name: String = row.get(1)?;
-                let last_name: String = row.get(2)?;
-                Ok(EventAttendanceLog {
-                    log_id: row.get(0)?,
-                    person_name: format!("{} {}", first_name, last_name),
-                    id_number: row.get(3)?,
-                    role: row.get(4)?,
-                    event_name: row.get(5)?,
-                    scanned_at: row.get(6)?,
-                    status: row.get(7)?,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-        for item in iter {
-            list.push(item.map_err(|e| e.to_string())?);
-        }
-    } else if let Some(date) = start_date.or(end_date) {
-        let iter = stmt
-            .query_map(params![date], |row| {
-                let first_name: String = row.get(1)?;
-                let last_name: String = row.get(2)?;
-                Ok(EventAttendanceLog {
-                    log_id: row.get(0)?,
-                    person_name: format!("{} {}", first_name, last_name),
-                    id_number: row.get(3)?,
-                    role: row.get(4)?,
-                    event_name: row.get(5)?,
-                    scanned_at: row.get(6)?,
-                    status: row.get(7)?,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-        for item in iter {
-            list.push(item.map_err(|e| e.to_string())?);
-        }
-    } else {
-        let iter = stmt
-            .query_map([], |row| {
-                let first_name: String = row.get(1)?;
-                let last_name: String = row.get(2)?;
-                Ok(EventAttendanceLog {
-                    log_id: row.get(0)?,
-                    person_name: format!("{} {}", first_name, last_name),
-                    id_number: row.get(3)?,
-                    role: row.get(4)?,
-                    event_name: row.get(5)?,
-                    scanned_at: row.get(6)?,
-                    status: row.get(7)?,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-        for item in iter {
-            list.push(item.map_err(|e| e.to_string())?);
-        }
+        base_query.push_str(" AND DATE(a.scanned_at) BETWEEN DATE(?) AND DATE(?)");
+        params_vec.push(Box::new(start.clone()));
+        params_vec.push(Box::new(end.clone()));
+    } else if let Some(start) = &start_date {
+        base_query.push_str(" AND DATE(a.scanned_at) >= DATE(?)");
+        params_vec.push(Box::new(start.clone()));
+    } else if let Some(end) = &end_date {
+        base_query.push_str(" AND DATE(a.scanned_at) <= DATE(?)");
+        params_vec.push(Box::new(end.clone()));
     }
 
+    if let Some(dept_id) = department_id {
+        base_query.push_str(" AND COALESCE(prog.department_id, emp.department_id) = ?");
+        params_vec.push(Box::new(dept_id));
+    }
+
+    if let Some(prog_id) = program_id {
+        base_query.push_str(" AND s.program_id = ?");
+        params_vec.push(Box::new(prog_id));
+    }
+
+    if let Some(year) = year_level {
+        base_query.push_str(" AND s.year_level = ?");
+        params_vec.push(Box::new(year));
+    }
+
+    base_query.push_str(" ORDER BY a.scanned_at DESC LIMIT 500");
+
+    let mut stmt = conn.prepare(&base_query).map_err(|e| e.to_string())?;
+    
+    let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+
+    let iter = stmt.query_map(params_refs.as_slice(), |row| {
+        let first_name: String = row.get(1)?;
+        let last_name: String = row.get(2)?;
+        Ok(EventAttendanceLog {
+            log_id: row.get(0)?,
+            person_name: format!("{} {}", first_name, last_name),
+            id_number: row.get(3)?,
+            role: row.get(4)?,
+            event_name: row.get(5)?,
+            scanned_at: row.get(6)?,
+            status: row.get(7)?,
+            department_name: row.get(8)?,
+            program_name: row.get(9)?,
+            year_level: row.get(10)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut list = Vec::new();
+    for item in iter {
+        list.push(item.map_err(|e| e.to_string())?);
+    }
     Ok(list)
 }
 
@@ -2006,7 +2009,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     // 1. Check if person exists and is active
-    let mut stmt = conn.prepare("SELECT first_name, last_name, role, is_active, DATE(created_at, 'localtime') == DATE('now', 'localtime') as is_created_today FROM persons WHERE person_id = ?1")
+    let mut stmt = conn.prepare("SELECT first_name, last_name, role, is_active, DATE(created_at) == DATE('now', 'localtime') as is_created_today FROM persons WHERE person_id = ?1")
         .map_err(|e| e.to_string())?;
 
     let mut person_iter = stmt
@@ -2150,7 +2153,7 @@ pub fn manual_id_entry(
 ) -> Result<ScanResult, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT person_id, first_name, last_name, role, is_active, DATE(created_at, 'localtime') == DATE('now', 'localtime') as is_created_today FROM persons WHERE id_number = ?1")
+    let mut stmt = conn.prepare("SELECT person_id, first_name, last_name, role, is_active, DATE(created_at) == DATE('now', 'localtime') as is_created_today FROM persons WHERE id_number = ?1")
         .map_err(|e| e.to_string())?;
 
     let mut person_iter = stmt
@@ -3164,7 +3167,7 @@ pub fn log_event_attendance(
             p.last_name, 
             p.role, 
             p.is_active, 
-            DATE(p.created_at, 'localtime') == DATE('now', 'localtime') as is_created_today,
+            DATE(p.created_at) == DATE('now', 'localtime') as is_created_today,
             s.program_id,
             s.year_level
         FROM persons p

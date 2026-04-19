@@ -701,16 +701,22 @@ export const UserManagement = ({ adminSession }) => {
                                                         ? (
                                                             <div className="flex flex-col">
                                                                 <span>{user.program_name} - Yr {user.year_level}</span>
-                                                                {user.is_irregular && <span className="text-[10px] font-bold text-amber-600 uppercase">Irregular Status</span>}
                                                             </div>
                                                         )
                                                         : `${user.department_name || 'N/A'} - ${user.position_title}`}
                                                 </td>
-                                                <td className="px-3 py-1.5">
-                                                    <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${user.is_active ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-rose-100 text-rose-700 border border-rose-200'
-                                                        }`}>
-                                                        {user.is_active ? 'Active' : 'Inactive'}
-                                                    </span>
+                                                <td className="px-3 py-1.5 text-left">
+                                                    <div className="flex items-center gap-2 -ml-1.5">
+                                                        <span className={`inline-flex items-center px-2.5 py-0.5 text-xs font-semibold rounded-full border ${user.is_active ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-rose-100 text-rose-700 border-rose-200'
+                                                            }`}>
+                                                            {user.is_active ? 'Active' : 'Inactive'}
+                                                        </span>
+                                                        {user.is_irregular && (
+                                                            <span className="inline-flex items-center px-2.5 py-0.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-700 border border-amber-200">
+                                                                Irregular
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </td>
                                             </>
                                         )}
