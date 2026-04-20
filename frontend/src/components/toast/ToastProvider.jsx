@@ -44,10 +44,10 @@ const ToastItem = ({ toast, onDismiss }) => {
 
     return (
         <div
-            className={`animate-in slide-in-from-top-4 fade-in duration-300 min-w-[340px] max-w-md border border-slate-200 ${accent.border} border-l-4 rounded-2xl bg-white p-4 shadow-[0_20px_50px_rgba(0,0,0,0.1)] flex items-center gap-4`}
+            className={`animate-in slide-in-from-top-4 fade-in duration-300 min-w-[340px] max-w-md border border-slate-200 ${accent.border} border-l-4 rounded-2xl bg-white p-4 shadow-[0_20px_50px_rgba(0,0,0,0.1)] flex items-start gap-4`}
         >
             <div className="shrink-0">{accent.icon}</div>
-            <p className="flex-1 text-sm font-medium text-slate-800 antialiased">{toast.message}</p>
+            <p className="flex-1 whitespace-pre-line text-sm font-medium leading-relaxed text-slate-800 antialiased">{toast.message}</p>
             <button
                 type="button"
                 onClick={() => onDismiss(toast.id)}
