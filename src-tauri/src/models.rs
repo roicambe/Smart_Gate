@@ -196,6 +196,18 @@ pub struct ScanResult {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct ScanPersonDetails {
+    pub role: String,
+    pub id_number: String,
+    pub first_name: String,
+    pub middle_name: Option<String>,
+    pub last_name: String,
+    pub department_name: Option<String>,
+    pub program_name: Option<String>,
+    pub year_level: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ChartDataPoint {
     pub date: String,
     pub students: i64,
@@ -257,4 +269,3 @@ pub struct BulkImportResult {
     pub imported_ids: Vec<String>,
     pub error_logs: Vec<String>,
 }
-

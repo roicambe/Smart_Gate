@@ -56,6 +56,7 @@ pub fn run() {
             commands::bulk_import_users_from_excel,
             commands::register_user,
             commands::manual_id_entry,
+            commands::get_scan_person_details,
             commands::update_user,
             commands::delete_user,
             commands::get_audit_logs,

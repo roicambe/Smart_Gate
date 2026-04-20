@@ -503,6 +503,14 @@ pub fn manual_id_entry(
 }
 
 #[tauri::command]
+pub fn get_scan_person_details(
+    pool: State<'_, DbPool>,
+    id_number: String,
+) -> Result<Option<ScanPersonDetails>, String> {
+    db::get_scan_person_details(&pool, &id_number)
+}
+
+#[tauri::command]
 pub fn update_user(
     pool: State<'_, DbPool>,
     person_id: i64,

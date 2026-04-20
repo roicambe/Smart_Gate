@@ -1,11 +1,66 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Keyboard, QrCode, ScanFace, Users, LogIn, LogOut, ChevronLeft, ArrowRight } from "lucide-react";
+import { Keyboard, QrCode, ScanFace, Users, LogIn, LogOut, ChevronLeft, ArrowRight, X } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { QRScannerOverlay } from "./QRScannerOverlay";
 import { VisitorPassPrinter } from "./VisitorPassPrinter";
 import { extractScanId } from "../utils/patternHunter";
 import { useGhostScannerListener } from "../hooks/useGhostScannerListener";
 import { useToast } from "./toast/ToastProvider";
+
+const ID_CARD_DURATION_MS = 1000;
+const DETAILED_TOAST_ROLES = new Set(["student", "professor", "staff"]);
+
+const formatRoleLabel = (role) => (
+    role
+        ? role.charAt(0).toUpperCase() + role.slice(1)
+        : "N/A"
+);
+
+const getYearLevelLabel = (yearLevel) => {
+    if (yearLevel === null || yearLevel === undefined) {
+        return null;
+    }
+
+    const suffixes = ["th", "st", "nd", "rd"];
+    const mod100 = yearLevel % 100;
+    const suffix = (mod100 >= 11 && mod100 <= 13)
+        ? "th"
+        : (suffixes[yearLevel % 10] || "th");
+
+    return `${yearLevel}${suffix} Year`;
+};
+
+const getProgramYearLabel = (programName, yearLevel) => {
+    const yearLabel = getYearLevelLabel(yearLevel);
+
+    if (programName && yearLabel) {
+        return `${programName} - ${yearLabel}`;
+    }
+
+    return programName || yearLabel || null;
+};
+
+const getFullNameLabel = ({ first_name, middle_name, last_name }) => (
+    [first_name, middle_name, last_name]
+        .filter(Boolean)
+        .join(" ")
+);
+
+const getDetailedToastMessage = (scanDetails) => {
+    const messageLines = [
+        `Role: ${formatRoleLabel(scanDetails.role)}`,
+        `Name: ${getFullNameLabel(scanDetails)}`,
+        `ID: ${scanDetails.id_number}`,
+        `Department: ${scanDetails.department_name || "N/A"}`
+    ];
+
+    const programYear = getProgramYearLabel(scanDetails.program_name, scanDetails.year_level);
+    if (programYear) {
+        messageLines.push(`Program & Year: ${programYear}`);
+    }
+
+    return messageLines.join("\n");
+};
 
 export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) => {
     const isEntrance = view === 'action_entrance';
@@ -15,9 +70,13 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
     const [showQRScanner, setShowQRScanner] = useState(false);
     const [showPrintModal, setShowPrintModal] = useState(false);
     const [printPassData, setPrintPassData] = useState(null);
+    const [activeScanCard, setActiveScanCard] = useState(null);
     const audioContextRef = useRef(null);
     const isBackgroundScanRunningRef = useRef(false);
+    const scanCardTimerRef = useRef(null);
+    const scanCardRequestIdRef = useRef(0);
     const { showSuccess, showError, showWarning } = useToast();
+    const isAnyModalOpen = showManualModal || showVisitorModal || showQRScanner || showPrintModal;
 
     const [visitorForm, setVisitorForm] = useState({
         firstName: '',
@@ -28,6 +87,66 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
         purpose: '',
         personToVisit: ''
     });
+
+    const clearScanCardTimer = useCallback(() => {
+        if (scanCardTimerRef.current) {
+            window.clearTimeout(scanCardTimerRef.current);
+            scanCardTimerRef.current = null;
+        }
+    }, []);
+
+    const showScanCard = useCallback((scanDetails) => {
+        clearScanCardTimer();
+        setActiveScanCard(scanDetails);
+        scanCardTimerRef.current = window.setTimeout(() => {
+            setActiveScanCard(null);
+        }, ID_CARD_DURATION_MS);
+    }, [clearScanCardTimer]);
+
+    const dismissScanCard = useCallback(() => {
+        clearScanCardTimer();
+        setActiveScanCard(null);
+    }, [clearScanCardTimer]);
+
+    const showScanSuccessFeedback = useCallback(async ({
+        result,
+        scannedId,
+        fallbackMessage,
+        modalActive
+    }) => {
+        const successMessage = fallbackMessage || `${result.message} - ${result.person_name} (${result.role})`;
+        const normalizedRole = (result.role || "").toString().trim().toLowerCase();
+        const shouldShowDetailedToast = modalActive && DETAILED_TOAST_ROLES.has(normalizedRole);
+
+        if (modalActive && !shouldShowDetailedToast) {
+            showSuccess(successMessage);
+            return;
+        }
+
+        const requestId = ++scanCardRequestIdRef.current;
+        try {
+            const details = await invoke("get_scan_person_details", { idNumber: scannedId });
+            if (requestId !== scanCardRequestIdRef.current) {
+                return;
+            }
+
+            if (details) {
+                if (modalActive) {
+                    showSuccess(getDetailedToastMessage(details));
+                    return;
+                }
+
+                showScanCard(details);
+                return;
+            }
+        } catch (error) {
+            console.error("Failed to fetch scan person details:", error);
+        }
+
+        if (requestId === scanCardRequestIdRef.current) {
+            showSuccess(successMessage);
+        }
+    }, [showSuccess, showScanCard]);
 
     const handleVisitorSubmit = async (e) => {
         e.preventDefault();
@@ -93,15 +212,23 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
 
     const handleManualSubmit = async (e) => {
         e.preventDefault();
+        const submittedId = manualId;
+
         try {
             const scannerFunction = isEntrance ? 'entrance' : 'exit';
             const result = await invoke('manual_id_entry', {
-                idNumber: manualId,
+                idNumber: submittedId,
                 scannerFunction
             });
 
             if (result.success) {
-                showSuccess(`${result.message} - ${result.person_name} (${result.role})`);
+                setShowManualModal(false);
+                setManualId("");
+                await showScanSuccessFeedback({
+                    result,
+                    scannedId: submittedId,
+                    modalActive: false
+                });
             } else {
                 showError(result.message);
             }
@@ -119,6 +246,20 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
             audioContextRef.current.close().catch(() => {});
         }
     }, []);
+
+    useEffect(() => () => {
+        clearScanCardTimer();
+    }, [clearScanCardTimer]);
+
+    useEffect(() => {
+        if (!isAnyModalOpen) {
+            return;
+        }
+
+        scanCardRequestIdRef.current += 1;
+        clearScanCardTimer();
+        setActiveScanCard(null);
+    }, [clearScanCardTimer, isAnyModalOpen]);
 
     const playBackgroundBeep = useCallback(() => {
         try {
@@ -179,7 +320,12 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
 
             const actionWord = isEntrance ? "Logged In" : "Logged Out";
             const personName = result.person_name || scannedId;
-            showSuccess(`Background Scan Success: ${personName} ${actionWord}.`);
+            await showScanSuccessFeedback({
+                result,
+                scannedId,
+                fallbackMessage: `Background Scan Success: ${personName} ${actionWord}.`,
+                modalActive: isAnyModalOpen
+            });
             playBackgroundBeep();
 
             if (manualId.trim().toUpperCase() === scannedId.toUpperCase()) {
@@ -191,7 +337,15 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
         } finally {
             isBackgroundScanRunningRef.current = false;
         }
-    }, [isEntrance, isGhostScannerDisabled, manualId, playBackgroundBeep, showSuccess, showError]);
+    }, [
+        isEntrance,
+        isGhostScannerDisabled,
+        isAnyModalOpen,
+        manualId,
+        playBackgroundBeep,
+        showScanSuccessFeedback,
+        showError
+    ]);
 
     useGhostScannerListener({
         enabled: !isGhostScannerDisabled,
@@ -335,6 +489,51 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
                 </div>
             )}
 
+            {activeScanCard && (
+                <div className="pointer-events-none fixed inset-0 z-[90] flex items-center justify-center px-4">
+                    <div className="pointer-events-auto relative w-full max-w-2xl rounded-3xl border border-white/20 bg-black/80 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
+                        <button
+                            type="button"
+                            onClick={dismissScanCard}
+                            className="absolute right-4 top-4 rounded-lg p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                            aria-label="Close ID card"
+                        >
+                            <X className="h-5 w-5" />
+                        </button>
+                        <div className="mb-6">
+                            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200/85">
+                                ID Card
+                            </p>
+                            <h3 className="mt-2 text-4xl font-extrabold text-white">
+                                {getFullNameLabel(activeScanCard)}
+                            </h3>
+                        </div>
+                        <div className="grid grid-cols-1 gap-4 text-base text-slate-100 sm:grid-cols-2">
+                            <div>
+                                <p className="text-xs uppercase tracking-widest text-slate-300/80">Role</p>
+                                <p className="mt-1 text-xl font-semibold">{formatRoleLabel(activeScanCard.role)}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase tracking-widest text-slate-300/80">ID Number</p>
+                                <p className="mt-1 text-xl font-semibold">{activeScanCard.id_number}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase tracking-widest text-slate-300/80">Department</p>
+                                <p className="mt-1 font-semibold">{activeScanCard.department_name || "N/A"}</p>
+                            </div>
+                            {getProgramYearLabel(activeScanCard.program_name, activeScanCard.year_level) && (
+                                <div>
+                                    <p className="text-xs uppercase tracking-widest text-slate-300/80">Program & Year</p>
+                                    <p className="mt-1 font-semibold">
+                                        {getProgramYearLabel(activeScanCard.program_name, activeScanCard.year_level)}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Manual ID Modal */}
             {showManualModal && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md">
@@ -459,7 +658,11 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
                             });
 
                             if (result.success) {
-                                showSuccess(`${result.message} - ${result.person_name} (${result.role})`);
+                                await showScanSuccessFeedback({
+                                    result,
+                                    scannedId,
+                                    modalActive: false
+                                });
                             } else {
                                 showError(result.message);
                             }

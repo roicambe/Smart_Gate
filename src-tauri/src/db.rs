@@ -2283,6 +2283,50 @@ pub fn manual_id_entry(
     }
 }
 
+pub fn get_scan_person_details(
+    pool: &DbPool,
+    id_number: &str,
+) -> Result<Option<ScanPersonDetails>, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    conn.query_row(
+        "
+        SELECT
+            p.role,
+            p.id_number,
+            p.first_name,
+            p.middle_name,
+            p.last_name,
+            COALESCE(emp_dept.department_name, stu_dept.department_name) AS department_name,
+            prog.program_name,
+            stu.year_level
+        FROM persons p
+        LEFT JOIN students stu ON p.person_id = stu.person_id
+        LEFT JOIN programs prog ON stu.program_id = prog.program_id
+        LEFT JOIN departments stu_dept ON prog.department_id = stu_dept.department_id
+        LEFT JOIN employees emp ON p.person_id = emp.person_id
+        LEFT JOIN departments emp_dept ON emp.department_id = emp_dept.department_id
+        WHERE p.id_number = ?1
+        LIMIT 1
+        ",
+        params![id_number],
+        |row| {
+            Ok(ScanPersonDetails {
+                role: row.get(0)?,
+                id_number: row.get(1)?,
+                first_name: row.get(2)?,
+                middle_name: row.get(3)?,
+                last_name: row.get(4)?,
+                department_name: row.get(5)?,
+                program_name: row.get(6)?,
+                year_level: row.get(7)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
 pub fn log_audit_action(
     pool: &DbPool,
     admin_id: i64,
