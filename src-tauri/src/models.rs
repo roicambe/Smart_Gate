@@ -232,7 +232,7 @@ pub struct AccessLogDetails {
     pub person_name: String,
     pub id_number: String,
     pub role: String,
-    pub scanner_location: String,
+    pub department_name: String,
     pub scanner_function: String,
 }
 
@@ -260,6 +260,9 @@ pub struct SystemBranding {
     pub primary_circle: bool,
     pub secondary1_circle: bool,
     pub secondary2_circle: bool,
+    pub primary_logo_enabled: bool,
+    pub secondary_logo_1_enabled: bool,
+    pub secondary_logo_2_enabled: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

@@ -14,6 +14,9 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
     const [primaryCircle, setPrimaryCircle] = useState(false);
     const [secondary1Circle, setSecondary1Circle] = useState(false);
     const [secondary2Circle, setSecondary2Circle] = useState(false);
+    const [primaryEnabled, setPrimaryEnabled] = useState(true);
+    const [secondary1Enabled, setSecondary1Enabled] = useState(true);
+    const [secondary2Enabled, setSecondary2Enabled] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
@@ -25,6 +28,9 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
             setPrimaryCircle(branding.primary_circle ?? false);
             setSecondary1Circle(branding.secondary1_circle ?? false);
             setSecondary2Circle(branding.secondary2_circle ?? false);
+            setPrimaryEnabled(branding.primary_logo_enabled ?? true);
+            setSecondary1Enabled(branding.secondary_logo_1_enabled ?? true);
+            setSecondary2Enabled(branding.secondary_logo_2_enabled ?? true);
         }
     }, [branding]);
 
@@ -76,6 +82,9 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                 primaryCircle: primaryCircle,
                 secondary1Circle: secondary1Circle,
                 secondary2Circle: secondary2Circle,
+                primaryLogoEnabled: primaryEnabled,
+                secondaryLogo1Enabled: secondary1Enabled,
+                secondaryLogo2Enabled: secondary2Enabled,
             });
             await fetchBranding();
             showToast('Settings Updated: Institutional Branding saved.', 'success');
@@ -168,6 +177,21 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                                             }`} />
                                         </button>
                                     </div>
+
+                                    <div className="flex items-center justify-between px-1 mt-1">
+                                        <span className="text-sm font-medium text-slate-500">Enable Logo</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPrimaryEnabled(v => !v)}
+                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                                                primaryEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                                            }`}
+                                        >
+                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition duration-200 ease-in-out ${
+                                                primaryEnabled ? 'translate-x-5' : 'translate-x-0'
+                                            }`} />
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
  
@@ -206,6 +230,21 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                                             }`} />
                                         </button>
                                     </div>
+
+                                    <div className="flex items-center justify-between px-1 mt-1">
+                                        <span className="text-sm font-medium text-slate-500">Enable Logo</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSecondary1Enabled(v => !v)}
+                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                                                secondary1Enabled ? 'bg-emerald-500' : 'bg-slate-300'
+                                            }`}
+                                        >
+                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition duration-200 ease-in-out ${
+                                                secondary1Enabled ? 'translate-x-5' : 'translate-x-0'
+                                            }`} />
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
  
@@ -241,6 +280,21 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                                         >
                                             <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition duration-200 ease-in-out ${
                                                 secondary2Circle ? 'translate-x-5' : 'translate-x-0'
+                                            }`} />
+                                        </button>
+                                    </div>
+
+                                    <div className="flex items-center justify-between px-1 mt-1">
+                                        <span className="text-sm font-medium text-slate-500">Enable Logo</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSecondary2Enabled(v => !v)}
+                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                                                secondary2Enabled ? 'bg-emerald-500' : 'bg-slate-300'
+                                            }`}
+                                        >
+                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition duration-200 ease-in-out ${
+                                                secondary2Enabled ? 'translate-x-5' : 'translate-x-0'
                                             }`} />
                                         </button>
                                     </div>
