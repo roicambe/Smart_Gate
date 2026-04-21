@@ -1662,7 +1662,7 @@ pub fn get_access_logs(
     pool: &DbPool,
     role_filter: Option<String>,
     action_type: Option<String>,
-    location_name: Option<String>,
+    department_id: Option<i64>,
     search_term: Option<String>,
     start_date: Option<String>,
     end_date: Option<String>,
@@ -1670,14 +1670,19 @@ pub fn get_access_logs(
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let base_query = "
-        SELECT l.log_id, l.scanned_at, p.first_name, p.last_name, p.id_number, p.role, s.location_name, s.function
+        SELECT l.log_id, l.scanned_at, p.first_name, p.last_name, p.id_number, p.role, COALESCE(d_s.department_name, d_e.department_name, 'N/A') as department_name, s.function
         FROM entry_logs l
         JOIN persons p ON l.person_id = p.person_id
         JOIN scanners s ON l.scanner_id = s.scanner_id
+        LEFT JOIN students stu ON p.person_id = stu.person_id
+        LEFT JOIN programs prog ON stu.program_id = prog.program_id
+        LEFT JOIN departments d_s ON prog.department_id = d_s.department_id
+        LEFT JOIN employees emp ON p.person_id = emp.person_id
+        LEFT JOIN departments d_e ON emp.department_id = d_e.department_id
         WHERE 1=1
         AND (?1 IS NULL OR p.role = ?1)
         AND (?2 IS NULL OR s.function = ?2)
-        AND (?3 IS NULL OR s.location_name = ?3)
+        AND (?3 IS NULL OR COALESCE(prog.department_id, emp.department_id) = ?3)
         AND (?4 IS NULL OR p.first_name LIKE '%' || ?4 || '%' OR p.last_name LIKE '%' || ?4 || '%' OR p.id_number LIKE '%' || ?4 || '%')
         AND (?5 IS NULL OR DATE(l.scanned_at) >= DATE(?5))
         AND (?6 IS NULL OR DATE(l.scanned_at) <= DATE(?6))
@@ -1693,7 +1698,7 @@ pub fn get_access_logs(
             params![
                 role_filter,
                 action_type,
-                location_name,
+                department_id,
                 search_term,
                 start_date,
                 end_date
@@ -1707,7 +1712,7 @@ pub fn get_access_logs(
                     person_name: format!("{} {}", first_name, last_name),
                     id_number: row.get(4)?,
                     role: row.get(5)?,
-                    scanner_location: row.get(6)?,
+                    department_name: row.get(6).unwrap_or_else(|_| "N/A".to_string()),
                     scanner_function: row.get(7)?,
                 })
             },
@@ -2632,6 +2637,7 @@ pub fn add_admin_account(
         target_id, 
         None, 
         Some(json!({
+            "summary": format!("Created Administrator account for {}.", full_name),
             "username": username,
             "full_name": full_name,
             "email": email,
@@ -2649,11 +2655,11 @@ pub fn update_admin_role(
 ) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let old_role: String = conn.query_row(
-        "SELECT role FROM accounts WHERE account_id = ?1", 
+    let (old_role, account_name): (String, String) = conn.query_row(
+        "SELECT role, full_name FROM accounts WHERE account_id = ?1", 
         params![account_id], 
-        |row| row.get(0)
-    ).unwrap_or_else(|_| "Unknown".to_string());
+        |row| Ok((row.get(0)?, row.get(1)?))
+    ).unwrap_or_else(|_| ("Unknown".to_string(), "Unknown".to_string()));
 
     conn.execute(
         "UPDATE accounts SET role = ?1 WHERE account_id = ?2",
@@ -2668,7 +2674,10 @@ pub fn update_admin_role(
         "accounts", 
         account_id, 
         Some(json!({"role": old_role}).to_string()), 
-        Some(json!({"role": new_role}).to_string())
+        Some(json!({
+            "summary": format!("Updated Role for Account: {}", account_name),
+            "role": new_role
+        }).to_string())
     );
     Ok(())
 }
@@ -2763,6 +2772,7 @@ pub fn update_admin_info(
             "email": old_email
         }).to_string()), 
         Some(json!({
+            "summary": format!("Updated information for Account: {}", full_name),
             "username": username,
             "full_name": full_name,
             "email": email
@@ -2822,11 +2832,11 @@ pub fn delete_admin_account(
         }
     }
 
-    let deleted_username: String = conn.query_row(
-        "SELECT username FROM accounts WHERE account_id = ?1", 
+    let (deleted_username, deleted_full_name): (String, String) = conn.query_row(
+        "SELECT username, full_name FROM accounts WHERE account_id = ?1", 
         params![account_id], 
-        |row| row.get(0)
-    ).unwrap_or_else(|_| "Unknown".to_string());
+        |row| Ok((row.get(0)?, row.get(1)?))
+    ).unwrap_or_else(|_| ("Unknown".to_string(), "Unknown".to_string()));
 
     // Reassign audit_logs that reference the to-be-deleted account to the
     // active admin, so the FK constraint is satisfied without losing history.
@@ -2848,7 +2858,10 @@ pub fn delete_admin_account(
         "DELETE", 
         "accounts", 
         account_id, 
-        Some(json!({ "username": deleted_username }).to_string()), 
+        Some(json!({
+            "summary": format!("Deleted Administrator account for {}.", deleted_full_name),
+            "username": deleted_username
+        }).to_string()), 
         None
     );
     Ok(())
@@ -3361,6 +3374,9 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
     let mut primary_circle: bool = false;
     let mut secondary1_circle: bool = false;
     let mut secondary2_circle: bool = false;
+    let mut primary_logo_enabled: bool = true;
+    let mut secondary_logo_1_enabled: bool = true;
+    let mut secondary_logo_2_enabled: bool = true;
 
     let mut stmt = conn
         .prepare("SELECT setting_key, setting_value FROM settings")
@@ -3385,6 +3401,9 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
                 "primary_circle" => primary_circle = value == "1" || value.to_lowercase() == "true",
                 "secondary1_circle" => secondary1_circle = value == "1" || value.to_lowercase() == "true",
                 "secondary2_circle" => secondary2_circle = value == "1" || value.to_lowercase() == "true",
+                "primary_logo_enabled" => primary_logo_enabled = value == "1" || value.to_lowercase() == "true",
+                "secondary_logo_1_enabled" => secondary_logo_1_enabled = value == "1" || value.to_lowercase() == "true",
+                "secondary_logo_2_enabled" => secondary_logo_2_enabled = value == "1" || value.to_lowercase() == "true",
                 "circle_logo_format" => {
                     // Legacy support: if individual ones aren't set yet, they could inherit this
                     // but we'll prioritize individual ones.
@@ -3403,12 +3422,15 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
         primary_circle,
         secondary1_circle,
         secondary2_circle,
+        primary_logo_enabled,
+        secondary_logo_1_enabled,
+        secondary_logo_2_enabled,
     })
 }
 
 pub fn update_system_branding(
     pool: &DbPool,
-    _admin_id: i64,
+    admin_id: i64,
     name: &str,
     logo_base64: &str,
     primary_logo: Option<String>,
@@ -3417,8 +3439,53 @@ pub fn update_system_branding(
     primary_circle: bool,
     secondary1_circle: bool,
     secondary2_circle: bool,
+    primary_logo_enabled: bool,
+    secondary_logo_1_enabled: bool,
+    secondary_logo_2_enabled: bool,
 ) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
+
+    let old_system_name: Option<String> = conn.query_row("SELECT setting_value FROM settings WHERE setting_key = 'system_name'", [], |row| row.get(0)).unwrap_or(None);
+    let old_primary: Option<String> = conn.query_row("SELECT setting_value FROM settings WHERE setting_key = 'primary_logo'", [], |row| row.get(0)).unwrap_or(None);
+    let old_sec1: Option<String> = conn.query_row("SELECT setting_value FROM settings WHERE setting_key = 'secondary_logo_1'", [], |row| row.get(0)).unwrap_or(None);
+    let old_sec2: Option<String> = conn.query_row("SELECT setting_value FROM settings WHERE setting_key = 'secondary_logo_2'", [], |row| row.get(0)).unwrap_or(None);
+
+    let mut branding_changes = Vec::new();
+
+    let old_primary_len = old_primary.unwrap_or_default().len();
+    let new_primary_len = primary_logo.as_deref().unwrap_or_default().len();
+    if old_primary_len == 0 && new_primary_len > 0 { branding_changes.push("Added Primary Logo"); }
+    else if old_primary_len > 0 && new_primary_len == 0 { branding_changes.push("Removed Primary Logo"); }
+    else if old_primary_len > 0 && new_primary_len > 0 && old_primary_len != new_primary_len { branding_changes.push("Updated Primary Logo"); }
+
+    let old_sec1_len = old_sec1.unwrap_or_default().len();
+    let new_sec1_len = secondary_logo_1.as_deref().unwrap_or_default().len();
+    if old_sec1_len == 0 && new_sec1_len > 0 { branding_changes.push("Added Secondary Logo 1"); }
+    else if old_sec1_len > 0 && new_sec1_len == 0 { branding_changes.push("Removed Secondary Logo 1"); }
+    else if old_sec1_len > 0 && new_sec1_len > 0 && old_sec1_len != new_sec1_len { branding_changes.push("Updated Secondary Logo 1"); }
+
+    let old_sec2_len = old_sec2.unwrap_or_default().len();
+    let new_sec2_len = secondary_logo_2.as_deref().unwrap_or_default().len();
+    if old_sec2_len == 0 && new_sec2_len > 0 { branding_changes.push("Added Secondary Logo 2"); }
+    else if old_sec2_len > 0 && new_sec2_len == 0 { branding_changes.push("Removed Secondary Logo 2"); }
+    else if old_sec2_len > 0 && new_sec2_len > 0 && old_sec2_len != new_sec2_len { branding_changes.push("Updated Secondary Logo 2"); }
+
+    let name_changed = old_system_name.as_deref().unwrap_or_default() != name;
+
+    let summary_message = if branding_changes.is_empty() {
+        if name_changed {
+            format!("Updated System Branding. Name set to '{}'", name)
+        } else {
+            "Updated System Settings Appearance".to_string()
+        }
+    } else {
+        if name_changed {
+            format!("Updated System Branding. Name set to '{}' | Setup Logs: {}", name, branding_changes.join(", "))
+        } else {
+            branding_changes.join(", ")
+        }
+    };
+
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     // We'll skip extensive audit logging for the 3 new logos to prevent massive bloat unless necessary, 
@@ -3483,7 +3550,49 @@ pub fn update_system_branding(
         params![if secondary2_circle { "1" } else { "0" }],
     ).map_err(|e| e.to_string())?;
 
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('primary_logo_enabled', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![if primary_logo_enabled { "1" } else { "0" }],
+    ).map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary_logo_1_enabled', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![if secondary_logo_1_enabled { "1" } else { "0" }],
+    ).map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary_logo_2_enabled', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![if secondary_logo_2_enabled { "1" } else { "0" }],
+    ).map_err(|e| e.to_string())?;
+
     tx.commit().map_err(|e| e.to_string())?;
+
+    // Log the branding update
+    let _ = log_audit_action(
+        pool,
+        admin_id,
+        "UPDATE",
+        "settings",
+        0, // Using 0 to represent a global/system level setting change
+        None,
+        Some(
+            serde_json::json!({
+                "summary": summary_message,
+                "system_name": name,
+                "primary_circle": primary_circle,
+                "secondary1_circle": secondary1_circle,
+                "secondary2_circle": secondary2_circle,
+                "primary_logo_enabled": primary_logo_enabled,
+                "secondary_logo_1_enabled": secondary_logo_1_enabled,
+                "secondary_logo_2_enabled": secondary_logo_2_enabled
+            })
+            .to_string(),
+        ),
+    );
+
     Ok(())
 }
 

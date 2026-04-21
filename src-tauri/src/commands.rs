@@ -133,7 +133,7 @@ pub fn get_access_logs(
     pool: State<'_, DbPool>,
     role_filter: Option<String>,
     action_type: Option<String>,
-    location_name: Option<String>,
+    department_id: Option<i64>,
     search_term: Option<String>,
     start_date: Option<String>,
     end_date: Option<String>,
@@ -142,7 +142,7 @@ pub fn get_access_logs(
         &pool,
         role_filter,
         action_type,
-        location_name,
+        department_id,
         search_term,
         start_date,
         end_date,
@@ -582,6 +582,9 @@ pub fn update_system_branding(
     primary_circle: Option<bool>,
     secondary1_circle: Option<bool>,
     secondary2_circle: Option<bool>,
+    primary_logo_enabled: Option<bool>,
+    secondary_logo_1_enabled: Option<bool>,
+    secondary_logo_2_enabled: Option<bool>,
 ) -> Result<(), String> {
     db::update_system_branding(
         &pool,
@@ -594,6 +597,9 @@ pub fn update_system_branding(
         primary_circle.unwrap_or(false),
         secondary1_circle.unwrap_or(false),
         secondary2_circle.unwrap_or(false),
+        primary_logo_enabled.unwrap_or(true),
+        secondary_logo_1_enabled.unwrap_or(true),
+        secondary_logo_2_enabled.unwrap_or(true),
     )
 }
 
