@@ -69,6 +69,24 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
             return;
         }
 
+        // Check if there are any actual changes
+        const hasChanges = 
+            name.trim() !== (branding?.system_name || 'Standard Gate System') ||
+            primaryLogo !== (branding?.primary_logo || branding?.system_logo || '') ||
+            secondaryLogo1 !== (branding?.secondary_logo_1 || '') ||
+            secondaryLogo2 !== (branding?.secondary_logo_2 || '') ||
+            primaryCircle !== (branding?.primary_circle ?? false) ||
+            secondary1Circle !== (branding?.secondary1_circle ?? false) ||
+            secondary2Circle !== (branding?.secondary2_circle ?? false) ||
+            primaryEnabled !== (branding?.primary_logo_enabled ?? true) ||
+            secondary1Enabled !== (branding?.secondary_logo_1_enabled ?? true) ||
+            secondary2Enabled !== (branding?.secondary_logo_2_enabled ?? true);
+
+        if (!hasChanges) {
+            showToast('No changes detected in Institutional Branding.', 'info');
+            return;
+        }
+
         setIsSaving(true);
 
         try {

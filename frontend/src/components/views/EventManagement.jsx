@@ -228,11 +228,15 @@ export const EventManagement = ({ branding, adminSession }) => {
         }
     };
 
-    const handleRegisterClick = () => {
+    const resetForm = () => {
         setFormData({ event_name: '', description: '', schedule_type: 'weekly', event_date: '', start_date: '', end_date: '', start_time: '', end_time: '', required_role: 'all', required_programs: null, required_year_levels: null, is_enabled: true });
         setSelectedRoles(['all']);
         setSelectedPrograms(['all']);
         setSelectedYearLevels([1, 2, 3, 4]);
+    };
+
+    const handleRegisterClick = () => {
+        resetForm();
         setShowRegisterModal(true);
     };
 
