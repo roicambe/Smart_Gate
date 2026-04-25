@@ -554,6 +554,24 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
         ").map_err(|e| format!("Failed to migrate audit_logs: {}", e))?;
     }
 
+    // Archive system migration: add is_archived + archived_at to core tables
+    for table in &["persons", "departments", "programs", "events"] {
+        if !table_has_column(&conn, table, "is_archived")? {
+            conn.execute(
+                &format!("ALTER TABLE {table} ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT 0"),
+                params![],
+            )
+            .map_err(|e| format!("Failed to add is_archived to {table}: {e}"))?;
+        }
+        if !table_has_column(&conn, table, "archived_at")? {
+            conn.execute(
+                &format!("ALTER TABLE {table} ADD COLUMN archived_at DATETIME NULL"),
+                params![],
+            )
+            .map_err(|e| format!("Failed to add archived_at to {table}: {e}"))?;
+        }
+    }
+
     Ok(pool)
 }
 
@@ -591,7 +609,7 @@ pub fn get_departments(pool: &DbPool) -> Result<Vec<Department>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let mut stmt = conn
-        .prepare("SELECT department_id, department_code, department_name FROM departments")
+        .prepare("SELECT department_id, department_code, department_name FROM departments WHERE is_archived = 0")
         .map_err(|e| e.to_string())?;
 
     let iter = stmt
@@ -654,17 +672,17 @@ pub fn update_department(
 pub fn delete_department(pool: &DbPool, department_id: i64, active_admin_id: i64) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    // Check if there are programs associated
+    // Check if there are active (non-archived) programs associated
     let count: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM programs WHERE department_id = ?1",
+            "SELECT COUNT(*) FROM programs WHERE department_id = ?1 AND is_archived = 0",
             params![department_id],
             |row| row.get(0),
         )
         .unwrap_or(0);
 
     if count > 0 {
-        return Err("Cannot delete department because it has associated programs. Please delete the programs first.".to_string());
+        return Err("Cannot archive department because it has active programs. Please archive the programs first.".to_string());
     }
 
     let (deleted_code, deleted_name): (String, String) = conn.query_row(
@@ -673,9 +691,10 @@ pub fn delete_department(pool: &DbPool, department_id: i64, active_admin_id: i64
         |row| Ok((row.get(0)?, row.get(1)?))
     ).unwrap_or_default();
 
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     conn.execute(
-        "DELETE FROM departments WHERE department_id = ?1",
-        params![department_id],
+        "UPDATE departments SET is_archived = 1, archived_at = ?1 WHERE department_id = ?2",
+        params![now, department_id],
     )
     .map_err(|e| e.to_string())?;
 
@@ -686,7 +705,7 @@ pub fn delete_department(pool: &DbPool, department_id: i64, active_admin_id: i64
         "departments",
         department_id,
         Some(json!({ "department_code": deleted_code, "department_name": deleted_name }).to_string()),
-        None,
+        Some(json!({ "action": "archived" }).to_string()),
     );
 
     Ok(())
@@ -729,7 +748,7 @@ pub fn get_programs(pool: &DbPool) -> Result<Vec<Program>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let mut stmt = conn
-        .prepare("SELECT program_id, department_id, program_code, program_name FROM programs")
+        .prepare("SELECT program_id, department_id, program_code, program_name FROM programs WHERE is_archived = 0")
         .map_err(|e| e.to_string())?;
 
     let iter = stmt
@@ -796,17 +815,17 @@ pub fn update_program(
 pub fn delete_program(pool: &DbPool, program_id: i64, active_admin_id: i64) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    // Check if there are students associated
+    // Check if there are active students associated
     let count: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM students WHERE program_id = ?1",
+            "SELECT COUNT(*) FROM students s JOIN persons p ON s.person_id = p.person_id WHERE s.program_id = ?1 AND p.is_archived = 0",
             params![program_id],
             |row| row.get(0),
         )
         .unwrap_or(0);
 
     if count > 0 {
-        return Err("Cannot delete program because it has associated students.".to_string());
+        return Err("Cannot archive program because it has active students.".to_string());
     }
 
     let (deleted_dept_id, deleted_code, deleted_name): (i64, String, String) = conn.query_row(
@@ -815,9 +834,10 @@ pub fn delete_program(pool: &DbPool, program_id: i64, active_admin_id: i64) -> R
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
     ).unwrap_or_default();
 
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     conn.execute(
-        "DELETE FROM programs WHERE program_id = ?1",
-        params![program_id],
+        "UPDATE programs SET is_archived = 1, archived_at = ?1 WHERE program_id = ?2",
+        params![now, program_id],
     )
     .map_err(|e| e.to_string())?;
 
@@ -828,7 +848,7 @@ pub fn delete_program(pool: &DbPool, program_id: i64, active_admin_id: i64) -> R
         "programs",
         program_id,
         Some(json!({ "department_id": deleted_dept_id, "program_code": deleted_code, "program_name": deleted_name }).to_string()),
-        None,
+        Some(json!({ "action": "archived" }).to_string()),
     );
 
     Ok(())
@@ -865,7 +885,7 @@ pub fn add_person(pool: &DbPool, person: Person) -> Result<i64, String> {
 pub fn get_persons(pool: &DbPool) -> Result<Vec<Person>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT person_id, id_number, role, first_name, middle_name, last_name, email, contact_number, face_template_path, is_active FROM persons")
+    let mut stmt = conn.prepare("SELECT person_id, id_number, role, first_name, middle_name, last_name, email, contact_number, face_template_path, is_active FROM persons WHERE is_archived = 0")
         .map_err(|e| e.to_string())?;
 
     let person_iter = stmt
@@ -933,7 +953,8 @@ pub fn get_students(pool: &DbPool) -> Result<Vec<StudentDetails>, String> {
                 s.program_id, pr.program_name, s.year_level, s.is_irregular
          FROM persons p
          JOIN students s ON p.person_id = s.person_id
-         JOIN programs pr ON s.program_id = pr.program_id"
+         JOIN programs pr ON s.program_id = pr.program_id
+         WHERE p.is_archived = 0"
     ).map_err(|e| e.to_string())?;
 
     let iter = stmt
@@ -1441,11 +1462,10 @@ pub fn update_user(
     Ok(())
 }
 
-pub fn delete_user(pool: &DbPool, person_id: i64, role: &str, active_admin_id: i64) -> Result<(), String> {
-    let mut conn = pool.get().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
+pub fn delete_user(pool: &DbPool, person_id: i64, _role: &str, active_admin_id: i64) -> Result<(), String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let old_data: Option<serde_json::Value> = tx.query_row(
+    let old_data: Option<serde_json::Value> = conn.query_row(
         "SELECT id_number, first_name, middle_name, last_name, email, contact_number, role
          FROM persons WHERE person_id = ?1",
         params![person_id],
@@ -1462,46 +1482,12 @@ pub fn delete_user(pool: &DbPool, person_id: i64, role: &str, active_admin_id: i
         }
     ).ok();
 
-    match role {
-        "student" => {
-            tx.execute(
-                "DELETE FROM students WHERE person_id = ?1",
-                params![person_id],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        "professor" | "staff" => {
-            tx.execute(
-                "DELETE FROM employees WHERE person_id = ?1",
-                params![person_id],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        "visitor" => {
-            tx.execute(
-                "DELETE FROM visitors WHERE person_id = ?1",
-                params![person_id],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        _ => return Err("Invalid role specified".to_string()),
-    }
-
-    // Also delete entry logs
-    tx.execute(
-        "DELETE FROM entry_logs WHERE person_id = ?1",
-        params![person_id],
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    conn.execute(
+        "UPDATE persons SET is_archived = 1, archived_at = ?1 WHERE person_id = ?2",
+        params![now, person_id],
     )
     .map_err(|e| e.to_string())?;
-
-    // Finally delete from persons
-    tx.execute(
-        "DELETE FROM persons WHERE person_id = ?1",
-        params![person_id],
-    )
-    .map_err(|e| e.to_string())?;
-
-    tx.commit().map_err(|e| e.to_string())?;
 
     let _ = log_audit_action(
         pool,
@@ -1510,7 +1496,7 @@ pub fn delete_user(pool: &DbPool, person_id: i64, role: &str, active_admin_id: i
         "persons",
         person_id,
         old_data.map(|v| v.to_string()),
-        None,
+        Some(json!({ "action": "archived" }).to_string()),
     );
 
     Ok(())
@@ -1523,7 +1509,8 @@ pub fn get_employees(pool: &DbPool) -> Result<Vec<EmployeeDetails>, String> {
                 e.department_id, e.position_title, d.department_name
          FROM persons p
          JOIN employees e ON p.person_id = e.person_id
-         JOIN departments d ON e.department_id = d.department_id"
+         JOIN departments d ON e.department_id = d.department_id
+         WHERE p.is_archived = 0"
     ).map_err(|e| e.to_string())?;
 
     let iter = stmt
@@ -1569,7 +1556,7 @@ pub fn get_visitors(pool: &DbPool, sort_order: Option<String>) -> Result<Vec<Vis
             (SELECT MAX(e.scanned_at) FROM entry_logs e JOIN scanners s ON e.scanner_id = s.scanner_id WHERE e.person_id = p.person_id AND s.function = 'exit') as time_out
          FROM persons p
          JOIN visitors v ON p.person_id = v.person_id
-         WHERE p.role = 'visitor'
+         WHERE p.role = 'visitor' AND p.is_archived = 0
          ORDER BY p.created_at {order_direction}"
     );
 
@@ -1662,7 +1649,7 @@ pub fn get_access_logs(
     pool: &DbPool,
     role_filter: Option<String>,
     action_type: Option<String>,
-    location_name: Option<String>,
+    department_id: Option<i64>,
     search_term: Option<String>,
     start_date: Option<String>,
     end_date: Option<String>,
@@ -1670,14 +1657,19 @@ pub fn get_access_logs(
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let base_query = "
-        SELECT l.log_id, l.scanned_at, p.first_name, p.last_name, p.id_number, p.role, s.location_name, s.function
+        SELECT l.log_id, l.scanned_at, p.first_name, p.last_name, p.id_number, p.role, COALESCE(d_s.department_name, d_e.department_name, 'N/A') as department_name, s.function
         FROM entry_logs l
         JOIN persons p ON l.person_id = p.person_id
         JOIN scanners s ON l.scanner_id = s.scanner_id
+        LEFT JOIN students stu ON p.person_id = stu.person_id
+        LEFT JOIN programs prog ON stu.program_id = prog.program_id
+        LEFT JOIN departments d_s ON prog.department_id = d_s.department_id
+        LEFT JOIN employees emp ON p.person_id = emp.person_id
+        LEFT JOIN departments d_e ON emp.department_id = d_e.department_id
         WHERE 1=1
         AND (?1 IS NULL OR p.role = ?1)
         AND (?2 IS NULL OR s.function = ?2)
-        AND (?3 IS NULL OR s.location_name = ?3)
+        AND (?3 IS NULL OR COALESCE(prog.department_id, emp.department_id) = ?3)
         AND (?4 IS NULL OR p.first_name LIKE '%' || ?4 || '%' OR p.last_name LIKE '%' || ?4 || '%' OR p.id_number LIKE '%' || ?4 || '%')
         AND (?5 IS NULL OR DATE(l.scanned_at) >= DATE(?5))
         AND (?6 IS NULL OR DATE(l.scanned_at) <= DATE(?6))
@@ -1693,7 +1685,7 @@ pub fn get_access_logs(
             params![
                 role_filter,
                 action_type,
-                location_name,
+                department_id,
                 search_term,
                 start_date,
                 end_date
@@ -1707,7 +1699,7 @@ pub fn get_access_logs(
                     person_name: format!("{} {}", first_name, last_name),
                     id_number: row.get(4)?,
                     role: row.get(5)?,
-                    scanner_location: row.get(6)?,
+                    department_name: row.get(6).unwrap_or_else(|_| "N/A".to_string()),
                     scanner_function: row.get(7)?,
                 })
             },
@@ -1724,89 +1716,92 @@ pub fn get_event_attendance_logs(
     pool: &DbPool,
     start_date: Option<String>,
     end_date: Option<String>,
+    department_id: Option<i64>,
+    program_id: Option<i64>,
+    year_level: Option<i64>,
 ) -> Result<Vec<EventAttendanceLog>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let mut base_query = "
-        SELECT a.attendance_id, p.first_name, p.last_name, p.id_number, p.role, e.event_name, a.scanned_at, a.status
+        SELECT 
+            a.attendance_id, 
+            p.first_name, 
+            p.last_name, 
+            p.id_number, 
+            p.role, 
+            e.event_name, 
+            a.scanned_at, 
+            a.status,
+            COALESCE(d_s.department_name, d_e.department_name) as department_name,
+            prog.program_name,
+            s.year_level
         FROM event_attendance a
         JOIN persons p ON a.person_id = p.person_id
         JOIN events e ON a.event_id = e.event_id
+        LEFT JOIN students s ON p.person_id = s.person_id
+        LEFT JOIN programs prog ON s.program_id = prog.program_id
+        LEFT JOIN departments d_s ON prog.department_id = d_s.department_id
+        LEFT JOIN employees emp ON p.person_id = emp.person_id
+        LEFT JOIN departments d_e ON emp.department_id = d_e.department_id
+        WHERE 1=1
     ".to_string();
 
-    if start_date.is_some() && end_date.is_some() {
-        base_query.push_str(" WHERE DATE(a.scanned_at) BETWEEN DATE(?1) AND DATE(?2)");
-    } else if start_date.is_some() {
-        base_query.push_str(" WHERE DATE(a.scanned_at) >= DATE(?1)");
-    } else if end_date.is_some() {
-        base_query.push_str(" WHERE DATE(a.scanned_at) <= DATE(?1)");
-    }
-
-    base_query.push_str(" ORDER BY a.scanned_at DESC LIMIT 100");
-
-    let mut stmt = conn.prepare(&base_query).map_err(|e| e.to_string())?;
-
-    let mut list = Vec::new();
+    let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
     if let (Some(start), Some(end)) = (&start_date, &end_date) {
-        let iter = stmt
-            .query_map(params![start, end], |row| {
-                let first_name: String = row.get(1)?;
-                let last_name: String = row.get(2)?;
-                Ok(EventAttendanceLog {
-                    log_id: row.get(0)?,
-                    person_name: format!("{} {}", first_name, last_name),
-                    id_number: row.get(3)?,
-                    role: row.get(4)?,
-                    event_name: row.get(5)?,
-                    scanned_at: row.get(6)?,
-                    status: row.get(7)?,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-        for item in iter {
-            list.push(item.map_err(|e| e.to_string())?);
-        }
-    } else if let Some(date) = start_date.or(end_date) {
-        let iter = stmt
-            .query_map(params![date], |row| {
-                let first_name: String = row.get(1)?;
-                let last_name: String = row.get(2)?;
-                Ok(EventAttendanceLog {
-                    log_id: row.get(0)?,
-                    person_name: format!("{} {}", first_name, last_name),
-                    id_number: row.get(3)?,
-                    role: row.get(4)?,
-                    event_name: row.get(5)?,
-                    scanned_at: row.get(6)?,
-                    status: row.get(7)?,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-        for item in iter {
-            list.push(item.map_err(|e| e.to_string())?);
-        }
-    } else {
-        let iter = stmt
-            .query_map([], |row| {
-                let first_name: String = row.get(1)?;
-                let last_name: String = row.get(2)?;
-                Ok(EventAttendanceLog {
-                    log_id: row.get(0)?,
-                    person_name: format!("{} {}", first_name, last_name),
-                    id_number: row.get(3)?,
-                    role: row.get(4)?,
-                    event_name: row.get(5)?,
-                    scanned_at: row.get(6)?,
-                    status: row.get(7)?,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-        for item in iter {
-            list.push(item.map_err(|e| e.to_string())?);
-        }
+        base_query.push_str(" AND DATE(a.scanned_at) BETWEEN DATE(?) AND DATE(?)");
+        params_vec.push(Box::new(start.clone()));
+        params_vec.push(Box::new(end.clone()));
+    } else if let Some(start) = &start_date {
+        base_query.push_str(" AND DATE(a.scanned_at) >= DATE(?)");
+        params_vec.push(Box::new(start.clone()));
+    } else if let Some(end) = &end_date {
+        base_query.push_str(" AND DATE(a.scanned_at) <= DATE(?)");
+        params_vec.push(Box::new(end.clone()));
     }
 
+    if let Some(dept_id) = department_id {
+        base_query.push_str(" AND COALESCE(prog.department_id, emp.department_id) = ?");
+        params_vec.push(Box::new(dept_id));
+    }
+
+    if let Some(prog_id) = program_id {
+        base_query.push_str(" AND s.program_id = ?");
+        params_vec.push(Box::new(prog_id));
+    }
+
+    if let Some(year) = year_level {
+        base_query.push_str(" AND s.year_level = ?");
+        params_vec.push(Box::new(year));
+    }
+
+    base_query.push_str(" ORDER BY a.scanned_at DESC LIMIT 500");
+
+    let mut stmt = conn.prepare(&base_query).map_err(|e| e.to_string())?;
+    
+    let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+
+    let iter = stmt.query_map(params_refs.as_slice(), |row| {
+        let first_name: String = row.get(1)?;
+        let last_name: String = row.get(2)?;
+        Ok(EventAttendanceLog {
+            log_id: row.get(0)?,
+            person_name: format!("{} {}", first_name, last_name),
+            id_number: row.get(3)?,
+            role: row.get(4)?,
+            event_name: row.get(5)?,
+            scanned_at: row.get(6)?,
+            status: row.get(7)?,
+            department_name: row.get(8)?,
+            program_name: row.get(9)?,
+            year_level: row.get(10)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut list = Vec::new();
+    for item in iter {
+        list.push(item.map_err(|e| e.to_string())?);
+    }
     Ok(list)
 }
 
@@ -1856,7 +1851,7 @@ pub fn add_event(pool: &DbPool, event: Event, active_admin_id: i64) -> Result<i6
 pub fn get_events(pool: &DbPool) -> Result<Vec<Event>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT event_id, event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, required_programs, required_year_levels, is_enabled FROM events")
+    let mut stmt = conn.prepare("SELECT event_id, event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, required_programs, required_year_levels, is_enabled FROM events WHERE is_archived = 0")
         .map_err(|e| e.to_string())?;
 
     let iter = stmt
@@ -1983,9 +1978,12 @@ pub fn delete_event(pool: &DbPool, event_id: i64, active_admin_id: i64) -> Resul
            }))
         }
     ).ok();
-
-    conn.execute("DELETE FROM events WHERE event_id = ?1", params![event_id])
-        .map_err(|e| e.to_string())?;
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    conn.execute(
+        "UPDATE events SET is_archived = 1, archived_at = ?1 WHERE event_id = ?2",
+        params![now, event_id],
+    )
+    .map_err(|e| e.to_string())?;
 
     let _ = log_audit_action(
         pool,
@@ -1994,7 +1992,7 @@ pub fn delete_event(pool: &DbPool, event_id: i64, active_admin_id: i64) -> Resul
         "events",
         event_id,
         old_data.map(|v| v.to_string()),
-        None,
+        Some(json!({ "action": "archived" }).to_string()),
     );
 
     Ok(())
@@ -2006,7 +2004,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     // 1. Check if person exists and is active
-    let mut stmt = conn.prepare("SELECT first_name, last_name, role, is_active, DATE(created_at, 'localtime') == DATE('now', 'localtime') as is_created_today FROM persons WHERE person_id = ?1")
+    let mut stmt = conn.prepare("SELECT first_name, last_name, role, is_active, DATE(created_at) == DATE('now', 'localtime') as is_created_today FROM persons WHERE person_id = ?1")
         .map_err(|e| e.to_string())?;
 
     let mut person_iter = stmt
@@ -2150,7 +2148,7 @@ pub fn manual_id_entry(
 ) -> Result<ScanResult, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT person_id, first_name, last_name, role, is_active, DATE(created_at, 'localtime') == DATE('now', 'localtime') as is_created_today FROM persons WHERE id_number = ?1")
+    let mut stmt = conn.prepare("SELECT person_id, first_name, last_name, role, is_active, DATE(created_at) == DATE('now', 'localtime') as is_created_today FROM persons WHERE id_number = ?1")
         .map_err(|e| e.to_string())?;
 
     let mut person_iter = stmt
@@ -2278,6 +2276,50 @@ pub fn manual_id_entry(
             role: None,
         })
     }
+}
+
+pub fn get_scan_person_details(
+    pool: &DbPool,
+    id_number: &str,
+) -> Result<Option<ScanPersonDetails>, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    conn.query_row(
+        "
+        SELECT
+            p.role,
+            p.id_number,
+            p.first_name,
+            p.middle_name,
+            p.last_name,
+            COALESCE(emp_dept.department_name, stu_dept.department_name) AS department_name,
+            prog.program_name,
+            stu.year_level
+        FROM persons p
+        LEFT JOIN students stu ON p.person_id = stu.person_id
+        LEFT JOIN programs prog ON stu.program_id = prog.program_id
+        LEFT JOIN departments stu_dept ON prog.department_id = stu_dept.department_id
+        LEFT JOIN employees emp ON p.person_id = emp.person_id
+        LEFT JOIN departments emp_dept ON emp.department_id = emp_dept.department_id
+        WHERE p.id_number = ?1
+        LIMIT 1
+        ",
+        params![id_number],
+        |row| {
+            Ok(ScanPersonDetails {
+                role: row.get(0)?,
+                id_number: row.get(1)?,
+                first_name: row.get(2)?,
+                middle_name: row.get(3)?,
+                last_name: row.get(4)?,
+                department_name: row.get(5)?,
+                program_name: row.get(6)?,
+                year_level: row.get(7)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
 }
 
 pub fn log_audit_action(
@@ -2585,6 +2627,7 @@ pub fn add_admin_account(
         target_id, 
         None, 
         Some(json!({
+            "summary": format!("Created Administrator account for {}.", full_name),
             "username": username,
             "full_name": full_name,
             "email": email,
@@ -2602,11 +2645,11 @@ pub fn update_admin_role(
 ) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let old_role: String = conn.query_row(
-        "SELECT role FROM accounts WHERE account_id = ?1", 
+    let (old_role, account_name): (String, String) = conn.query_row(
+        "SELECT role, full_name FROM accounts WHERE account_id = ?1", 
         params![account_id], 
-        |row| row.get(0)
-    ).unwrap_or_else(|_| "Unknown".to_string());
+        |row| Ok((row.get(0)?, row.get(1)?))
+    ).unwrap_or_else(|_| ("Unknown".to_string(), "Unknown".to_string()));
 
     conn.execute(
         "UPDATE accounts SET role = ?1 WHERE account_id = ?2",
@@ -2621,7 +2664,10 @@ pub fn update_admin_role(
         "accounts", 
         account_id, 
         Some(json!({"role": old_role}).to_string()), 
-        Some(json!({"role": new_role}).to_string())
+        Some(json!({
+            "summary": format!("Updated Role for Account: {}", account_name),
+            "role": new_role
+        }).to_string())
     );
     Ok(())
 }
@@ -2716,6 +2762,7 @@ pub fn update_admin_info(
             "email": old_email
         }).to_string()), 
         Some(json!({
+            "summary": format!("Updated information for Account: {}", full_name),
             "username": username,
             "full_name": full_name,
             "email": email
@@ -2775,11 +2822,11 @@ pub fn delete_admin_account(
         }
     }
 
-    let deleted_username: String = conn.query_row(
-        "SELECT username FROM accounts WHERE account_id = ?1", 
+    let (deleted_username, deleted_full_name): (String, String) = conn.query_row(
+        "SELECT username, full_name FROM accounts WHERE account_id = ?1", 
         params![account_id], 
-        |row| row.get(0)
-    ).unwrap_or_else(|_| "Unknown".to_string());
+        |row| Ok((row.get(0)?, row.get(1)?))
+    ).unwrap_or_else(|_| ("Unknown".to_string(), "Unknown".to_string()));
 
     // Reassign audit_logs that reference the to-be-deleted account to the
     // active admin, so the FK constraint is satisfied without losing history.
@@ -2801,7 +2848,10 @@ pub fn delete_admin_account(
         "DELETE", 
         "accounts", 
         account_id, 
-        Some(json!({ "username": deleted_username }).to_string()), 
+        Some(json!({
+            "summary": format!("Deleted Administrator account for {}.", deleted_full_name),
+            "username": deleted_username
+        }).to_string()), 
         None
     );
     Ok(())
@@ -2985,7 +3035,7 @@ pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
 
     let total_students: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM persons WHERE role = 'student'",
+            "SELECT COUNT(*) FROM persons WHERE role = 'student' AND is_archived = 0",
             [],
             |row| row.get(0),
         )
@@ -2993,7 +3043,7 @@ pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
 
     let total_employees: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM persons WHERE role IN ('professor', 'staff')",
+            "SELECT COUNT(*) FROM persons WHERE role IN ('professor', 'staff') AND is_archived = 0",
             [],
             |row| row.get(0),
         )
@@ -3001,7 +3051,7 @@ pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
 
     let total_visitors: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM persons WHERE role = 'visitor'",
+            "SELECT COUNT(*) FROM persons WHERE role = 'visitor' AND is_archived = 0",
             [],
             |row| row.get(0),
         )
@@ -3164,7 +3214,7 @@ pub fn log_event_attendance(
             p.last_name, 
             p.role, 
             p.is_active, 
-            DATE(p.created_at, 'localtime') == DATE('now', 'localtime') as is_created_today,
+            DATE(p.created_at) == DATE('now', 'localtime') as is_created_today,
             s.program_id,
             s.year_level
         FROM persons p
@@ -3306,14 +3356,21 @@ pub fn log_event_attendance(
 pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let mut system_name = "Pamantasan ng Lungsod ni Roi".to_string();
+    let mut system_name = "Pamantasan ng Lungsod ng Pasig".to_string();
     let mut system_logo = "".to_string();
+    let mut system_title = "SMART GATE".to_string();
+    let mut report_address = "Alkalde Jose St. Kapasigan Pasig City, Philippines 1600".to_string();
+    let mut report_phone = "(106) 628-1014".to_string();
+    let mut report_email = "info@plpasig.edu.ph".to_string();
     let mut primary_logo: Option<String> = None;
     let mut secondary_logo_1: Option<String> = None;
     let mut secondary_logo_2: Option<String> = None;
     let mut primary_circle: bool = false;
     let mut secondary1_circle: bool = false;
     let mut secondary2_circle: bool = false;
+    let mut primary_logo_enabled: bool = true;
+    let mut secondary_logo_1_enabled: bool = true;
+    let mut secondary_logo_2_enabled: bool = true;
 
     let mut stmt = conn
         .prepare("SELECT setting_key, setting_value FROM settings")
@@ -3332,12 +3389,19 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
             match key.as_str() {
                 "system_name" => system_name = value,
                 "system_logo" => system_logo = value,
+                "system_title" => system_title = value,
+                "report_address" => report_address = value,
+                "report_phone" => report_phone = value,
+                "report_email" => report_email = value,
                 "primary_logo" => primary_logo = Some(value).filter(|v| !v.is_empty()),
                 "secondary_logo_1" => secondary_logo_1 = Some(value).filter(|v| !v.is_empty()),
                 "secondary_logo_2" => secondary_logo_2 = Some(value).filter(|v| !v.is_empty()),
                 "primary_circle" => primary_circle = value == "1" || value.to_lowercase() == "true",
                 "secondary1_circle" => secondary1_circle = value == "1" || value.to_lowercase() == "true",
                 "secondary2_circle" => secondary2_circle = value == "1" || value.to_lowercase() == "true",
+                "primary_logo_enabled" => primary_logo_enabled = value == "1" || value.to_lowercase() == "true",
+                "secondary_logo_1_enabled" => secondary_logo_1_enabled = value == "1" || value.to_lowercase() == "true",
+                "secondary_logo_2_enabled" => secondary_logo_2_enabled = value == "1" || value.to_lowercase() == "true",
                 "circle_logo_format" => {
                     // Legacy support: if individual ones aren't set yet, they could inherit this
                     // but we'll prioritize individual ones.
@@ -3350,28 +3414,84 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
     Ok(SystemBranding {
         system_name,
         system_logo,
+        system_title,
+        report_address,
+        report_phone,
+        report_email,
         primary_logo,
         secondary_logo_1,
         secondary_logo_2,
         primary_circle,
         secondary1_circle,
         secondary2_circle,
+        primary_logo_enabled,
+        secondary_logo_1_enabled,
+        secondary_logo_2_enabled,
     })
 }
 
 pub fn update_system_branding(
     pool: &DbPool,
-    _admin_id: i64,
+    admin_id: i64,
     name: &str,
     logo_base64: &str,
+    system_title: &str,
+    report_address: &str,
+    report_phone: &str,
+    report_email: &str,
     primary_logo: Option<String>,
     secondary_logo_1: Option<String>,
     secondary_logo_2: Option<String>,
     primary_circle: bool,
     secondary1_circle: bool,
     secondary2_circle: bool,
+    primary_logo_enabled: bool,
+    secondary_logo_1_enabled: bool,
+    secondary_logo_2_enabled: bool,
 ) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
+
+    let old_system_name: Option<String> = conn.query_row("SELECT setting_value FROM settings WHERE setting_key = 'system_name'", [], |row| row.get(0)).unwrap_or(None);
+    let old_primary: Option<String> = conn.query_row("SELECT setting_value FROM settings WHERE setting_key = 'primary_logo'", [], |row| row.get(0)).unwrap_or(None);
+    let old_sec1: Option<String> = conn.query_row("SELECT setting_value FROM settings WHERE setting_key = 'secondary_logo_1'", [], |row| row.get(0)).unwrap_or(None);
+    let old_sec2: Option<String> = conn.query_row("SELECT setting_value FROM settings WHERE setting_key = 'secondary_logo_2'", [], |row| row.get(0)).unwrap_or(None);
+
+    let mut branding_changes = Vec::new();
+
+    let old_primary_len = old_primary.unwrap_or_default().len();
+    let new_primary_len = primary_logo.as_deref().unwrap_or_default().len();
+    if old_primary_len == 0 && new_primary_len > 0 { branding_changes.push("Added Primary Logo"); }
+    else if old_primary_len > 0 && new_primary_len == 0 { branding_changes.push("Removed Primary Logo"); }
+    else if old_primary_len > 0 && new_primary_len > 0 && old_primary_len != new_primary_len { branding_changes.push("Updated Primary Logo"); }
+
+    let old_sec1_len = old_sec1.unwrap_or_default().len();
+    let new_sec1_len = secondary_logo_1.as_deref().unwrap_or_default().len();
+    if old_sec1_len == 0 && new_sec1_len > 0 { branding_changes.push("Added Secondary Logo 1"); }
+    else if old_sec1_len > 0 && new_sec1_len == 0 { branding_changes.push("Removed Secondary Logo 1"); }
+    else if old_sec1_len > 0 && new_sec1_len > 0 && old_sec1_len != new_sec1_len { branding_changes.push("Updated Secondary Logo 1"); }
+
+    let old_sec2_len = old_sec2.unwrap_or_default().len();
+    let new_sec2_len = secondary_logo_2.as_deref().unwrap_or_default().len();
+    if old_sec2_len == 0 && new_sec2_len > 0 { branding_changes.push("Added Secondary Logo 2"); }
+    else if old_sec2_len > 0 && new_sec2_len == 0 { branding_changes.push("Removed Secondary Logo 2"); }
+    else if old_sec2_len > 0 && new_sec2_len > 0 && old_sec2_len != new_sec2_len { branding_changes.push("Updated Secondary Logo 2"); }
+
+    let name_changed = old_system_name.as_deref().unwrap_or_default() != name;
+
+    let summary_message = if branding_changes.is_empty() {
+        if name_changed {
+            format!("Updated System Branding. Name set to '{}'", name)
+        } else {
+            "Updated System Settings Appearance".to_string()
+        }
+    } else {
+        if name_changed {
+            format!("Updated System Branding. Name set to '{}' | Setup Logs: {}", name, branding_changes.join(", "))
+        } else {
+            branding_changes.join(", ")
+        }
+    };
+
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     // We'll skip extensive audit logging for the 3 new logos to prevent massive bloat unless necessary, 
@@ -3390,6 +3510,34 @@ pub fn update_system_branding(
         "INSERT INTO settings (setting_key, setting_value) VALUES ('system_logo', ?1)
          ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
         params![logo_base64],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('system_title', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![system_title],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('report_address', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![report_address],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('report_phone', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![report_phone],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('report_email', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![report_email],
     )
     .map_err(|e| e.to_string())?;
 
@@ -3436,7 +3584,53 @@ pub fn update_system_branding(
         params![if secondary2_circle { "1" } else { "0" }],
     ).map_err(|e| e.to_string())?;
 
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('primary_logo_enabled', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![if primary_logo_enabled { "1" } else { "0" }],
+    ).map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary_logo_1_enabled', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![if secondary_logo_1_enabled { "1" } else { "0" }],
+    ).map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary_logo_2_enabled', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![if secondary_logo_2_enabled { "1" } else { "0" }],
+    ).map_err(|e| e.to_string())?;
+
     tx.commit().map_err(|e| e.to_string())?;
+
+    // Log the branding update
+    let _ = log_audit_action(
+        pool,
+        admin_id,
+        "UPDATE",
+        "settings",
+        0, // Using 0 to represent a global/system level setting change
+        None,
+        Some(
+            serde_json::json!({
+                "summary": summary_message,
+                "system_name": name,
+                "system_title": system_title,
+                "report_address": report_address,
+                "report_phone": report_phone,
+                "report_email": report_email,
+                "primary_circle": primary_circle,
+                "secondary1_circle": secondary1_circle,
+                "secondary2_circle": secondary2_circle,
+                "primary_logo_enabled": primary_logo_enabled,
+                "secondary_logo_1_enabled": secondary_logo_1_enabled,
+                "secondary_logo_2_enabled": secondary_logo_2_enabled
+            })
+            .to_string(),
+        ),
+    );
+
     Ok(())
 }
 
@@ -3673,4 +3867,470 @@ mod tests {
         assert!(!result_denied.success);
         assert_eq!(result_denied.message, "Access Denied: ID is inactive.");
     }
+}
+
+// ------ Archive Center Functions ------
+
+pub fn get_archived_users(pool: &DbPool) -> Result<Vec<serde_json::Value>, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.role, p.email, p.archived_at,
+                COALESCE(pr.program_name, d.department_name, '') as affiliation
+         FROM persons p
+         LEFT JOIN students s ON p.person_id = s.person_id
+         LEFT JOIN programs pr ON s.program_id = pr.program_id
+         LEFT JOIN employees e ON p.person_id = e.person_id
+         LEFT JOIN departments d ON e.department_id = d.department_id
+         WHERE p.is_archived = 1
+         ORDER BY p.archived_at DESC"
+    ).map_err(|e| e.to_string())?;
+
+    let iter = stmt.query_map([], |row| {
+        Ok(json!({
+            "person_id": row.get::<_, i64>(0)?,
+            "id_number": row.get::<_, String>(1)?,
+            "first_name": row.get::<_, String>(2)?,
+            "middle_name": row.get::<_, Option<String>>(3)?,
+            "last_name": row.get::<_, String>(4)?,
+            "role": row.get::<_, String>(5)?,
+            "email": row.get::<_, Option<String>>(6)?,
+            "archived_at": row.get::<_, Option<String>>(7)?,
+            "affiliation": row.get::<_, String>(8)?
+        }))
+    }).map_err(|e| e.to_string())?;
+
+    let mut list = Vec::new();
+    for item in iter {
+        list.push(item.map_err(|e| e.to_string())?);
+    }
+    Ok(list)
+}
+
+pub fn get_archived_events(pool: &DbPool) -> Result<Vec<serde_json::Value>, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(
+        "SELECT event_id, event_name, event_date, start_time, end_time, required_role, archived_at
+         FROM events WHERE is_archived = 1
+         ORDER BY archived_at DESC"
+    ).map_err(|e| e.to_string())?;
+
+    let iter = stmt.query_map([], |row| {
+        Ok(json!({
+            "event_id": row.get::<_, i64>(0)?,
+            "event_name": row.get::<_, String>(1)?,
+            "event_date": row.get::<_, String>(2)?,
+            "start_time": row.get::<_, String>(3)?,
+            "end_time": row.get::<_, String>(4)?,
+            "required_role": row.get::<_, String>(5)?,
+            "archived_at": row.get::<_, Option<String>>(6)?
+        }))
+    }).map_err(|e| e.to_string())?;
+
+    let mut list = Vec::new();
+    for item in iter {
+        list.push(item.map_err(|e| e.to_string())?);
+    }
+    Ok(list)
+}
+
+pub fn get_archived_academic(pool: &DbPool) -> Result<serde_json::Value, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    // Archived departments
+    let mut dept_stmt = conn.prepare(
+        "SELECT department_id, department_code, department_name, archived_at
+         FROM departments WHERE is_archived = 1
+         ORDER BY archived_at DESC"
+    ).map_err(|e| e.to_string())?;
+
+    let dept_iter = dept_stmt.query_map([], |row| {
+        Ok(json!({
+            "id": row.get::<_, i64>(0)?,
+            "code": row.get::<_, String>(1)?,
+            "name": row.get::<_, String>(2)?,
+            "type": "Department",
+            "archived_at": row.get::<_, Option<String>>(3)?
+        }))
+    }).map_err(|e| e.to_string())?;
+
+    let mut departments = Vec::new();
+    for item in dept_iter {
+        departments.push(item.map_err(|e| e.to_string())?);
+    }
+
+    // Archived programs
+    let mut prog_stmt = conn.prepare(
+        "SELECT p.program_id, p.program_code, p.program_name, p.archived_at, d.department_name
+         FROM programs p
+         LEFT JOIN departments d ON p.department_id = d.department_id
+         WHERE p.is_archived = 1
+         ORDER BY p.archived_at DESC"
+    ).map_err(|e| e.to_string())?;
+
+    let prog_iter = prog_stmt.query_map([], |row| {
+        Ok(json!({
+            "id": row.get::<_, i64>(0)?,
+            "code": row.get::<_, String>(1)?,
+            "name": row.get::<_, String>(2)?,
+            "type": "Program",
+            "archived_at": row.get::<_, Option<String>>(3)?,
+            "department_name": row.get::<_, Option<String>>(4)?
+        }))
+    }).map_err(|e| e.to_string())?;
+
+    let mut programs = Vec::new();
+    for item in prog_iter {
+        programs.push(item.map_err(|e| e.to_string())?);
+    }
+
+    Ok(json!({
+        "departments": departments,
+        "programs": programs
+    }))
+}
+
+pub fn restore_user(pool: &DbPool, person_id: i64, active_admin_id: i64) -> Result<(), String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let name: String = conn.query_row(
+        "SELECT first_name || ' ' || last_name FROM persons WHERE person_id = ?1",
+        params![person_id],
+        |row| row.get(0),
+    ).unwrap_or_else(|_| "Unknown".to_string());
+
+    conn.execute(
+        "UPDATE persons SET is_archived = 0, archived_at = NULL WHERE person_id = ?1",
+        params![person_id],
+    ).map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "UPDATE",
+        "persons",
+        person_id,
+        Some(json!({ "action": "restored_from_archive" }).to_string()),
+        Some(json!({ "name": name, "is_archived": false }).to_string()),
+    );
+
+    Ok(())
+}
+
+pub fn restore_event(pool: &DbPool, event_id: i64, active_admin_id: i64) -> Result<(), String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let name: String = conn.query_row(
+        "SELECT event_name FROM events WHERE event_id = ?1",
+        params![event_id],
+        |row| row.get(0),
+    ).unwrap_or_else(|_| "Unknown".to_string());
+
+    conn.execute(
+        "UPDATE events SET is_archived = 0, archived_at = NULL WHERE event_id = ?1",
+        params![event_id],
+    ).map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "UPDATE",
+        "events",
+        event_id,
+        Some(json!({ "action": "restored_from_archive" }).to_string()),
+        Some(json!({ "event_name": name, "is_archived": false }).to_string()),
+    );
+
+    Ok(())
+}
+
+pub fn restore_department(pool: &DbPool, department_id: i64, active_admin_id: i64) -> Result<(), String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let name: String = conn.query_row(
+        "SELECT department_name FROM departments WHERE department_id = ?1",
+        params![department_id],
+        |row| row.get(0),
+    ).unwrap_or_else(|_| "Unknown".to_string());
+
+    conn.execute(
+        "UPDATE departments SET is_archived = 0, archived_at = NULL WHERE department_id = ?1",
+        params![department_id],
+    ).map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "UPDATE",
+        "departments",
+        department_id,
+        Some(json!({ "action": "restored_from_archive" }).to_string()),
+        Some(json!({ "department_name": name, "is_archived": false }).to_string()),
+    );
+
+    Ok(())
+}
+
+pub fn restore_program(pool: &DbPool, program_id: i64, active_admin_id: i64) -> Result<(), String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let name: String = conn.query_row(
+        "SELECT program_name FROM programs WHERE program_id = ?1",
+        params![program_id],
+        |row| row.get(0),
+    ).unwrap_or_else(|_| "Unknown".to_string());
+
+    conn.execute(
+        "UPDATE programs SET is_archived = 0, archived_at = NULL WHERE program_id = ?1",
+        params![program_id],
+    ).map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "UPDATE",
+        "programs",
+        program_id,
+        Some(json!({ "action": "restored_from_archive" }).to_string()),
+        Some(json!({ "program_name": name, "is_archived": false }).to_string()),
+    );
+
+    Ok(())
+}
+
+pub fn permanent_delete_user(pool: &DbPool, person_id: i64, active_admin_id: i64) -> Result<(), String> {
+    let mut conn = pool.get().map_err(|e| e.to_string())?;
+
+    // Only allow permanent delete of archived records
+    let is_archived: bool = conn.query_row(
+        "SELECT is_archived FROM persons WHERE person_id = ?1",
+        params![person_id],
+        |row| row.get::<_, i32>(0).map(|v| v == 1),
+    ).map_err(|e| e.to_string())?;
+
+    if !is_archived {
+        return Err("Only archived records can be permanently deleted. Archive the record first.".to_string());
+    }
+
+    let old_data: Option<serde_json::Value> = conn.query_row(
+        "SELECT id_number, first_name, last_name, role FROM persons WHERE person_id = ?1",
+        params![person_id],
+        |row| {
+            Ok(json!({
+                "id_number": row.get::<_, String>(0)?,
+                "first_name": row.get::<_, String>(1)?,
+                "last_name": row.get::<_, String>(2)?,
+                "role": row.get::<_, String>(3)?
+            }))
+        }
+    ).ok();
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    // Delete from role-specific tables
+    tx.execute("DELETE FROM students WHERE person_id = ?1", params![person_id]).ok();
+    tx.execute("DELETE FROM employees WHERE person_id = ?1", params![person_id]).ok();
+    tx.execute("DELETE FROM visitors WHERE person_id = ?1", params![person_id]).ok();
+    tx.execute("DELETE FROM event_attendance WHERE person_id = ?1", params![person_id]).ok();
+    tx.execute("DELETE FROM entry_logs WHERE person_id = ?1", params![person_id]).ok();
+    tx.execute("DELETE FROM persons WHERE person_id = ?1", params![person_id])
+        .map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "DELETE",
+        "persons",
+        person_id,
+        old_data.map(|v| v.to_string()),
+        Some(json!({ "action": "permanent_delete" }).to_string()),
+    );
+
+    Ok(())
+}
+
+pub fn permanent_delete_event(pool: &DbPool, event_id: i64, active_admin_id: i64) -> Result<(), String> {
+    let mut conn = pool.get().map_err(|e| e.to_string())?;
+
+    let is_archived: bool = conn.query_row(
+        "SELECT is_archived FROM events WHERE event_id = ?1",
+        params![event_id],
+        |row| row.get::<_, i32>(0).map(|v| v == 1),
+    ).map_err(|e| e.to_string())?;
+
+    if !is_archived {
+        return Err("Only archived events can be permanently deleted.".to_string());
+    }
+
+    let old_data: Option<serde_json::Value> = conn.query_row(
+        "SELECT event_name FROM events WHERE event_id = ?1",
+        params![event_id],
+        |row| Ok(json!({ "event_name": row.get::<_, String>(0)? })),
+    ).ok();
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM event_attendance WHERE event_id = ?1", params![event_id]).ok();
+    tx.execute("DELETE FROM events WHERE event_id = ?1", params![event_id])
+        .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "DELETE",
+        "events",
+        event_id,
+        old_data.map(|v| v.to_string()),
+        Some(json!({ "action": "permanent_delete" }).to_string()),
+    );
+
+    Ok(())
+}
+
+pub fn permanent_delete_department(pool: &DbPool, department_id: i64, active_admin_id: i64) -> Result<(), String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let is_archived: bool = conn.query_row(
+        "SELECT is_archived FROM departments WHERE department_id = ?1",
+        params![department_id],
+        |row| row.get::<_, i32>(0).map(|v| v == 1),
+    ).map_err(|e| e.to_string())?;
+
+    if !is_archived {
+        return Err("Only archived departments can be permanently deleted.".to_string());
+    }
+
+    let old_data: Option<serde_json::Value> = conn.query_row(
+        "SELECT department_code, department_name FROM departments WHERE department_id = ?1",
+        params![department_id],
+        |row| Ok(json!({ "department_code": row.get::<_, String>(0)?, "department_name": row.get::<_, String>(1)? })),
+    ).ok();
+
+    conn.execute("DELETE FROM departments WHERE department_id = ?1", params![department_id])
+        .map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "DELETE",
+        "departments",
+        department_id,
+        old_data.map(|v| v.to_string()),
+        Some(json!({ "action": "permanent_delete" }).to_string()),
+    );
+
+    Ok(())
+}
+
+pub fn permanent_delete_program(pool: &DbPool, program_id: i64, active_admin_id: i64) -> Result<(), String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let is_archived: bool = conn.query_row(
+        "SELECT is_archived FROM programs WHERE program_id = ?1",
+        params![program_id],
+        |row| row.get::<_, i32>(0).map(|v| v == 1),
+    ).map_err(|e| e.to_string())?;
+
+    if !is_archived {
+        return Err("Only archived programs can be permanently deleted.".to_string());
+    }
+
+    let old_data: Option<serde_json::Value> = conn.query_row(
+        "SELECT program_code, program_name FROM programs WHERE program_id = ?1",
+        params![program_id],
+        |row| Ok(json!({ "program_code": row.get::<_, String>(0)?, "program_name": row.get::<_, String>(1)? })),
+    ).ok();
+
+    conn.execute("DELETE FROM programs WHERE program_id = ?1", params![program_id])
+        .map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "DELETE",
+        "programs",
+        program_id,
+        old_data.map(|v| v.to_string()),
+        Some(json!({ "action": "permanent_delete" }).to_string()),
+    );
+
+    Ok(())
+}
+
+// ------ Database Backup & Recovery ------
+
+pub fn backup_database(app_handle: &tauri::AppHandle, destination_path: &str) -> Result<String, String> {
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .expect("Failed to get app data directory");
+    let db_path = app_dir.join("smart_gate.sqlite");
+
+    if !db_path.exists() {
+        return Err("Database file not found.".to_string());
+    }
+
+    fs::copy(&db_path, destination_path)
+        .map_err(|e| format!("Failed to create backup: {}", e))?;
+
+    Ok(format!("Backup saved to: {}", destination_path))
+}
+
+pub fn restore_database(app_handle: &tauri::AppHandle, source_path: &str) -> Result<String, String> {
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .expect("Failed to get app data directory");
+    let db_path = app_dir.join("smart_gate.sqlite");
+
+    let source = std::path::Path::new(source_path);
+    if !source.exists() {
+        return Err("Backup file not found.".to_string());
+    }
+
+    // Create a safety backup before overwriting
+    let safety_backup = app_dir.join("smart_gate_pre_restore_backup.sqlite");
+    if db_path.exists() {
+        fs::copy(&db_path, &safety_backup)
+            .map_err(|e| format!("Failed to create safety backup: {}", e))?;
+    }
+
+    fs::copy(source_path, &db_path)
+        .map_err(|e| format!("Failed to restore database: {}", e))?;
+
+    Ok("Database restored successfully. Please restart the application.".to_string())
+}
+
+pub fn get_database_stats(app_handle: &tauri::AppHandle, pool: &DbPool) -> Result<serde_json::Value, String> {
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .expect("Failed to get app data directory");
+    let db_path = app_dir.join("smart_gate.sqlite");
+
+    let file_size = if db_path.exists() {
+        fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0)
+    } else {
+        0
+    };
+
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let total_persons: i64 = conn.query_row("SELECT COUNT(*) FROM persons", [], |row| row.get(0)).unwrap_or(0);
+    let total_events: i64 = conn.query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0)).unwrap_or(0);
+    let total_logs: i64 = conn.query_row("SELECT COUNT(*) FROM entry_logs", [], |row| row.get(0)).unwrap_or(0);
+    let total_audit: i64 = conn.query_row("SELECT COUNT(*) FROM audit_logs", [], |row| row.get(0)).unwrap_or(0);
+    let archived_persons: i64 = conn.query_row("SELECT COUNT(*) FROM persons WHERE is_archived = 1", [], |row| row.get(0)).unwrap_or(0);
+    let archived_events: i64 = conn.query_row("SELECT COUNT(*) FROM events WHERE is_archived = 1", [], |row| row.get(0)).unwrap_or(0);
+
+    Ok(json!({
+        "file_size_bytes": file_size,
+        "total_persons": total_persons,
+        "total_events": total_events,
+        "total_entry_logs": total_logs,
+        "total_audit_logs": total_audit,
+        "archived_persons": archived_persons,
+        "archived_events": archived_events
+    }))
 }

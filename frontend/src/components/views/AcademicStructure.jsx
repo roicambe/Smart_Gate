@@ -160,12 +160,12 @@ export const AcademicStructure = ({ branding, adminSession }) => {
             } else {
                 await invoke('delete_program', { programId: selectedItem.program_id, activeAdminId: adminSession?.account_id });
             }
-            setStatus({ type: 'success', message: `${activeTab} deleted successfully!` });
+            setStatus({ type: 'success', message: `${activeTab} archived successfully!` });
             setShowDeleteModal(false);
             fetchData();
         } catch (error) {
             console.error(error);
-            setStatus({ type: 'error', message: typeof error === 'string' ? error : `Failed to delete ${activeTab}.` });
+            setStatus({ type: 'error', message: typeof error === 'string' ? error : `Failed to archive ${activeTab}.` });
         }
     };
 
@@ -299,7 +299,7 @@ export const AcademicStructure = ({ branding, adminSession }) => {
                                                     onClick={() => handleEditClick(item)}>
                                                     <Edit2 className="w-4 h-4" />
                                                 </button>
-                                                <button className="p-2 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors border border-transparent hover:border-rose-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Delete"
+                                                <button className="p-2 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors border border-transparent hover:border-rose-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Archive"
                                                     onClick={() => handleDeleteClick(item)}>
                                                     <Trash2 className="w-4 h-4" />
                                                 </button>
@@ -381,12 +381,12 @@ export const AcademicStructure = ({ branding, adminSession }) => {
                                 <AlertTriangle className="w-10 h-10 text-rose-400" />
                             </div>
                             <div className="space-y-2">
-                                <h2 className="text-2xl font-bold text-white">Delete {activeTab}?</h2>
-                                <p className="text-white/70">Are you sure you want to delete <span className="text-white font-semibold">{activeTab === 'department' ? selectedItem.department_code : selectedItem.program_code}</span>? This action cannot be undone.</p>
+                                <h2 className="text-2xl font-bold text-white capitalize">Archive {activeTab}?</h2>
+                                <p className="text-white/70">Are you sure you want to archive <span className="text-white font-semibold">{activeTab === 'department' ? selectedItem.department_code : selectedItem.program_code}</span>? This record will be moved to the Archive Center.</p>
                             </div>
                             <div className="flex gap-4 w-full pt-4">
                                 <button onClick={() => setShowDeleteModal(false)} className="flex-1 py-3 px-4 bg-white/5 hover:bg-white/10 text-white font-semibold rounded-xl transition-colors border border-white/10 focus:outline-none">Cancel</button>
-                                <button onClick={confirmDelete} className="flex-1 py-3 px-4 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl transition-all shadow-[0_0_20px_rgba(244,63,94,0.3)] hover:shadow-[0_0_30px_rgba(244,63,94,0.5)] border border-rose-400 focus:outline-none">Delete</button>
+                                <button onClick={confirmDelete} className="flex-1 py-3 px-4 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl transition-all shadow-[0_0_20px_rgba(244,63,94,0.3)] hover:shadow-[0_0_30px_rgba(244,63,94,0.5)] border border-rose-400 focus:outline-none">Archive</button>
                             </div>
                         </div>
                     </div>

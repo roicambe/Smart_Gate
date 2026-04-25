@@ -343,15 +343,21 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
             <div className="flex h-16 w-full select-none items-center justify-between border-b border-white/10 bg-black/20 px-6 text-white backdrop-blur-md">
                 <div className="pointer-events-none flex items-center gap-4">
                     <div className="flex items-center gap-2">
-                        <div className={`h-11 w-11 flex items-center justify-center overflow-hidden flex-shrink-0 ${secondary1CircleClass}`}>
-                            <img src={secondaryLogo1} alt="Secondary Logo 1" className={`w-full h-full ${branding?.secondary1_circle ? 'object-cover' : 'object-contain'} drop-shadow-md`} />
-                        </div>
-                        <div className={`h-11 w-11 flex items-center justify-center overflow-hidden flex-shrink-0 ${secondary2CircleClass}`}>
-                            <img src={secondaryLogo2} alt="Secondary Logo 2" className={`w-full h-full ${branding?.secondary2_circle ? 'object-cover' : 'object-contain'} drop-shadow-md`} />
-                        </div>
-                        <div className={`h-11 w-11 flex items-center justify-center overflow-hidden flex-shrink-0 ${primaryCircleClass}`}>
-                            <img src={logoSrc} alt="Primary Logo" className={`w-full h-full ${branding?.primary_circle ? 'object-cover' : 'object-contain'} drop-shadow-md`} />
-                        </div>
+                        {branding?.secondary_logo_1_enabled !== false && (
+                            <div className={`h-11 w-11 flex items-center justify-center overflow-hidden flex-shrink-0 ${secondary1CircleClass}`}>
+                                <img src={secondaryLogo1} alt="Secondary Logo 1" className={`w-full h-full ${branding?.secondary1_circle ? 'object-cover' : 'object-contain'} drop-shadow-md`} />
+                            </div>
+                        )}
+                        {branding?.secondary_logo_2_enabled !== false && (
+                            <div className={`h-11 w-11 flex items-center justify-center overflow-hidden flex-shrink-0 ${secondary2CircleClass}`}>
+                                <img src={secondaryLogo2} alt="Secondary Logo 2" className={`w-full h-full ${branding?.secondary2_circle ? 'object-cover' : 'object-contain'} drop-shadow-md`} />
+                            </div>
+                        )}
+                        {branding?.primary_logo_enabled !== false && (
+                            <div className={`h-11 w-11 flex items-center justify-center overflow-hidden flex-shrink-0 ${primaryCircleClass}`}>
+                                <img src={logoSrc} alt="Primary Logo" className={`w-full h-full ${branding?.primary_circle ? 'object-cover' : 'object-contain'} drop-shadow-md`} />
+                            </div>
+                        )}
                     </div>
                     <span className="text-xl font-bold tracking-wide drop-shadow-sm line-clamp-1">{systemName}</span>
                 </div>
@@ -405,96 +411,135 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
 
             {showAdminModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-                    <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-white/20 bg-slate-900/80 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-200">
-                        <div className="flex flex-col items-center border-b border-white/10 p-6">
-                            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-brand-500/30 bg-brand-500/20 text-brand-400">
-                                <Lock className="h-7 w-7" />
+                    <div className="w-full max-w-4xl overflow-hidden rounded-2xl border border-white/20 bg-slate-900/80 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-200 flex flex-col md:flex-row">
+                        {/* Left Side: Branding */}
+                        <div className="hidden md:flex w-1/2 flex-col items-center justify-center border-r border-white/10 bg-black/40 p-10 relative overflow-hidden">
+                            <div className="relative z-10 flex flex-col items-center gap-8">
+                                <div className="flex gap-4 items-center justify-center">
+                                    {branding?.secondary_logo_1_enabled !== false && (
+                                        <div className={`h-16 w-16 flex items-center justify-center overflow-hidden flex-shrink-0 ${secondary1CircleClass}`}>
+                                            <img src={secondaryLogo1} alt="Secondary Logo 1" className={`w-full h-full ${branding?.secondary1_circle ? 'object-cover' : 'object-contain'} drop-shadow-md`} />
+                                        </div>
+                                    )}
+                                    {branding?.primary_logo_enabled !== false && (
+                                        <div className={`h-28 w-28 flex items-center justify-center overflow-hidden flex-shrink-0 ${primaryCircleClass}`}>
+                                            <img src={logoSrc} alt="Primary Logo" className={`w-full h-full ${branding?.primary_circle ? 'object-cover' : 'object-contain'} drop-shadow-lg`} />
+                                        </div>
+                                    )}
+                                    {branding?.secondary_logo_2_enabled !== false && (
+                                        <div className={`h-16 w-16 flex items-center justify-center overflow-hidden flex-shrink-0 ${secondary2CircleClass}`}>
+                                            <img src={secondaryLogo2} alt="Secondary Logo 2" className={`w-full h-full ${branding?.secondary2_circle ? 'object-cover' : 'object-contain'} drop-shadow-md`} />
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="text-center">
+                                    <h2 className="text-4xl font-extrabold tracking-wider text-white drop-shadow-md">
+                                        {systemName}
+                                    </h2>
+                                    <p className="mt-3 text-sm font-semibold tracking-[0.2em] text-brand-400 uppercase drop-shadow-sm">
+                                        Administrator Portal
+                                    </p>
+                                </div>
                             </div>
-                            <h2 className="text-center text-xl font-bold tracking-wide text-white">Administrator Access</h2>
-                            <p className="mt-2 text-center text-sm text-white/60">
-                                Enter your secure passcode to proceed.
-                            </p>
+                            
+                            {/* Decorative Elements */}
+                            <div className="absolute inset-0 bg-gradient-to-br from-brand-600/10 to-transparent pointer-events-none" />
+                            <div className="absolute -top-32 -left-32 h-80 w-80 rounded-full bg-brand-500/10 blur-3xl pointer-events-none" />
+                            <div className="absolute -bottom-32 -right-32 h-80 w-80 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none" />
                         </div>
-                        <form onSubmit={handleLogin} className="p-6">
-                            <input
-                                type="text"
-                                placeholder="Enter username..."
-                                value={username}
-                                onChange={(e) => setUsername(e.target.value)}
-                                className="mb-3 w-full rounded-lg border border-white/10 bg-black/40 px-4 py-3 text-center tracking-wide text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50"
-                                autoFocus
-                            />
-                            <div className="relative mb-2">
+
+                        {/* Right Side: Login Form */}
+                        <div className="w-full md:w-1/2 flex flex-col justify-center bg-slate-900/50">
+                            <div className="flex flex-col items-center border-b border-white/10 p-6 md:p-8">
+                                <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-full border border-brand-500/30 bg-brand-500/20 text-brand-400 shadow-inner">
+                                    <Lock className="h-7 w-7" />
+                                </div>
+                                <h2 className="text-center text-2xl font-bold tracking-wide text-white">Access Required</h2>
+                                <p className="mt-2 text-center text-sm text-white/50">
+                                    Enter your securely assigned credentials.
+                                </p>
+                            </div>
+                            <form onSubmit={handleLogin} className="p-6 md:p-8 pt-6">
                                 <input
-                                    type={showPassword ? "text" : "password"}
-                                    placeholder="Enter passcode..."
-                                    value={password}
-                                    onChange={(e) => {
-                                        const nextPassword = e.target.value;
-                                        setPassword(nextPassword);
-                                        if (!nextPassword) {
-                                            setShowPassword(false);
-                                        }
-                                    }}
-                                    data-password-toggle="custom"
-                                    className="w-full rounded-lg border border-white/10 bg-black/40 px-11 py-3 text-center tracking-wide text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+                                    type="text"
+                                    placeholder="Enter username..."
+                                    value={username}
+                                    onChange={(e) => setUsername(e.target.value)}
+                                    className="mb-4 w-full rounded-xl border border-white/10 bg-black/40 px-5 py-3.5 text-center tracking-wide text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition-all hover:bg-black/60"
+                                    autoFocus
                                 />
-                                {password && (
-                                    <button
-                                        type="button"
-                                        onMouseDown={(e) => {
-                                            e.preventDefault();
-                                            setShowPassword(true);
-                                        }}
-                                        onMouseUp={() => setShowPassword(false)}
-                                        onMouseLeave={() => setShowPassword(false)}
-                                        onTouchStart={() => setShowPassword(true)}
-                                        onTouchEnd={() => setShowPassword(false)}
-                                        onTouchCancel={() => setShowPassword(false)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === " " || e.key === "Enter") {
-                                                setShowPassword(true);
-                                            }
-                                        }}
-                                        onKeyUp={(e) => {
-                                            if (e.key === " " || e.key === "Enter") {
+                                <div className="relative mb-3">
+                                    <input
+                                        type={showPassword ? "text" : "password"}
+                                        placeholder="Enter passcode..."
+                                        value={password}
+                                        onChange={(e) => {
+                                            const nextPassword = e.target.value;
+                                            setPassword(nextPassword);
+                                            if (!nextPassword) {
                                                 setShowPassword(false);
                                             }
                                         }}
-                                        onBlur={() => setShowPassword(false)}
-                                        className="absolute inset-y-0 right-0 flex items-center px-3 text-white/90 hover:text-white focus:outline-none"
-                                        aria-label={showPassword ? "Hide password" : "Show password"}
+                                        data-password-toggle="custom"
+                                        className="w-full rounded-xl border border-white/10 bg-black/40 px-12 py-3.5 text-center tracking-wide text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-brand-500/50 transition-all hover:bg-black/60"
+                                    />
+                                    {password && (
+                                        <button
+                                            type="button"
+                                            onMouseDown={(e) => {
+                                                e.preventDefault();
+                                                setShowPassword(true);
+                                            }}
+                                            onMouseUp={() => setShowPassword(false)}
+                                            onMouseLeave={() => setShowPassword(false)}
+                                            onTouchStart={() => setShowPassword(true)}
+                                            onTouchEnd={() => setShowPassword(false)}
+                                            onTouchCancel={() => setShowPassword(false)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === " " || e.key === "Enter") {
+                                                    setShowPassword(true);
+                                                }
+                                            }}
+                                            onKeyUp={(e) => {
+                                                if (e.key === " " || e.key === "Enter") {
+                                                    setShowPassword(false);
+                                                }
+                                            }}
+                                            onBlur={() => setShowPassword(false)}
+                                            className="absolute inset-y-0 right-0 flex items-center px-4 text-white/50 hover:text-white focus:outline-none transition-colors"
+                                            aria-label={showPassword ? "Hide password" : "Show password"}
+                                        >
+                                            {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                                        </button>
+                                    )}
+                                </div>
+                                {loginError && <div className="mb-4 text-center text-sm font-medium text-rose-400">{loginError}</div>}
+                                <div className="mb-6 text-center">
+                                    <button
+                                        type="button"
+                                        onClick={() => { setShowAdminModal(false); setShowForgotPasswordModal(true); }}
+                                        className="text-sm font-medium text-brand-400/80 hover:text-brand-300 transition-colors focus:outline-none underline-offset-4 hover:underline"
                                     >
-                                        {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                                        Forgot Password?
                                     </button>
-                                )}
-                            </div>
-                            {loginError && <div className="mb-4 text-center text-sm text-rose-400">{loginError}</div>}
-                            <div className="mb-4 text-center">
-                                <button
-                                    type="button"
-                                    onClick={() => { setShowAdminModal(false); setShowForgotPasswordModal(true); }}
-                                    className="text-sm text-brand-400 hover:text-brand-300 transition-colors focus:outline-none"
-                                >
-                                    Forgot Password?
-                                </button>
-                            </div>
-                            <div className="mt-4 flex gap-3">
-                                <button
-                                    type="button"
-                                    onClick={closeLoginModal}
-                                    className="flex-1 rounded-lg border border-white/10 bg-white/5 px-4 py-2.5 font-medium text-white/80 transition-all hover:bg-white/10 hover:text-white focus:outline-none"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    className="flex-1 rounded-lg bg-brand-600 px-4 py-2.5 font-medium text-white shadow-lg shadow-brand-500/25 transition-all hover:bg-brand-500 focus:outline-none"
-                                >
-                                    Login
-                                </button>
-                            </div>
-                        </form>
+                                </div>
+                                <div className="flex gap-4">
+                                    <button
+                                        type="button"
+                                        onClick={closeLoginModal}
+                                        className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-3 font-medium text-white/80 transition-all hover:bg-white/10 hover:text-white focus:outline-none"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        className="flex-1 rounded-xl bg-brand-600 px-4 py-3 font-semibold text-white shadow-lg shadow-brand-500/25 transition-all hover:bg-brand-500 hover:shadow-brand-500/40 focus:outline-none active:scale-[0.98]"
+                                    >
+                                        Log In
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
                     </div>
                 </div>
             )}

@@ -155,6 +155,9 @@ pub struct EventAttendanceLog {
     pub event_name: String,
     pub scanned_at: String,
     pub status: String,
+    pub department_name: Option<String>,
+    pub program_name: Option<String>,
+    pub year_level: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -193,6 +196,18 @@ pub struct ScanResult {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct ScanPersonDetails {
+    pub role: String,
+    pub id_number: String,
+    pub first_name: String,
+    pub middle_name: Option<String>,
+    pub last_name: String,
+    pub department_name: Option<String>,
+    pub program_name: Option<String>,
+    pub year_level: Option<i64>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ChartDataPoint {
     pub date: String,
     pub students: i64,
@@ -217,7 +232,7 @@ pub struct AccessLogDetails {
     pub person_name: String,
     pub id_number: String,
     pub role: String,
-    pub scanner_location: String,
+    pub department_name: String,
     pub scanner_function: String,
 }
 
@@ -239,12 +254,19 @@ pub struct AuditLogDetails {
 pub struct SystemBranding {
     pub system_name: String,
     pub system_logo: String,
+    pub system_title: String,
+    pub report_address: String,
+    pub report_phone: String,
+    pub report_email: String,
     pub primary_logo: Option<String>,
     pub secondary_logo_1: Option<String>,
     pub secondary_logo_2: Option<String>,
     pub primary_circle: bool,
     pub secondary1_circle: bool,
     pub secondary2_circle: bool,
+    pub primary_logo_enabled: bool,
+    pub secondary_logo_1_enabled: bool,
+    pub secondary_logo_2_enabled: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -254,4 +276,3 @@ pub struct BulkImportResult {
     pub imported_ids: Vec<String>,
     pub error_logs: Vec<String>,
 }
-

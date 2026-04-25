@@ -133,7 +133,7 @@ pub fn get_access_logs(
     pool: State<'_, DbPool>,
     role_filter: Option<String>,
     action_type: Option<String>,
-    location_name: Option<String>,
+    department_id: Option<i64>,
     search_term: Option<String>,
     start_date: Option<String>,
     end_date: Option<String>,
@@ -142,7 +142,7 @@ pub fn get_access_logs(
         &pool,
         role_filter,
         action_type,
-        location_name,
+        department_id,
         search_term,
         start_date,
         end_date,
@@ -154,8 +154,11 @@ pub fn get_event_attendance_logs(
     pool: State<'_, DbPool>,
     start_date: Option<String>,
     end_date: Option<String>,
+    department_id: Option<i64>,
+    program_id: Option<i64>,
+    year_level: Option<i64>,
 ) -> Result<Vec<EventAttendanceLog>, String> {
-    db::get_event_attendance_logs(&pool, start_date, end_date)
+    db::get_event_attendance_logs(&pool, start_date, end_date, department_id, program_id, year_level)
 }
 
 #[tauri::command]
@@ -500,6 +503,14 @@ pub fn manual_id_entry(
 }
 
 #[tauri::command]
+pub fn get_scan_person_details(
+    pool: State<'_, DbPool>,
+    id_number: String,
+) -> Result<Option<ScanPersonDetails>, String> {
+    db::get_scan_person_details(&pool, &id_number)
+}
+
+#[tauri::command]
 pub fn update_user(
     pool: State<'_, DbPool>,
     person_id: i64,
@@ -565,24 +576,38 @@ pub fn update_system_branding(
     admin_id: i64,
     name: String,
     logo_base64: String,
+    system_title: String,
+    report_address: String,
+    report_phone: String,
+    report_email: String,
     primary_logo: Option<String>,
     secondary_logo_1: Option<String>,
     secondary_logo_2: Option<String>,
     primary_circle: Option<bool>,
     secondary1_circle: Option<bool>,
     secondary2_circle: Option<bool>,
+    primary_logo_enabled: Option<bool>,
+    secondary_logo_1_enabled: Option<bool>,
+    secondary_logo_2_enabled: Option<bool>,
 ) -> Result<(), String> {
     db::update_system_branding(
         &pool,
         admin_id,
         &name,
         &logo_base64,
+        &system_title,
+        &report_address,
+        &report_phone,
+        &report_email,
         primary_logo,
         secondary_logo_1,
         secondary_logo_2,
         primary_circle.unwrap_or(false),
         secondary1_circle.unwrap_or(false),
         secondary2_circle.unwrap_or(false),
+        primary_logo_enabled.unwrap_or(true),
+        secondary_logo_1_enabled.unwrap_or(true),
+        secondary_logo_2_enabled.unwrap_or(true),
     )
 }
 
@@ -838,4 +863,78 @@ Write-Output "Printed successfully to $PrinterName"
         let _ = fs::remove_file(&data_path);
         result
     }
+}
+
+// ------ Archive Center Commands ------
+
+#[tauri::command]
+pub fn get_archived_users(pool: State<'_, DbPool>) -> Result<Vec<serde_json::Value>, String> {
+    db::get_archived_users(&pool)
+}
+
+#[tauri::command]
+pub fn get_archived_events(pool: State<'_, DbPool>) -> Result<Vec<serde_json::Value>, String> {
+    db::get_archived_events(&pool)
+}
+
+#[tauri::command]
+pub fn get_archived_academic(pool: State<'_, DbPool>) -> Result<serde_json::Value, String> {
+    db::get_archived_academic(&pool)
+}
+
+#[tauri::command]
+pub fn restore_user(pool: State<'_, DbPool>, person_id: i64, active_admin_id: i64) -> Result<(), String> {
+    db::restore_user(&pool, person_id, active_admin_id)
+}
+
+#[tauri::command]
+pub fn restore_event(pool: State<'_, DbPool>, event_id: i64, active_admin_id: i64) -> Result<(), String> {
+    db::restore_event(&pool, event_id, active_admin_id)
+}
+
+#[tauri::command]
+pub fn restore_department(pool: State<'_, DbPool>, department_id: i64, active_admin_id: i64) -> Result<(), String> {
+    db::restore_department(&pool, department_id, active_admin_id)
+}
+
+#[tauri::command]
+pub fn restore_program(pool: State<'_, DbPool>, program_id: i64, active_admin_id: i64) -> Result<(), String> {
+    db::restore_program(&pool, program_id, active_admin_id)
+}
+
+#[tauri::command]
+pub fn permanent_delete_user(pool: State<'_, DbPool>, person_id: i64, active_admin_id: i64) -> Result<(), String> {
+    db::permanent_delete_user(&pool, person_id, active_admin_id)
+}
+
+#[tauri::command]
+pub fn permanent_delete_event(pool: State<'_, DbPool>, event_id: i64, active_admin_id: i64) -> Result<(), String> {
+    db::permanent_delete_event(&pool, event_id, active_admin_id)
+}
+
+#[tauri::command]
+pub fn permanent_delete_department(pool: State<'_, DbPool>, department_id: i64, active_admin_id: i64) -> Result<(), String> {
+    db::permanent_delete_department(&pool, department_id, active_admin_id)
+}
+
+#[tauri::command]
+pub fn permanent_delete_program(pool: State<'_, DbPool>, program_id: i64, active_admin_id: i64) -> Result<(), String> {
+    db::permanent_delete_program(&pool, program_id, active_admin_id)
+}
+
+// ------ Backup & Recovery Commands ------
+
+#[tauri::command]
+pub fn backup_database(app_handle: tauri::AppHandle, destination_path: String) -> Result<String, String> {
+    db::backup_database(&app_handle, &destination_path)
+}
+
+#[tauri::command]
+pub fn restore_database(app_handle: tauri::AppHandle, source_path: String) -> Result<String, String> {
+    db::restore_database(&app_handle, &source_path)
+}
+
+#[tauri::command]
+pub fn get_database_stats(app_handle: tauri::AppHandle, pool: State<'_, DbPool>) -> Result<serde_json::Value, String> {
+    db::get_database_stats(&app_handle, &pool)
 }

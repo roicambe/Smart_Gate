@@ -50,8 +50,12 @@ export const VisitorPassPrinter = ({ visitorData, onClose }) => {
     const normalizeVisitorPayload = useCallback(() => {
         const visitorName = String(visitorData?.name ?? visitorData?.visitor_name ?? "").trim();
         const visitorId = String(visitorData?.id ?? visitorData?.visitor_id ?? "").trim().toUpperCase();
-        return { visitorName, visitorId };
+        const purpose = String(visitorData?.purpose ?? "General Visit").trim();
+        const personToVisit = String(visitorData?.person_to_visit ?? "N/A").trim();
+        return { visitorName, visitorId, purpose, personToVisit };
     }, [visitorData]);
+
+    const { visitorName, visitorId, purpose, personToVisit } = normalizeVisitorPayload();
 
     const getReceiptStyles = useCallback(() => `
     @page { margin: 0; }
@@ -103,13 +107,13 @@ export const VisitorPassPrinter = ({ visitorData, onClose }) => {
     .footer { font-size: 9pt; font-weight: 700; line-height: 1.1; margin: 0; color: #000000; }
   `, []);
 
-    const getReceiptBodyHtml = useCallback((visitorName, visitorId, qrDataUrl) => `
+    const getReceiptBodyHtml = useCallback((vName, vId, qrDataUrl) => `
   <div class="receipt">
     <div class="header">PAMANTASAN NG LUNGSOD NG PASIG</div>
     <div class="pass-label">Smart Gate - Visitor Pass</div>
     <div class="separator separator-bottom">--------------------------------</div>
-    <div class="greeting">Welcome, ${visitorName}!</div>
-    <div class="visitor-id">${visitorId}</div>
+    <div class="greeting">Welcome, ${vName}!</div>
+    <div class="visitor-id">${vId}</div>
     <div class="instruction">Present this QR code at the scanner upon exit. A digital copy has been delivered to your email for your convenience.</div>
     <div class="qr-wrap">${qrDataUrl ? `<img class="qr" src="${qrDataUrl}" alt="Visitor QR" />` : ""}</div>
     <div class="valid">This pass is valid for today ONLY and will expire at 11:59 PM.</div>
@@ -120,9 +124,8 @@ export const VisitorPassPrinter = ({ visitorData, onClose }) => {
 
     const openPrintWindowReceipt = useCallback(async () => {
         const qrDataUrl = await getQRCodeDataURL();
-        const { visitorName: rawVisitorName, visitorId: rawVisitorId } = normalizeVisitorPayload();
-        const visitorName = escapeHtml(rawVisitorName);
-        const visitorId = escapeHtml(rawVisitorId);
+        const vName = escapeHtml(visitorName);
+        const vId = escapeHtml(visitorId);
 
         const html = `<!doctype html>
 <html>
@@ -131,7 +134,7 @@ export const VisitorPassPrinter = ({ visitorData, onClose }) => {
   <title>Visitor Pass</title>
   <style>${getReceiptStyles()}</style>
 </head>
-<body>${getReceiptBodyHtml(visitorName, visitorId, qrDataUrl)}</body>
+<body>${getReceiptBodyHtml(vName, vId, qrDataUrl)}</body>
 </html>`;
 
         const printWindow = window.open("", "_blank", "width=460,height=760");
@@ -185,13 +188,12 @@ export const VisitorPassPrinter = ({ visitorData, onClose }) => {
                 }, 1500);
             }
         }, 200);
-    }, [escapeHtml, getQRCodeDataURL, getReceiptBodyHtml, getReceiptStyles, normalizeVisitorPayload]);
+    }, [escapeHtml, getQRCodeDataURL, getReceiptBodyHtml, getReceiptStyles, visitorName, visitorId]);
 
     const captureReceiptImageDataUrl = useCallback(async () => {
         const qrDataUrl = await getQRCodeDataURL();
-        const { visitorName: rawVisitorName, visitorId: rawVisitorId } = normalizeVisitorPayload();
-        const visitorName = escapeHtml(rawVisitorName);
-        const visitorId = escapeHtml(rawVisitorId);
+        const vName = escapeHtml(visitorName);
+        const vId = escapeHtml(visitorId);
 
         const container = document.createElement("div");
         container.setAttribute("aria-hidden", "true");
@@ -201,7 +203,7 @@ export const VisitorPassPrinter = ({ visitorData, onClose }) => {
         container.style.width = "58mm";
         container.style.background = "#FFFFFF";
         container.style.zIndex = "-1";
-        container.innerHTML = `<style>${getReceiptStyles()}</style>${getReceiptBodyHtml(visitorName, visitorId, qrDataUrl)}`;
+        container.innerHTML = `<style>${getReceiptStyles()}</style>${getReceiptBodyHtml(vName, vId, qrDataUrl)}`;
 
         document.body.appendChild(container);
         const receiptElement = container.querySelector(".receipt");
@@ -223,12 +225,11 @@ export const VisitorPassPrinter = ({ visitorData, onClose }) => {
                 container.parentNode.removeChild(container);
             }
         }
-    }, [escapeHtml, getQRCodeDataURL, getReceiptBodyHtml, getReceiptStyles, normalizeVisitorPayload]);
+    }, [escapeHtml, getQRCodeDataURL, getReceiptBodyHtml, getReceiptStyles, visitorName, visitorId]);
 
     const handlePrint = useCallback(async () => {
         setIsPrinting(true);
         try {
-            const { visitorName, visitorId } = normalizeVisitorPayload();
             if (!visitorName || !visitorId) {
                 showError("Missing visitor details. Please retry registration before printing.");
                 return;
@@ -269,7 +270,8 @@ export const VisitorPassPrinter = ({ visitorData, onClose }) => {
         onClose,
         openPrintWindowReceipt,
         printMode,
-        normalizeVisitorPayload,
+        visitorName,
+        visitorId,
     ]);
 
     const loadPrinters = useCallback(async () => {
@@ -313,11 +315,11 @@ export const VisitorPassPrinter = ({ visitorData, onClose }) => {
     }, [loadPrinters, printMode]);
 
     return (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-md">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
             <div style={{ position: "absolute", left: "-9999px", top: "-9999px" }}>
                 <QRCodeSVG
                     id="visitor-pass-qr-source"
-                    value={normalizeVisitorPayload().visitorId || ""}
+                    value={visitorId || ""}
                     size={512}
                     level="M"
                     includeMargin={false}
@@ -326,85 +328,134 @@ export const VisitorPassPrinter = ({ visitorData, onClose }) => {
                 />
             </div>
 
-            <div className="bg-black/90 backdrop-blur-2xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 fade-in duration-200">
-                <div className="p-8 text-center flex flex-col items-center">
-                    <div className="w-20 h-20 bg-blue-500/15 rounded-full flex items-center justify-center border-2 border-blue-500/30 mb-6">
-                        <Printer className="w-10 h-10 text-blue-400" />
-                    </div>
-                    <h2 className="text-2xl font-bold text-white tracking-wide mb-2">Print Visitor Pass?</h2>
-                    <p className="text-white/60 mb-2 text-sm">Print a 58mm thermal receipt for</p>
-                    <p className="text-white font-semibold text-lg mb-1">{normalizeVisitorPayload().visitorName}</p>
-                    <p className="text-blue-400 font-mono font-bold text-xl tracking-widest mb-8">{normalizeVisitorPayload().visitorId}</p>
-
-                    {printMode === "silent" ? (
-                        <div className="w-full mb-6 space-y-2">
-                            <div className="flex items-center justify-between">
-                                <p className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-white/60">Target Printer</p>
-                                <button
-                                    type="button"
-                                    onClick={loadPrinters}
-                                    disabled={isLoadingPrinters || isPrinting}
-                                    className="inline-flex items-center gap-1 rounded-md border border-white/20 px-2 py-1 text-xs text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
-                                >
-                                    <RefreshCcw className={`h-3.5 w-3.5 ${isLoadingPrinters ? "animate-spin" : ""}`} />
-                                    Refresh
-                                </button>
+            <div className="bg-black/90 backdrop-blur-2xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-4xl overflow-hidden animate-in zoom-in-95 fade-in duration-200">
+                <div className="grid grid-cols-1 md:grid-cols-2">
+                    {/* Left Side: Visitor Digital Pass */}
+                    <div className="p-8 border-b md:border-b-0 md:border-r border-white/10 bg-white/5">
+                        <div className="flex flex-col items-center">
+                            <div className="w-full text-center mb-6">
+                                <h3 className="text-blue-400 text-xs font-bold uppercase tracking-[0.3em] mb-1">Visitor Pass</h3>
+                                <div className="h-px w-12 bg-blue-500/50 mx-auto"></div>
                             </div>
-                            <select
-                                value={selectedPrinter}
-                                onChange={(event) => {
-                                    const nextPrinter = event.target.value;
-                                    setSelectedPrinter(nextPrinter);
-                                    window.localStorage.setItem(preferredPrinterStorageKey, nextPrinter);
-                                }}
-                                disabled={isLoadingPrinters || isPrinting || !printers.length}
-                                className="w-full rounded-xl border border-white/20 bg-black/40 px-4 py-3 text-sm text-white outline-none transition focus:ring-2 focus:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                                {isLoadingPrinters && <option value="">Loading printers...</option>}
-                                {!isLoadingPrinters && !printers.length && <option value="">No printers found</option>}
-                                {!isLoadingPrinters && printers.map((printer) => (
-                                    <option key={printer.name} value={printer.name} className="bg-slate-900 text-white">
-                                        {printer.name}{printer.is_default ? " (Default)" : ""}
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-                    ) : (
-                        <div className="w-full mb-6 rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-left">
-                            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/60">Print Mode</p>
-                            <p className="mt-1 text-sm text-white/80">Window preview mode is enabled for receipt size checking.</p>
-                        </div>
-                    )}
 
-                    <div className="flex gap-3 w-full">
-                        <button
-                            onClick={onClose}
-                            disabled={isPrinting}
-                            className="flex-1 px-4 py-3.5 bg-white/5 border border-white/10 text-white/80 font-medium rounded-xl hover:bg-white/10 hover:text-white transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                            <X className="w-4 h-4 inline mr-1" />
-                            Skip
-                        </button>
-                        <button
-                            onClick={handlePrint}
-                            disabled={isPrinting || (printMode === "silent" && (isLoadingPrinters || !selectedPrinter))}
-                            className="flex-[2] px-4 py-3.5 bg-blue-500 hover:bg-blue-400 text-white font-bold rounded-xl transition-all focus:outline-none focus:ring-4 focus:ring-blue-500/30 flex items-center justify-center gap-2.5 text-lg shadow-[0_0_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_30px_rgba(59,130,246,0.5)] disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                            {isPrinting ? (
-                                <>
-                                    <Loader2 className="w-5 h-5 animate-spin" />
-                                    Printing...
-                                </>
-                            ) : (
-                                <>
-                                    <Printer className="w-5 h-5" />
-                                    {printMode === "silent" ? "Print" : "Open Print Window"}
-                                </>
-                            )}
-                        </button>
+                            <div className="bg-white p-4 rounded-2xl shadow-xl mb-6 transform hover:scale-105 transition-transform duration-300">
+                                <QRCodeSVG
+                                    value={visitorId || ""}
+                                    size={180}
+                                    level="H"
+                                    includeMargin={false}
+                                    bgColor="#FFFFFF"
+                                    fgColor="#000000"
+                                />
+                            </div>
+
+                            <div className="w-full space-y-4">
+                                <div className="text-center">
+                                    <p className="text-white font-bold text-2xl uppercase tracking-tight">{visitorName}</p>
+                                    <p className="text-blue-400 font-mono text-lg tracking-[0.2em] font-medium mt-1">{visitorId}</p>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4 mt-6">
+                                    <div className="bg-white/5 p-3 rounded-xl border border-white/10">
+                                        <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Purpose of Visit</p>
+                                        <p className="text-white text-sm font-medium line-clamp-2">{purpose}</p>
+                                    </div>
+                                    <div className="bg-white/5 p-3 rounded-xl border border-white/10">
+                                        <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Person to Visit</p>
+                                        <p className="text-white text-sm font-medium line-clamp-2">{personToVisit}</p>
+                                    </div>
+                                </div>
+
+                                <div className="flex items-center gap-2 justify-center py-2 px-4 rounded-full bg-blue-500/10 text-blue-400 text-[10px] font-bold uppercase tracking-widest border border-blue-500/20">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+                                    Valid for Today Only
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Right Side: Printing Interaction */}
+                    <div className="p-8 flex flex-col justify-center items-center text-center">
+                        <div className="w-16 h-16 bg-blue-500/15 rounded-full flex items-center justify-center border-2 border-blue-500/30 mb-6">
+                            <Printer className="w-8 h-8 text-blue-400" />
+                        </div>
+                        
+                        <h2 className="text-2xl font-bold text-white tracking-wide mb-2">Print Physical Pass?</h2>
+                        <p className="text-white/60 mb-8 text-sm max-w-[280px]">
+                            Would you like to print a 58mm thermal receipt for this visitor?
+                        </p>
+
+                        {printMode === "silent" ? (
+                            <div className="w-full mb-8 space-y-2 text-left">
+                                <div className="flex items-center justify-between px-1">
+                                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">Select Printer</p>
+                                    <button
+                                        type="button"
+                                        onClick={loadPrinters}
+                                        disabled={isLoadingPrinters || isPrinting}
+                                        className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-0.5 text-[10px] text-white/50 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed"
+                                    >
+                                        <RefreshCcw className={`h-2.5 w-2.5 ${isLoadingPrinters ? "animate-spin" : ""}`} />
+                                        Refresh
+                                    </button>
+                                </div>
+                                <select
+                                    value={selectedPrinter}
+                                    onChange={(event) => {
+                                        const nextPrinter = event.target.value;
+                                        setSelectedPrinter(nextPrinter);
+                                        window.localStorage.setItem(preferredPrinterStorageKey, nextPrinter);
+                                    }}
+                                    disabled={isLoadingPrinters || isPrinting || !printers.length}
+                                    className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none transition focus:ring-2 focus:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 appearance-none"
+                                >
+                                    {isLoadingPrinters && <option value="">Loading printers...</option>}
+                                    {!isLoadingPrinters && !printers.length && <option value="">No printers found</option>}
+                                    {!isLoadingPrinters && printers.map((printer) => (
+                                        <option key={printer.name} value={printer.name} className="bg-slate-900 text-white">
+                                            {printer.name}{printer.is_default ? " (Default)" : ""}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        ) : (
+                            <div className="w-full mb-8 rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-left">
+                                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/60">Print Mode</p>
+                                <p className="mt-1 text-sm text-white/80">Window preview mode is enabled for receipt size checking.</p>
+                            </div>
+                        )}
+
+                        <div className="flex gap-4 w-full">
+                            <button
+                                onClick={onClose}
+                                disabled={isPrinting}
+                                className="flex-1 px-4 py-3.5 bg-white/5 border border-white/10 text-white/80 font-medium rounded-xl hover:bg-white/10 hover:text-white transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 text-sm"
+                            >
+                                <X className="w-4 h-4 inline mr-2" />
+                                Done
+                            </button>
+                            <button
+                                onClick={handlePrint}
+                                disabled={isPrinting || (printMode === "silent" && (isLoadingPrinters || !selectedPrinter))}
+                                className="flex-[1.5] px-4 py-3.5 bg-blue-500 hover:bg-blue-400 text-white font-bold rounded-xl transition-all focus:outline-none focus:ring-4 focus:ring-blue-500/30 flex items-center justify-center gap-2.5 text-base shadow-[0_0_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_30px_rgba(59,130,246,0.5)] disabled:cursor-not-allowed disabled:opacity-70"
+                            >
+                                {isPrinting ? (
+                                    <>
+                                        <Loader2 className="w-5 h-5 animate-spin" />
+                                        Printing...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Printer className="w-5 h-5" />
+                                        Print Pass
+                                    </>
+                                )}
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     );
 };
+
