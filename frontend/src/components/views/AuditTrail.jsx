@@ -6,8 +6,8 @@ import { writeFile } from '@tauri-apps/plugin-fs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
-import logoUrl from '../../../imgs/plp-logo.png';
 import { useToast } from '../toast/ToastProvider';
+import { drawInstitutionalHeader, prepareInstitutionalHeaderAssets } from '../../utils/pdfInstitutionalHeader';
 
 // ─── Human-Readable Translator (Dual-Layer) ──────────────────────────────────
 // Layer 1: getShortSummary() — concise 3-4 word label for the table column.
@@ -451,6 +451,33 @@ export const AuditTrail = ({ branding, adminSession }) => {
         }
     };
 
+    // ─── Resolve target_id to a human-readable name ────────────────────────────
+    const resolveTargetName = (log) => {
+        const oldObj = safeParseJSON(log.old_values);
+        const newObj = safeParseJSON(log.new_values);
+        const obj = newObj || oldObj;
+        if (!obj) return '-';
+
+        // Try the most descriptive identifiers in order of priority
+        if (obj.full_name) return obj.full_name;
+        if (obj.first_name && obj.last_name) return `${obj.first_name} ${obj.last_name}`;
+        if (obj.username) return obj.username;
+        if (obj.event_name) return obj.event_name;
+        if (obj.id_number) return obj.id_number;
+        if (obj.department_code) return obj.department_code;
+        if (obj.department_name) return obj.department_name;
+        if (obj.program_code) return obj.program_code;
+        if (obj.program_name) return obj.program_name;
+        if (obj.location_name) return obj.location_name;
+        if (obj.setting_key) return obj.setting_key;
+        if (obj.system_name) return obj.system_name;
+
+        // For EXPORT actions, show format info
+        if (log.action_type === 'EXPORT' && obj.format) return `${obj.format} Export`;
+
+        return '-';
+    };
+
     const handleExportPDF = async () => {
         if (filteredLogs.length === 0) return;
         setIsExporting(true);
@@ -458,21 +485,8 @@ export const AuditTrail = ({ branding, adminSession }) => {
         showProcessing("Preparing PDF export...");
 
         try {
-            const doc = new jsPDF('landscape'); // Use landscape for more columns
-
-            // Load logo image as base64 or draw directly
-            const img = new Image();
-            img.src = (branding && branding.system_logo && branding.system_logo !== "") ? branding.system_logo : logoUrl;
-
-            // We use a promise to ensure image loads before drawing it
-            await new Promise((resolve, reject) => {
-                img.onload = () => resolve();
-                img.onerror = reject;
-            });
-
-            doc.addImage(img, 'PNG', 14, 10, 24, 24); // x, y, width, height
-
-            const pageWidth = doc.internal.pageSize.getWidth();
+            const doc = new jsPDF();
+            const headerAssets = await prepareInstitutionalHeaderAssets(branding);
 
             // Store metadata string upfront
             let dateRangeStr = "All Time";
@@ -482,42 +496,25 @@ export const AuditTrail = ({ branding, adminSession }) => {
 
             const generatedDate = new Date().toLocaleString();
 
-            const drawHeader = (data) => {
-                // University Name
-                doc.setFont("helvetica", "bold");
-                doc.setFontSize(18);
-                doc.setTextColor(15, 23, 42); // slate-900
-                const uniName = (branding && branding.system_name) ? branding.system_name : "Pamantasan ng Lungsod ni Roi";
-                doc.text(uniName, pageWidth / 2, 18, { align: "center" });
-
-                // System Name
-                doc.setFontSize(14);
-                const sysName = "Smart Gate";
-                doc.text(sysName, pageWidth / 2, 26, { align: "center" });
-
-                // Report Type
-                doc.setFontSize(12);
-                doc.setTextColor(71, 85, 105); // slate-600
-                doc.text("System Audit Report", pageWidth / 2, 34, { align: "center" });
-
-                // Left-aligned Metadata below header
-                doc.setFont("helvetica", "normal");
-                doc.setFontSize(10);
-                doc.setTextColor(100, 116, 139); // slate-500
-                doc.text(`Reporting Period: ${dateRangeStr}`, 14, 44);
-                doc.text(`Document generated on: ${generatedDate}`, 14, 50);
-
-                // Horizontal Line Divider
-                doc.setDrawColor(203, 213, 225); // slate-300
-                doc.setLineWidth(0.5);
-                doc.line(14, 54, pageWidth - 14, 54);
+            const drawHeader = () => {
+                const layout = drawInstitutionalHeader(doc, {
+                    branding,
+                    logos: headerAssets.logos,
+                    contactIcons: headerAssets.contactIcons,
+                    reportTitle: 'Audit Trail',
+                    officeName: 'Office of the Human Resource Development',
+                });
+                layout.setBodyFont?.();
+                doc.setFontSize(8.5);
+                doc.setTextColor(90, 90, 90);
+                doc.text(`Reporting Period: ${dateRangeStr}`, layout.margin, layout.contentStartY - 1.5);
+                doc.text(`Generated: ${generatedDate}`, doc.internal.pageSize.getWidth() - layout.margin, layout.contentStartY - 1.5, { align: "right" });
+                return layout;
             };
+            const headerLayout = drawHeader();
 
-            // Draw header manually for the very first page before table generation
-            drawHeader();
-
-            // Table Data
-            const tableColumn = ["Timestamp", "Admin", "Action", "Target Table", "Target ID", "Details"];
+            // Table Data — human-readable columns
+            const tableColumn = ["Timestamp", "Admin", "Action", "Category", "Target", "Details"];
             const tableRows = [];
 
             filteredLogs.forEach(log => {
@@ -525,54 +522,58 @@ export const AuditTrail = ({ branding, adminSession }) => {
                     formatDate(log.created_at),
                     log.admin_username,
                     log.action_type,
-                    log.target_table,
-                    log.target_id || '-',
+                    getFriendlyTableName(log.target_table),
+                    resolveTargetName(log),
                     getShortSummary(log)
                 ]);
             });
 
-            // Generate Table
+            // Generate Table — matches Access Logs formatting
             autoTable(doc, {
-                startY: 60, // Starts below the initial header
-                margin: { top: 60 }, // Leaves space for repeated header on multi-page exports
+                startY: headerLayout.contentStartY + 2,
+                margin: { top: headerLayout.contentStartY + 2, left: headerLayout.margin, right: headerLayout.margin },
                 head: [tableColumn],
                 body: tableRows,
                 theme: 'striped',
-                headStyles: { fillColor: '#1E293B', textColor: '#FFFFFF', fontStyle: 'bold' }, // Charcoal
-                bodyStyles: { fontSize: 10 },
-                alternateRowStyles: { fillColor: [248, 250, 252] }, // slate-50
-                styles: { cellPadding: 3, overflow: 'linebreak' },
+                headStyles: { fillColor: '#1E293B', textColor: '#FFFFFF', fontStyle: 'bold', fontSize: 9, font: 'helvetica' },
+                bodyStyles: { fontSize: 8.5, font: 'helvetica' },
+                alternateRowStyles: { fillColor: [248, 250, 252] },
+                styles: { cellPadding: 2, overflow: 'linebreak', font: 'helvetica' },
                 columnStyles: {
                     0: { cellWidth: 'auto' }, // Timestamp
                     1: { cellWidth: 'auto' }, // Admin
                     2: { cellWidth: 'auto', fontStyle: 'bold' }, // Action
-                    3: { cellWidth: 'auto' }, // Target Table
-                    4: { cellWidth: 'auto' }, // Target ID
-                    5: { cellWidth: 80 },     // Details
+                    3: { cellWidth: 'auto' }, // Category
+                    4: { cellWidth: 'auto' }, // Target
+                    5: { cellWidth: 'auto' }, // Details
                 },
                 didDrawPage: function (data) {
-                    // Repeat Header on new pages
-                    if (data.pageNumber > 1) {
-                        drawHeader(data);
-                    }
+                    drawHeader();
                 },
                 didParseCell: function (data) {
                     if (data.section === 'body' && data.column.index === 2) {
-                        // Customize action column text colors based on action_type
                         if (data.cell.raw === 'INSERT') {
-                            data.cell.styles.textColor = [5, 150, 105]; // emerald-600
+                            data.cell.styles.textColor = [5, 150, 105];
                         } else if (data.cell.raw === 'UPDATE') {
-                            data.cell.styles.textColor = [217, 119, 6]; // amber-600
+                            data.cell.styles.textColor = [217, 119, 6];
                         } else if (data.cell.raw === 'DELETE') {
-                            data.cell.styles.textColor = [225, 29, 72]; // rose-600
+                            data.cell.styles.textColor = [225, 29, 72];
                         }
                     }
                 }
             });
 
-            // Format default filename
-            let filename = `PLP_SmartGate_AuditTrail_${new Date().toISOString().slice(0, 10)}`;
-            if (startDate && endDate) filename = `PLP_SmartGate_AuditTrail_${startDate}_to_${endDate}`;
+            // Formatted dynamic filename — matches Access Logs naming convention
+            const now = new Date();
+            const yyyy = now.getFullYear();
+            const mm = String(now.getMonth() + 1).padStart(2, '0');
+            const dd = String(now.getDate()).padStart(2, '0');
+            let hours = now.getHours();
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            hours = hours % 12 || 12;
+            const formattedTime = `${String(hours).padStart(2, '0')}.${minutes}${ampm}`;
+            const filename = `AuditTrail_${yyyy}-${mm}-${dd}_${formattedTime}`;
 
             // Generate ArrayBuffer from jsPDF
             const pdfBuffer = doc.output('arraybuffer');

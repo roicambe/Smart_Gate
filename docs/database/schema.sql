@@ -2,7 +2,9 @@
 CREATE TABLE IF NOT EXISTS departments (
     department_id INTEGER PRIMARY KEY,
     department_code VARCHAR UNIQUE NOT NULL,
-    department_name VARCHAR NOT NULL
+    department_name VARCHAR NOT NULL,
+    is_archived BOOLEAN NOT NULL DEFAULT 0,
+    archived_at DATETIME NULL
 );
 
 CREATE TABLE IF NOT EXISTS programs (
@@ -10,6 +12,8 @@ CREATE TABLE IF NOT EXISTS programs (
     department_id INTEGER NOT NULL,
     program_code VARCHAR UNIQUE NOT NULL,
     program_name VARCHAR NOT NULL,
+    is_archived BOOLEAN NOT NULL DEFAULT 0,
+    archived_at DATETIME NULL,
     FOREIGN KEY (department_id) REFERENCES departments(department_id)
 );
 
@@ -25,6 +29,8 @@ CREATE TABLE IF NOT EXISTS persons (
     contact_number VARCHAR NULL,      -- Added: Normalized contact data
     face_template_path VARCHAR NULL,
     is_active BOOLEAN NOT NULL DEFAULT 1,
+    is_archived BOOLEAN NOT NULL DEFAULT 0,
+    archived_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -79,7 +85,9 @@ CREATE TABLE IF NOT EXISTS events (
     start_time TIME NOT NULL,
     end_time TIME NOT NULL,
     required_role TEXT NOT NULL,
-    is_enabled BOOLEAN NOT NULL DEFAULT 1
+    is_enabled BOOLEAN NOT NULL DEFAULT 1,
+    is_archived BOOLEAN NOT NULL DEFAULT 0,
+    archived_at DATETIME NULL
 );
 
 CREATE TABLE IF NOT EXISTS event_attendance (
@@ -159,5 +167,9 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES
-    ('system_name', 'Pamantasan ng Lungsod ni Roi'),
+    ('system_name', 'Pamantasan ng Lungsod ng Pasig'),
+    ('system_title', 'SMART GATE'),
+    ('report_address', 'Alkalde Jose St. Kapasigan Pasig City, Philippines 1600'),
+    ('report_phone', '(106) 628-1014'),
+    ('report_email', 'info@plpasig.edu.ph'),
     ('system_logo', '');

@@ -254,6 +254,10 @@ pub struct AuditLogDetails {
 pub struct SystemBranding {
     pub system_name: String,
     pub system_logo: String,
+    pub system_title: String,
+    pub report_address: String,
+    pub report_phone: String,
+    pub report_email: String,
     pub primary_logo: Option<String>,
     pub secondary_logo_1: Option<String>,
     pub secondary_logo_2: Option<String>,

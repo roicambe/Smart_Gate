@@ -8,10 +8,8 @@ import { writeFile } from '@tauri-apps/plugin-fs';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
-import plpLogo from '../../../imgs/plp-logo.png';
-import pasigSeal from '../../../imgs/pasig_seal.png';
-import pasigUmaagos from '../../../imgs/pasig_umaagos.png';
 import { useToast } from '../toast/ToastProvider';
+import { drawInstitutionalHeader, prepareInstitutionalHeaderAssets } from '../../utils/pdfInstitutionalHeader';
 
 export const AccessLogs = ({ branding, adminSession }) => {
     const [activeTab, setActiveTab] = useState('gateLogs'); // 'gateLogs' | 'eventLogs'
@@ -445,55 +443,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
 
         try {
             const doc = new jsPDF();
-
-            const loadImg = (src, isCircle) => {
-                return new Promise((resolve) => {
-                    const img = new Image();
-                    img.crossOrigin = 'Anonymous';
-                    img.src = src;
-                    img.onload = () => {
-                        if (isCircle) {
-                            const canvas = document.createElement('canvas');
-                            const size = Math.min(img.width, img.height);
-                            canvas.width = size;
-                            canvas.height = size;
-                            const ctx = canvas.getContext('2d');
-                            ctx.beginPath();
-                            ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
-                            ctx.closePath();
-                            ctx.clip();
-                            const dx = (size - img.width) / 2;
-                            const dy = (size - img.height) / 2;
-                            ctx.drawImage(img, dx, dy, img.width, img.height);
-                            resolve({ src: canvas.toDataURL('image/png'), ratio: 1 });
-                        } else {
-                            resolve({ src: img, ratio: img.width / img.height });
-                        }
-                    };
-                    img.onerror = () => resolve(null);
-                });
-            };
-
-            const imagesToDraw = [];
-            
-            // Collect images if enabled
-            if (branding?.secondary_logo_1_enabled !== false) {
-                const src = (branding && branding.secondary_logo_1 && branding.secondary_logo_1 !== "") ? branding.secondary_logo_1 : pasigSeal;
-                imagesToDraw.push(loadImg(src, branding?.secondary1_circle));
-            }
-            if (branding?.secondary_logo_2_enabled !== false) {
-                const src = (branding && branding.secondary_logo_2 && branding.secondary_logo_2 !== "") ? branding.secondary_logo_2 : pasigUmaagos;
-                imagesToDraw.push(loadImg(src, branding?.secondary2_circle));
-            }
-            if (branding?.primary_logo_enabled !== false) {
-                const src = (branding && branding.primary_logo && branding.primary_logo !== "") ? branding.primary_logo : plpLogo;
-                imagesToDraw.push(loadImg(src, branding?.primary_circle));
-            }
-
-            const loadedImages = await Promise.all(imagesToDraw);
-            const validImages = loadedImages.filter(img => img !== null);
-
-            const pageWidth = doc.internal.pageSize.getWidth();
+            const headerAssets = await prepareInstitutionalHeaderAssets(branding);
 
             // Store metadata string upfront
             let dateRangeStr = "All Time";
@@ -503,50 +453,23 @@ export const AccessLogs = ({ branding, adminSession }) => {
 
             const generatedDate = new Date().toLocaleString();
 
-            const drawHeader = (data) => {
-                const isFirstPage = !data || data.pageNumber === 1;
-
-                // Draw Logos on all pages (Centered at the top)
-                const fixedHeight = 16; // pixels roughly in mm
-                const spacing = 6;
-                const totalWidth = validImages.reduce((sum, imgObj) => sum + (fixedHeight * imgObj.ratio), 0) + (spacing * Math.max(0, validImages.length - 1));
-                
-                let startX = (pageWidth - totalWidth) / 2;
-                validImages.forEach(imgObj => {
-                    const width = fixedHeight * imgObj.ratio;
-                    doc.addImage(imgObj.src, 'PNG', startX, 10, width, fixedHeight);
-                    startX += width + spacing;
+            const reportTitle = activeTab === 'gateLogs' ? 'Access Logs' : 'Event Attendance';
+            const drawHeader = () => {
+                const layout = drawInstitutionalHeader(doc, {
+                    branding,
+                    logos: headerAssets.logos,
+                    contactIcons: headerAssets.contactIcons,
+                    reportTitle,
+                    officeName: 'Office of Campus Security',
                 });
-
-                // University Name
-                doc.setFont("helvetica", "bold");
-                doc.setFontSize(14); 
-                doc.setTextColor(15, 23, 42); 
-                const uniName = (branding && branding.system_name) ? branding.system_name : "Pamantasan ng Lungsod ni Roi";
-                doc.text(uniName, pageWidth / 2, 33, { align: "center" });
-
-                // System Name
-                doc.setFontSize(11);
-                const sysName = "Smart Gate";
-                doc.text(sysName, pageWidth / 2, 39, { align: "center" });
-
-                // Report Type
-                doc.setFontSize(11);
-                doc.setTextColor(71, 85, 105); 
-                doc.text(activeTab === 'gateLogs' ? "General Gate Logs" : "Event Attendance Report", pageWidth / 2, 45, { align: "center" });
-
-                // Left-aligned Metadata below header
-                doc.setFont("helvetica", "normal");
-                doc.setFontSize(9);
-                doc.setTextColor(100, 116, 139); 
-                doc.text(`Reporting Period: ${dateRangeStr}`, 14, 53);
-                doc.text(`Document generated on: ${generatedDate}`, 14, 58);
-
-                // Horizontal Line Divider
-                doc.setDrawColor(203, 213, 225); 
-                doc.setLineWidth(0.5);
-                doc.line(14, 62, pageWidth - 14, 62);
+                layout.setBodyFont?.();
+                doc.setFontSize(8.5);
+                doc.setTextColor(90, 90, 90);
+                doc.text(`Reporting Period: ${dateRangeStr}`, layout.margin, layout.contentStartY - 1.5);
+                doc.text(`Generated: ${generatedDate}`, doc.internal.pageSize.getWidth() - layout.margin, layout.contentStartY - 1.5, { align: "right" });
+                return layout;
             };
+            const headerLayout = drawHeader();
 
             // Remove the initial manual `drawHeader()`. autoTable will call it inside `didDrawPage` for all pages.
 
@@ -621,20 +544,20 @@ export const AccessLogs = ({ branding, adminSession }) => {
             }
 
             autoTable(doc, {
-                startY: 67, // Starts below the initial header
+                startY: headerLayout.contentStartY + 2,
                 head: [[{ content: 'REPORT STATISTICS', colSpan: 2, styles: { halign: 'center' } }]],
                 body: statsData,
                 theme: 'grid',
                 headStyles: { fillColor: '#1E293B', textColor: '#FFFFFF', fontStyle: 'bold', fontSize: 10 },
-                bodyStyles: { fontSize: 8 },
+                bodyStyles: { fontSize: 10 },
                 columnStyles: {
                     0: { cellWidth: '50%', fontStyle: 'bold' },
                     1: { cellWidth: '50%' }
                 },
                 didDrawPage: function (data) {
-                    drawHeader(data);
+                    drawHeader();
                 },
-                margin: { top: 67 }
+                margin: { top: headerLayout.contentStartY + 2, left: headerLayout.margin, right: headerLayout.margin }
             });
 
             // --- STEP 2: Add a new page to securely separate stats from logs ---
@@ -642,13 +565,13 @@ export const AccessLogs = ({ branding, adminSession }) => {
 
             // --- STEP 3: Generate the main logs table ---
             autoTable(doc, {
-                startY: 67, // Push it down below the header explicitly on the new page
-                margin: { top: 67 }, // Leaves space for repeated header on multi-page exports
+                startY: headerLayout.contentStartY + 2,
+                margin: { top: headerLayout.contentStartY + 2, left: headerLayout.margin, right: headerLayout.margin },
                 head: [tableColumn],
                 body: tableRows,
                 theme: 'striped',
                 headStyles: { fillColor: '#1E293B', textColor: '#FFFFFF', fontStyle: 'bold', fontSize: 9 }, // Charcoal
-                bodyStyles: { fontSize: 8 },
+                bodyStyles: { fontSize: 10 },
                 alternateRowStyles: { fillColor: [248, 250, 252] }, // slate-50
                 styles: { cellPadding: 3, overflow: 'linebreak' },
                 columnStyles: {
@@ -660,8 +583,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                     5: { cellWidth: 'auto' }, // Action
                 },
                 didDrawPage: function (data) {
-                    // Repeat Header on all pages
-                    drawHeader(data);
+                    drawHeader();
                 }
             });
 
