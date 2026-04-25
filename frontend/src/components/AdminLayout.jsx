@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Users, BookOpen, ScanFace, FileBarChart, History, Settings, Building, Calendar, ShieldAlert } from 'lucide-react';
+import { LayoutDashboard, Users, BookOpen, ScanFace, FileBarChart, History, Settings, Building, Calendar, ShieldAlert, Database } from 'lucide-react';
 import { AdminDashboard } from './views/AdminDashboard';
 import { SystemSettings } from './views/SystemSettings';
 import { UserManagement } from './views/UserManagement';
@@ -8,6 +8,7 @@ import { AccessLogs } from './views/AccessLogs';
 import { AcademicStructure } from './views/AcademicStructure';
 import { EventManagement } from './views/EventManagement';
 import { AuditTrail } from './views/AuditTrail';
+import { DataManagement } from './views/DataManagement';
 
 export const AdminLayout = ({ view, setView, setIsAdminLoggedIn, adminSession, branding, fetchBranding }) => {
     const isSystemAdministrator = adminSession?.role === 'System Administrator';
@@ -20,6 +21,7 @@ export const AdminLayout = ({ view, setView, setIsAdminLoggedIn, adminSession, b
         { id: 'admin_events', label: 'Event Management', icon: Calendar, reqSuper: true },
         { id: 'admin_face', label: 'Face Recognition', icon: ScanFace, reqSuper: true },
         { id: 'admin_audit', label: 'Audit Trail', icon: ShieldAlert, reqSuper: true },
+        { id: 'admin_data', label: 'Data Management', icon: Database, reqSuper: true },
         { id: 'admin_settings', label: 'System Settings', icon: Settings },
     ];
 
@@ -35,6 +37,7 @@ export const AdminLayout = ({ view, setView, setIsAdminLoggedIn, adminSession, b
             case 'admin_academic': return <AcademicStructure branding={branding} adminSession={adminSession} />;
             case 'admin_events': return <EventManagement branding={branding} adminSession={adminSession} />;
             case 'admin_audit': return <AuditTrail branding={branding} adminSession={adminSession} />;
+            case 'admin_data': return <DataManagement adminSession={adminSession} />;
             default:
                 return (
                     <div className="flex-1 flex items-center justify-center p-8">

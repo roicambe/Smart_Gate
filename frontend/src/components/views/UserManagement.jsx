@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Users, Search, Edit2, Trash2, X, UserPlus, Eye, Check, AlertTriangle, ChevronLeft, ChevronRight, Mail, Filter, Upload, FileSpreadsheet, Download } from 'lucide-react';
+import { Users, Search, Edit2, Trash2, X, UserPlus, Eye, Check, AlertTriangle, ChevronLeft, ChevronRight, Mail, Filter, Upload, FileSpreadsheet, Download, GraduationCap, BookOpen } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
@@ -16,16 +16,16 @@ const ID_NUMBER_RULES = {
         maxLength: 8,
     },
     professor: {
-        placeholder: '0000000',
-        pattern: /^\d{7}$/,
-        hint: 'Professor IDs must be exactly 7 digits.',
-        maxLength: 7,
+        placeholder: '000000000',
+        pattern: /^\d{9}$/,
+        hint: 'Professor IDs must be exactly 9 digits.',
+        maxLength: 9,
     },
     staff: {
-        placeholder: '0000000',
-        pattern: /^\d{7}$/,
-        hint: 'Staff IDs must be exactly 7 digits.',
-        maxLength: 7,
+        placeholder: '000000000',
+        pattern: /^\d{9}$/,
+        hint: 'Staff IDs must be exactly 9 digits.',
+        maxLength: 9,
     },
     visitor: {
         placeholder: `VIS-${visitorYearCode}xxxx`,
@@ -303,12 +303,12 @@ export const UserManagement = ({ adminSession }) => {
                 role: activeRole,
                 activeAdminId: adminSession?.account_id
             });
-            setStatus({ type: 'success', message: 'User deleted successfully!' });
+            setStatus({ type: 'success', message: 'User archived successfully!' });
             setShowDeleteModal(false);
             fetchUsers();
         } catch (error) {
             console.error(error);
-            setStatus({ type: 'error', message: typeof error === 'string' ? error : 'Failed to delete user.' });
+            setStatus({ type: 'error', message: typeof error === 'string' ? error : 'Failed to archive user.' });
         }
     };
 
@@ -374,7 +374,7 @@ export const UserManagement = ({ adminSession }) => {
 
         const sampleRow = importRole === 'student'
             ? ['00-00000', 'Juan', 'Santos', 'Dela Cruz', 'delacruz_juan@plpasig.edu.ph', '09171234567', 'Bachelor of Science in Computer Science', 'BSCS', 1]
-            : ['0000000', 'Maria', 'Lopez', 'Reyes', 'reyes_maria@plpasig.edu.ph', '09179998888', 'College of Computer Studies', 'CCS', importRole === 'professor' ? 'Professor' : 'Administrative Staff'];
+            : ['000000000', 'Maria', 'Lopez', 'Reyes', 'reyes_maria@plpasig.edu.ph', '09179998888', 'College of Computer Studies', 'CCS', importRole === 'professor' ? 'Professor' : 'Administrative Staff'];
 
         const worksheet = XLSX.utils.aoa_to_sheet([headers, sampleRow]);
         const workbook = XLSX.utils.book_new();
@@ -508,7 +508,7 @@ export const UserManagement = ({ adminSession }) => {
             </div>
 
             {/* Controls: Tabs & Search */}
-            <div className="p-3 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-4">
+            <div className={`p-3 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-4 ${mainTab === 'members' ? 'mb-0' : ''}`}>
                 <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
                     <div className="flex gap-2 p-1 bg-slate-100 rounded-xl">
                         {['members', 'visitors'].map((tab) => (
@@ -613,24 +613,29 @@ export const UserManagement = ({ adminSession }) => {
                         </div>
                     </div>
                 </div>
-
-                {mainTab === 'members' && (
-                    <div className="flex gap-2">
-                        {['student', 'professor', 'staff'].map((tab) => (
-                            <button
-                                key={tab}
-                                onClick={() => setSubTab(tab)}
-                                className={`px-4 py-1.5 rounded-full text-sm font-semibold capitalize transition-all duration-300 ${subTab === tab
-                                    ? 'bg-blue-100 text-blue-700 border border-blue-200'
-                                    : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
-                                    }`}
-                            >
-                                {tab}s
-                            </button>
-                        ))}
-                    </div>
-                )}
             </div>
+
+            {mainTab === 'members' && (
+                <div className="flex border-b border-slate-200 px-2 mb-2">
+                    {[
+                        { id: 'student', label: 'Students', icon: GraduationCap },
+                        { id: 'professor', label: 'Professors', icon: BookOpen },
+                        { id: 'staff', label: 'Staffs', icon: Users },
+                    ].map((tab) => (
+                        <button
+                            key={tab.id}
+                            onClick={() => setSubTab(tab.id)}
+                            className={`flex items-center gap-2 px-6 py-3 text-sm font-semibold transition-all duration-300 border-b-2 ${subTab === tab.id
+                                ? 'border-blue-600 text-blue-600'
+                                : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                                }`}
+                        >
+                            <tab.icon className="w-4 h-4" />
+                            {tab.label}
+                        </button>
+                    ))}
+                </div>
+            )}
 
             {/* Data Table - scroll container with sticky headers */}
             <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-xl shadow-sm relative">
@@ -733,7 +738,7 @@ export const UserManagement = ({ adminSession }) => {
                                                         onClick={() => handleEditClick(user)}>
                                                         <Edit2 className="w-4 h-4" />
                                                     </button>
-                                                    <button className="p-2 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors border border-transparent hover:border-rose-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Delete"
+                                                    <button className="p-2 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors border border-transparent hover:border-rose-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Archive"
                                                         onClick={() => handleDeleteClick(user)}>
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>
@@ -1041,12 +1046,12 @@ export const UserManagement = ({ adminSession }) => {
                                 <AlertTriangle className="w-10 h-10 text-rose-400" />
                             </div>
                             <div className="space-y-2">
-                                <h2 className="text-2xl font-bold text-white">Delete Profile?</h2>
-                                <p className="text-white/70">Are you sure you want to permanently delete <span className="text-white font-semibold">{selectedUser.first_name} {selectedUser.last_name}</span>? This action cannot be undone.</p>
+                                <h2 className="text-2xl font-bold text-white">Archive Profile?</h2>
+                                <p className="text-white/70">Are you sure you want to archive <span className="text-white font-semibold">{selectedUser.first_name} {selectedUser.last_name}</span>? This record will be moved to the Archive Center.</p>
                             </div>
                             <div className="flex gap-4 w-full pt-4">
                                 <button onClick={() => setShowDeleteModal(false)} className="flex-1 py-3 px-4 bg-white/5 hover:bg-white/10 text-white font-semibold rounded-xl transition-colors border border-white/10 focus:outline-none">Cancel</button>
-                                <button onClick={confirmDelete} className="flex-1 py-3 px-4 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl transition-all shadow-[0_0_20px_rgba(244,63,94,0.3)] hover:shadow-[0_0_30px_rgba(244,63,94,0.5)] border border-rose-400 focus:outline-none">Delete</button>
+                                <button onClick={confirmDelete} className="flex-1 py-3 px-4 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl transition-all shadow-[0_0_20px_rgba(244,63,94,0.3)] hover:shadow-[0_0_30px_rgba(244,63,94,0.5)] border border-rose-400 focus:outline-none">Archive</button>
                             </div>
                         </div>
                     </div>

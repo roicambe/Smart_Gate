@@ -8,6 +8,10 @@ import pasigUmaagos from '../../../imgs/pasig_umaagos.png';
 export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, showToast }) => {
     const isSystemAdministrator = adminSession?.role === 'System Administrator';
     const [name, setName] = useState('');
+    const [systemTitle, setSystemTitle] = useState('');
+    const [reportAddress, setReportAddress] = useState('');
+    const [reportPhone, setReportPhone] = useState('');
+    const [reportEmail, setReportEmail] = useState('');
     const [primaryLogo, setPrimaryLogo] = useState('');
     const [secondaryLogo1, setSecondaryLogo1] = useState('');
     const [secondaryLogo2, setSecondaryLogo2] = useState('');
@@ -21,7 +25,11 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
 
     useEffect(() => {
         if (branding) {
-            setName(branding.system_name || 'Standard Gate System');
+            setName(branding.system_name || 'Pamantasan ng Lungsod ng Pasig');
+            setSystemTitle(branding.system_title || 'SMART GATE');
+            setReportAddress(branding.report_address || 'Alkalde Jose St. Kapasigan Pasig City, Philippines 1600');
+            setReportPhone(branding.report_phone || '(106) 628-1014');
+            setReportEmail(branding.report_email || 'info@plpasig.edu.ph');
             setPrimaryLogo(branding.primary_logo || branding.system_logo || '');
             setSecondaryLogo1(branding.secondary_logo_1 || '');
             setSecondaryLogo2(branding.secondary_logo_2 || '');
@@ -68,10 +76,18 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
             showToast('System Name cannot be empty.', 'error');
             return;
         }
+        if (!systemTitle.trim()) {
+            showToast('System Title cannot be empty.', 'error');
+            return;
+        }
 
         // Check if there are any actual changes
-        const hasChanges = 
-            name.trim() !== (branding?.system_name || 'Standard Gate System') ||
+        const hasChanges =
+            name.trim() !== (branding?.system_name || 'Pamantasan ng Lungsod ng Pasig') ||
+            systemTitle.trim() !== (branding?.system_title || 'SMART GATE') ||
+            reportAddress.trim() !== (branding?.report_address || 'Alkalde Jose St. Kapasigan Pasig City, Philippines 1600') ||
+            reportPhone.trim() !== (branding?.report_phone || '(106) 628-1014') ||
+            reportEmail.trim() !== (branding?.report_email || 'info@plpasig.edu.ph') ||
             primaryLogo !== (branding?.primary_logo || branding?.system_logo || '') ||
             secondaryLogo1 !== (branding?.secondary_logo_1 || '') ||
             secondaryLogo2 !== (branding?.secondary_logo_2 || '') ||
@@ -90,10 +106,14 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
         setIsSaving(true);
 
         try {
-            await invoke('update_system_branding', { 
+            await invoke('update_system_branding', {
                 adminId: adminSession.account_id,
-                name: name.trim(), 
-                logoBase64: primaryLogo, 
+                name: name.trim(),
+                logoBase64: primaryLogo,
+                systemTitle: systemTitle.trim(),
+                reportAddress: reportAddress.trim(),
+                reportPhone: reportPhone.trim(),
+                reportEmail: reportEmail.trim(),
                 primaryLogo: primaryLogo || null,
                 secondaryLogo1: secondaryLogo1 || null,
                 secondaryLogo2: secondaryLogo2 || null,
@@ -123,9 +143,9 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
 
     return (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 w-full max-h-[calc(100vh-120px)] overflow-y-auto">
-             <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-slate-800">System Identity & Branding</h2>
-                <button 
+                <button
                     onClick={handleSave}
                     disabled={isSaving}
                     className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-70 transition-all shadow-md shadow-blue-500/10"
@@ -137,25 +157,79 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                     )}
                     {isSaving ? 'Saving...' : 'Save Changes'}
                 </button>
-             </div>
- 
-             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                 {/* Left Column - Main Settings */}
-                 <div className="lg:col-span-8 space-y-6">
-                     <div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                {/* Left Column - Main Settings */}
+                <div className="lg:col-span-8 space-y-6">
+                    <div>
                         <label className="block text-sm font-semibold text-slate-700 mb-2">
                             System / University Name
                         </label>
-                        <input 
-                            type="text" 
+                        <input
+                            type="text"
                             value={name}
                             onChange={(e) => setName(e.target.value)}
                             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                             placeholder="e.g., Pamantasan ng Lungsod ni Roi"
                         />
-                     </div>
- 
-                     <div className="space-y-4">
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                PDF System Title
+                            </label>
+                            <input
+                                type="text"
+                                value={systemTitle}
+                                onChange={(e) => setSystemTitle(e.target.value)}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                                placeholder="e.g., SMART GATE"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                Contact Phone
+                            </label>
+                            <input
+                                type="text"
+                                value={reportPhone}
+                                onChange={(e) => setReportPhone(e.target.value)}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                                placeholder="e.g., (106) 628-1014"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                Contact Email
+                            </label>
+                            <input
+                                type="text"
+                                value={reportEmail}
+                                onChange={(e) => setReportEmail(e.target.value)}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                                placeholder="e.g., info@plpasig.edu.ph"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                Contact Address
+                            </label>
+                            <input
+                                type="text"
+                                value={reportAddress}
+                                onChange={(e) => setReportAddress(e.target.value)}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                                placeholder="e.g., Pasig City, Philippines"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="space-y-4">
                         <label className="block text-sm font-semibold text-slate-700">
                             Institutional Branding Logos
                         </label>
@@ -180,19 +254,17 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                                         <Upload size={16} /> Upload
                                     </label>
                                     <input type="file" id="primary-upload" accept="image/*" className="hidden" onChange={(e) => handleFileChange(e, 'primary')} />
-                                    
+
                                     <div className="flex items-center justify-between px-1 mt-1">
                                         <span className="text-sm font-medium text-slate-500">Circle Format</span>
                                         <button
                                             type="button"
                                             onClick={() => setPrimaryCircle(v => !v)}
-                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                                                primaryCircle ? 'bg-blue-600' : 'bg-slate-300'
-                                            }`}
+                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${primaryCircle ? 'bg-blue-600' : 'bg-slate-300'
+                                                }`}
                                         >
-                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition duration-200 ease-in-out ${
-                                                primaryCircle ? 'translate-x-5' : 'translate-x-0'
-                                            }`} />
+                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition duration-200 ease-in-out ${primaryCircle ? 'translate-x-5' : 'translate-x-0'
+                                                }`} />
                                         </button>
                                     </div>
 
@@ -201,18 +273,16 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                                         <button
                                             type="button"
                                             onClick={() => setPrimaryEnabled(v => !v)}
-                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                                                primaryEnabled ? 'bg-emerald-500' : 'bg-slate-300'
-                                            }`}
+                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${primaryEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                                                }`}
                                         >
-                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition duration-200 ease-in-out ${
-                                                primaryEnabled ? 'translate-x-5' : 'translate-x-0'
-                                            }`} />
+                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition duration-200 ease-in-out ${primaryEnabled ? 'translate-x-5' : 'translate-x-0'
+                                                }`} />
                                         </button>
                                     </div>
                                 </div>
                             </div>
- 
+
                             {/* Secondary Logo 1 */}
                             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col items-center gap-3">
                                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Secondary 1 (Left)</p>
@@ -233,19 +303,17 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                                         <Upload size={16} /> Upload
                                     </label>
                                     <input type="file" id="secondary1-upload" accept="image/*" className="hidden" onChange={(e) => handleFileChange(e, 'secondary1')} />
-                                    
+
                                     <div className="flex items-center justify-between px-1 mt-1">
                                         <span className="text-sm font-medium text-slate-500">Circle Format</span>
                                         <button
                                             type="button"
                                             onClick={() => setSecondary1Circle(v => !v)}
-                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                                                secondary1Circle ? 'bg-blue-600' : 'bg-slate-300'
-                                            }`}
+                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${secondary1Circle ? 'bg-blue-600' : 'bg-slate-300'
+                                                }`}
                                         >
-                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition duration-200 ease-in-out ${
-                                                secondary1Circle ? 'translate-x-5' : 'translate-x-0'
-                                            }`} />
+                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition duration-200 ease-in-out ${secondary1Circle ? 'translate-x-5' : 'translate-x-0'
+                                                }`} />
                                         </button>
                                     </div>
 
@@ -254,18 +322,16 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                                         <button
                                             type="button"
                                             onClick={() => setSecondary1Enabled(v => !v)}
-                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                                                secondary1Enabled ? 'bg-emerald-500' : 'bg-slate-300'
-                                            }`}
+                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${secondary1Enabled ? 'bg-emerald-500' : 'bg-slate-300'
+                                                }`}
                                         >
-                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition duration-200 ease-in-out ${
-                                                secondary1Enabled ? 'translate-x-5' : 'translate-x-0'
-                                            }`} />
+                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition duration-200 ease-in-out ${secondary1Enabled ? 'translate-x-5' : 'translate-x-0'
+                                                }`} />
                                         </button>
                                     </div>
                                 </div>
                             </div>
- 
+
                             {/* Secondary Logo 2 */}
                             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col items-center gap-3">
                                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Secondary 2 (Middle)</p>
@@ -286,19 +352,17 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                                         <Upload size={16} /> Upload
                                     </label>
                                     <input type="file" id="secondary2-upload" accept="image/*" className="hidden" onChange={(e) => handleFileChange(e, 'secondary2')} />
-                                    
+
                                     <div className="flex items-center justify-between px-1 mt-1">
                                         <span className="text-sm font-medium text-slate-500">Circle Format</span>
                                         <button
                                             type="button"
                                             onClick={() => setSecondary2Circle(v => !v)}
-                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                                                secondary2Circle ? 'bg-blue-600' : 'bg-slate-300'
-                                            }`}
+                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${secondary2Circle ? 'bg-blue-600' : 'bg-slate-300'
+                                                }`}
                                         >
-                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition duration-200 ease-in-out ${
-                                                secondary2Circle ? 'translate-x-5' : 'translate-x-0'
-                                            }`} />
+                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition duration-200 ease-in-out ${secondary2Circle ? 'translate-x-5' : 'translate-x-0'
+                                                }`} />
                                         </button>
                                     </div>
 
@@ -307,23 +371,21 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                                         <button
                                             type="button"
                                             onClick={() => setSecondary2Enabled(v => !v)}
-                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                                                secondary2Enabled ? 'bg-emerald-500' : 'bg-slate-300'
-                                            }`}
+                                            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${secondary2Enabled ? 'bg-emerald-500' : 'bg-slate-300'
+                                                }`}
                                         >
-                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition duration-200 ease-in-out ${
-                                                secondary2Enabled ? 'translate-x-5' : 'translate-x-0'
-                                            }`} />
+                                            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition duration-200 ease-in-out ${secondary2Enabled ? 'translate-x-5' : 'translate-x-0'
+                                                }`} />
                                         </button>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                     </div>
-                 </div>
- 
-                 {/* Right Column - Help & Info */}
-                 <div className="lg:col-span-4 flex flex-col gap-4">
+                    </div>
+                </div>
+
+                {/* Right Column - Help & Info */}
+                <div className="lg:col-span-4 flex flex-col gap-4">
                     <div className="bg-blue-50/50 p-5 rounded-xl border border-blue-100 h-full">
                         <h3 className="text-sm font-bold text-blue-800 uppercase tracking-widest mb-3 flex items-center gap-2">
                             <ImageIcon size={16} /> Header Layout
@@ -351,8 +413,8 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                             </div>
                         </div>
                     </div>
-                 </div>
-             </div>
+                </div>
+            </div>
         </div>
     );
 };
