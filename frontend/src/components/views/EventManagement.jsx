@@ -46,6 +46,22 @@ const formatRequiredRoleLabel = (requiredRole) => {
         .join(', ');
 };
 
+const getEventDateTimeLabel = (event) => {
+    const scheduleType = event.schedule_type || 'weekly';
+    const startTime = event.start_time || 'N/A';
+    const endTime = event.end_time || 'N/A';
+    const timeLabel = `${startTime} - ${endTime}`;
+
+    if (scheduleType === 'date_range') {
+        const startDate = event.start_date || 'N/A';
+        const endDate = event.end_date || 'N/A';
+        return `${startDate} to ${endDate} | ${timeLabel}`;
+    }
+
+    const weeklyDays = event.event_date || 'N/A';
+    return `${weeklyDays} | ${timeLabel}`;
+};
+
 const formatScheduleLabel = (event) => (
     event.schedule_type === 'date_range'
         ? `${event.start_date} to ${event.end_date}`
@@ -375,11 +391,11 @@ export const EventManagement = ({ branding, adminSession }) => {
                                 filteredEvents.map((event) => (
                                     <tr key={event.event_id} className="hover:bg-slate-50 even:bg-slate-50/50 transition-colors group">
                                         <td className="px-6 py-4 font-medium text-slate-900">{event.event_name}</td>
-                                        <td className="px-6 py-4 text-slate-600 max-w-xs truncate" title={event.description || 'No description'}>
+                                        <td className="px-6 py-4 text-slate-500 max-w-xs truncate" title={event.description || 'No description'}>
                                             {event.description || 'No description'}
                                         </td>
-                                        <td className="px-6 py-4 text-slate-600">{formatScheduleLabel(event)} | {event.start_time} - {event.end_time}</td>
-                                        <td className="px-6 py-4 text-slate-600">{formatRequiredRoleLabel(event.required_role)}</td>
+                                        <td className="px-6 py-4 text-slate-500">{getEventDateTimeLabel(event)}</td>
+                                        <td className="px-6 py-4 text-slate-500">{formatRequiredRoleLabel(event.required_role)}</td>
                                         <td className="px-6 py-4">
                                             <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${event.is_enabled ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-rose-100 text-rose-700 border border-rose-200'}`}>
                                                 {event.is_enabled ? 'Enabled' : 'Disabled'}
