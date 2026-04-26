@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Users, Search, Edit2, Trash2, X, UserPlus, Eye, Check, AlertTriangle, ChevronLeft, ChevronRight, Mail, Filter, Upload, FileSpreadsheet, Download, GraduationCap, BookOpen } from 'lucide-react';
+import { Users, Search, Edit2, Trash2, UserPlus, Eye, Check, AlertTriangle, ChevronLeft, ChevronRight, Mail, Filter, Upload, FileSpreadsheet, Download, GraduationCap, BookOpen } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import * as XLSX from 'xlsx';
 import { useToast } from '../toast/ToastProvider';
+import { AdminModal } from '../common/AdminModal';
 
 const visitorYearCode = new Date().getFullYear().toString().slice(-2);
 
@@ -792,19 +793,15 @@ export const UserManagement = ({ adminSession }) => {
 
             {/* Smart Registration / Edit Form Component */}
             {(showRegisterModal || showEditModal) && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in">
-                    <div className="bg-black/90 backdrop-blur-3xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-2xl overflow-y-auto max-h-[90vh] animate-in zoom-in-95 duration-200">
-                        <div className="px-8 py-6 border-b border-white/10 flex justify-between items-center sticky top-0 bg-black/50 backdrop-blur-md z-10">
-                            <div className="flex items-center gap-3">
-                                <div className={`p-2 bg-white/10 rounded-lg border border-white/20 `}>
-                                    {showEditModal ? <Edit2 className="w-5 h-5 text-amber-400" /> : <UserPlus className="w-5 h-5 text-emerald-400" />}
-                                </div>
-                                <h2 className="text-xl font-bold text-white tracking-wide">{showEditModal ? 'Edit Profile' : 'Register New Profile'}</h2>
-                            </div>
-                            <button onClick={() => { setShowRegisterModal(false); setShowEditModal(false); }} className="text-white/50 hover:text-white transition-colors bg-white/5 p-2 rounded-xl hover:bg-white/10"><X className="w-5 h-5" /></button>
-                        </div>
-
-                        <form onSubmit={showEditModal ? handleEditSubmit : handleRegisterSubmit} className="p-8 space-y-8">
+                <AdminModal
+                    isOpen={showRegisterModal || showEditModal}
+                    onClose={() => { setShowRegisterModal(false); setShowEditModal(false); }}
+                    title={showEditModal ? 'Edit Profile' : 'Register New Profile'}
+                    icon={showEditModal ? <Edit2 className="w-5 h-5 text-amber-300" /> : <UserPlus className="w-5 h-5 text-emerald-300" />}
+                    subtitle="Use this shared admin modal pattern for a consistent profile workflow."
+                    size="lg"
+                >
+                    <form onSubmit={showEditModal ? handleEditSubmit : handleRegisterSubmit} className="space-y-6">
                             {/* Role Selector (Only in Register mode to prevent changing role of existing user easily) */}
                             {!showEditModal && mainTab === 'members' && (
                                 <div className="space-y-3">
@@ -820,7 +817,7 @@ export const UserManagement = ({ adminSession }) => {
                                 </div>
                             )}
 
-                            <div className="space-y-6">
+                            <div className="space-y-5">
                                 <div className="space-y-4">
                                     <div>
                                         <label className="block text-xs text-white/60 mb-1 font-medium">
@@ -871,7 +868,7 @@ export const UserManagement = ({ adminSession }) => {
                                     </div>
                                 </div>
 
-                                <div className="h-px w-full bg-white/5 my-6"></div>
+                                <div className="my-4 h-px w-full bg-white/5"></div>
 
                                 {formData.role === 'student' && (
                                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 animate-in fade-in">
@@ -940,7 +937,7 @@ export const UserManagement = ({ adminSession }) => {
                                 )}
                             </div>
 
-                            <div className="pt-6">
+                            <div className="pt-2">
                                 <button
                                     type="submit"
                                     disabled={!isIdNumberValid}
@@ -949,26 +946,21 @@ export const UserManagement = ({ adminSession }) => {
                                     <Check className="w-6 h-6" /> {showEditModal ? 'Save Changes' : 'Confirm & Register'}
                                 </button>
                             </div>
-                        </form>
-                    </div>
-                </div>
+                    </form>
+                </AdminModal>
             )}
 
             {/* Bulk Import Modal */}
             {showImportModal && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in">
-                    <div className="bg-black/90 backdrop-blur-3xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-2xl overflow-y-auto max-h-[90vh] animate-in zoom-in-95 duration-200">
-                        <div className="px-8 py-6 border-b border-white/10 flex justify-between items-center sticky top-0 bg-black/50 backdrop-blur-md z-10">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-white/10 rounded-lg border border-white/20">
-                                    <FileSpreadsheet className="w-5 h-5 text-indigo-300" />
-                                </div>
-                                <h2 className="text-xl font-bold text-white tracking-wide">Bulk Import via Excel</h2>
-                            </div>
-                            <button onClick={() => setShowImportModal(false)} className="text-white/50 hover:text-white transition-colors bg-white/5 p-2 rounded-xl hover:bg-white/10"><X className="w-5 h-5" /></button>
-                        </div>
-
-                        <div className="p-8 space-y-6">
+                <AdminModal
+                    isOpen={showImportModal}
+                    onClose={() => setShowImportModal(false)}
+                    title="Bulk Import via Excel"
+                    icon={<FileSpreadsheet className="w-5 h-5 text-indigo-300" />}
+                    subtitle="Upload standardized spreadsheets to register users in bulk."
+                    size="lg"
+                >
+                    <div className="space-y-6">
                             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                                 {['student', 'professor', 'staff'].map((tab) => (
                                     <button
@@ -1032,41 +1024,53 @@ export const UserManagement = ({ adminSession }) => {
                             >
                                 {isImporting ? 'Importing...' : 'Start Import'}
                             </button>
-                        </div>
                     </div>
-                </div>
+                </AdminModal>
             )}
 
             {/* Delete Confirmation Modal */}
             {showDeleteModal && selectedUser && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in">
-                    <div className="bg-rose-950/40 backdrop-blur-2xl border border-rose-500/30 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-                        <div className="p-8 flex flex-col items-center text-center space-y-6">
-                            <div className="w-20 h-20 bg-rose-500/20 rounded-full flex items-center justify-center border-4 border-rose-500/30">
-                                <AlertTriangle className="w-10 h-10 text-rose-400" />
-                            </div>
-                            <div className="space-y-2">
-                                <h2 className="text-2xl font-bold text-white">Archive Profile?</h2>
-                                <p className="text-white/70">Are you sure you want to archive <span className="text-white font-semibold">{selectedUser.first_name} {selectedUser.last_name}</span>? This record will be moved to the Archive Center.</p>
-                            </div>
-                            <div className="flex gap-4 w-full pt-4">
-                                <button onClick={() => setShowDeleteModal(false)} className="flex-1 py-3 px-4 bg-white/5 hover:bg-white/10 text-white font-semibold rounded-xl transition-colors border border-white/10 focus:outline-none">Cancel</button>
-                                <button onClick={confirmDelete} className="flex-1 py-3 px-4 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl transition-all shadow-[0_0_20px_rgba(244,63,94,0.3)] hover:shadow-[0_0_30px_rgba(244,63,94,0.5)] border border-rose-400 focus:outline-none">Archive</button>
-                            </div>
+                <AdminModal
+                    isOpen={showDeleteModal}
+                    onClose={() => setShowDeleteModal(false)}
+                    title="Archive Profile?"
+                    tone="danger"
+                    icon={<AlertTriangle className="w-5 h-5 text-rose-300" />}
+                    size="md"
+                    footer={(
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setShowDeleteModal(false)}
+                                className="flex-1 rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-white/10"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmDelete}
+                                className="flex-1 rounded-xl border border-rose-300/40 bg-rose-500 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-rose-400"
+                            >
+                                Archive
+                            </button>
                         </div>
-                    </div>
-                </div>
+                    )}
+                >
+                    <p className="text-center text-sm leading-relaxed text-rose-100/85">
+                        Are you sure you want to archive <span className="font-semibold text-rose-50">{selectedUser.first_name} {selectedUser.last_name}</span>? This record will be moved to the Archive Center.
+                    </p>
+                </AdminModal>
             )}
 
             {/* View Details Modal */}
             {showViewModal && selectedUser && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in">
-                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-                        <div className="bg-slate-50 border-b border-slate-200 p-6 flex justify-between items-center">
-                            <h2 className="text-xl font-bold text-slate-900">Profile Details</h2>
-                            <button onClick={() => setShowViewModal(false)} className="text-slate-400 hover:bg-slate-200 hover:text-slate-600 p-2 rounded-xl transition-colors"><X className="w-5 h-5" /></button>
-                        </div>
-                        <div className="p-6 space-y-6">
+                <AdminModal
+                    isOpen={showViewModal}
+                    onClose={() => setShowViewModal(false)}
+                    title="Profile Details"
+                    icon={<Eye className="w-5 h-5 text-slate-300" />}
+                    tone="light"
+                    size="md"
+                >
+                    <div className="space-y-6">
                             <div className="flex items-center gap-4 border-b border-slate-100 pb-6">
                                 <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-2xl font-bold">
                                     {selectedUser.first_name.charAt(0)}
@@ -1118,9 +1122,8 @@ export const UserManagement = ({ adminSession }) => {
                                     </>
                                 )}
                             </div>
-                        </div>
                     </div>
-                </div>
+                </AdminModal>
             )}
         </div>
     );
