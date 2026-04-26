@@ -100,8 +100,8 @@ CREATE TABLE IF NOT EXISTS event_attendance (
     FOREIGN KEY (person_id) REFERENCES persons(person_id)
 );
 
-INSERT OR IGNORE INTO events (event_name, event_date, start_time, end_time, required_role, is_enabled)  
-VALUES ('Flag Ceremony', DATE('now', 'localtime'), '07:30', '08:00', 'all', 1);
+INSERT OR IGNORE INTO events (event_name, description, schedule_type, event_date, start_time, end_time, required_role, is_enabled)  
+VALUES ('Flag Ceremony', 'Official weekly campus flag ceremony', 'weekly', 'Monday', '07:30', '08:00', 'all', 1);
 
 -- Admin
 CREATE TABLE IF NOT EXISTS audit_logs (

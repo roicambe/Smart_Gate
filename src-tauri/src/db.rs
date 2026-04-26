@@ -3875,13 +3875,17 @@ pub fn get_archived_users(pool: &DbPool) -> Result<Vec<serde_json::Value>, Strin
     let conn = pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.role, p.email, p.archived_at,
-                COALESCE(pr.program_name, d.department_name, '') as affiliation,
-                s.year_level
+                COALESCE(stu_dept.department_name, emp_dept.department_name, '') as department_name,
+                pr.program_name,
+                s.year_level,
+                e.position_title,
+                COALESCE(pr.program_name, emp_dept.department_name, '') as affiliation
          FROM persons p
          LEFT JOIN students s ON p.person_id = s.person_id
          LEFT JOIN programs pr ON s.program_id = pr.program_id
+         LEFT JOIN departments stu_dept ON pr.department_id = stu_dept.department_id
          LEFT JOIN employees e ON p.person_id = e.person_id
-         LEFT JOIN departments d ON e.department_id = d.department_id
+         LEFT JOIN departments emp_dept ON e.department_id = emp_dept.department_id
          WHERE p.is_archived = 1
          ORDER BY p.archived_at DESC"
     ).map_err(|e| e.to_string())?;
@@ -3896,8 +3900,11 @@ pub fn get_archived_users(pool: &DbPool) -> Result<Vec<serde_json::Value>, Strin
             "role": row.get::<_, String>(5)?,
             "email": row.get::<_, Option<String>>(6)?,
             "archived_at": row.get::<_, Option<String>>(7)?,
-            "affiliation": row.get::<_, String>(8)?,
-            "year_level": row.get::<_, Option<i64>>(9)?
+            "department_name": row.get::<_, String>(8)?,
+            "program_name": row.get::<_, Option<String>>(9)?,
+            "year_level": row.get::<_, Option<i64>>(10)?,
+            "position_title": row.get::<_, Option<String>>(11)?,
+            "affiliation": row.get::<_, String>(12)?
         }))
     }).map_err(|e| e.to_string())?;
 
@@ -3911,7 +3918,7 @@ pub fn get_archived_users(pool: &DbPool) -> Result<Vec<serde_json::Value>, Strin
 pub fn get_archived_events(pool: &DbPool) -> Result<Vec<serde_json::Value>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT event_id, event_name, event_date, start_time, end_time, required_role, archived_at
+        "SELECT event_id, event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, archived_at
          FROM events WHERE is_archived = 1
          ORDER BY archived_at DESC"
     ).map_err(|e| e.to_string())?;
@@ -3920,11 +3927,15 @@ pub fn get_archived_events(pool: &DbPool) -> Result<Vec<serde_json::Value>, Stri
         Ok(json!({
             "event_id": row.get::<_, i64>(0)?,
             "event_name": row.get::<_, String>(1)?,
-            "event_date": row.get::<_, String>(2)?,
-            "start_time": row.get::<_, String>(3)?,
-            "end_time": row.get::<_, String>(4)?,
-            "required_role": row.get::<_, String>(5)?,
-            "archived_at": row.get::<_, Option<String>>(6)?
+            "description": row.get::<_, Option<String>>(2)?,
+            "schedule_type": row.get::<_, Option<String>>(3)?,
+            "event_date": row.get::<_, Option<String>>(4)?,
+            "start_date": row.get::<_, Option<String>>(5)?,
+            "end_date": row.get::<_, Option<String>>(6)?,
+            "start_time": row.get::<_, Option<String>>(7)?,
+            "end_time": row.get::<_, Option<String>>(8)?,
+            "required_role": row.get::<_, Option<String>>(9)?,
+            "archived_at": row.get::<_, Option<String>>(10)?
         }))
     }).map_err(|e| e.to_string())?;
 
@@ -3946,12 +3957,19 @@ pub fn get_archived_academic(pool: &DbPool) -> Result<serde_json::Value, String>
     ).map_err(|e| e.to_string())?;
 
     let dept_iter = dept_stmt.query_map([], |row| {
+        let department_id = row.get::<_, i64>(0)?;
+        let department_code = row.get::<_, String>(1)?;
+        let department_name = row.get::<_, String>(2)?;
+        let archived_at = row.get::<_, Option<String>>(3)?;
         Ok(json!({
-            "id": row.get::<_, i64>(0)?,
-            "code": row.get::<_, String>(1)?,
-            "name": row.get::<_, String>(2)?,
+            "id": department_id,
+            "code": department_code,
+            "name": department_name,
+            "department_id": department_id,
+            "department_code": department_code,
+            "department_name": department_name,
             "type": "Department",
-            "archived_at": row.get::<_, Option<String>>(3)?
+            "archived_at": archived_at
         }))
     }).map_err(|e| e.to_string())?;
 
@@ -3970,13 +3988,21 @@ pub fn get_archived_academic(pool: &DbPool) -> Result<serde_json::Value, String>
     ).map_err(|e| e.to_string())?;
 
     let prog_iter = prog_stmt.query_map([], |row| {
+        let program_id = row.get::<_, i64>(0)?;
+        let program_code = row.get::<_, String>(1)?;
+        let program_name = row.get::<_, String>(2)?;
+        let archived_at = row.get::<_, Option<String>>(3)?;
+        let department_name = row.get::<_, Option<String>>(4)?;
         Ok(json!({
-            "id": row.get::<_, i64>(0)?,
-            "code": row.get::<_, String>(1)?,
-            "name": row.get::<_, String>(2)?,
+            "id": program_id,
+            "code": program_code,
+            "name": program_name,
+            "program_id": program_id,
+            "program_code": program_code,
+            "program_name": program_name,
             "type": "Program",
-            "archived_at": row.get::<_, Option<String>>(3)?,
-            "department_name": row.get::<_, Option<String>>(4)?
+            "archived_at": archived_at,
+            "department_name": department_name
         }))
     }).map_err(|e| e.to_string())?;
 
