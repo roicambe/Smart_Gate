@@ -110,7 +110,12 @@ export const DataManagement = ({ adminSession }) => {
             message: isDelete 
                 ? 'This action cannot be undone. All logs associated with this record will also be destroyed.'
                 : 'This record will be moved back to the active system.',
-            targetName: item[nameField] || `ID ${item[idField]}`,
+            targetName:
+                item[nameField] ||
+                item.name ||
+                item.department_name ||
+                item.program_name ||
+                `ID ${item[idField]}`,
             requiredText: isDelete ? 'DELETE' : 'RESTORE',
             execute: async () => {
                 let commandStr = isDelete ? `permanent_delete_${itemType}` : `restore_${itemType}`;
@@ -158,6 +163,69 @@ export const DataManagement = ({ adminSession }) => {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     };
 
+    const pickFirstText = (...values) => {
+        const match = values.find(
+            (value) => typeof value === 'string' && value.trim().length > 0
+        );
+        return match ?? null;
+    };
+
+    const getAcademicName = (item = {}) =>
+        pickFirstText(
+            item.name,
+            item.department_name,
+            item.program_name,
+            item.departmentName,
+            item.programName
+        ) || 'N/A';
+
+    const getAcademicCode = (item = {}) =>
+        pickFirstText(
+            item.code,
+            item.department_code,
+            item.program_code,
+            item.departmentCode,
+            item.programCode
+        ) || 'N/A';
+
+    const getEventDateTime = (event = {}) => {
+        const scheduleType = pickFirstText(event.schedule_type, event.scheduleType);
+        const weeklyDays = pickFirstText(event.event_date, event.eventDate);
+        const startDate = pickFirstText(event.start_date, event.startDate);
+        const endDate = pickFirstText(event.end_date, event.endDate);
+        const startTime = pickFirstText(event.start_time, event.startTime);
+        const endTime = pickFirstText(event.end_time, event.endTime);
+        const timeLabel = (startTime && endTime)
+            ? `${startTime} - ${endTime}`
+            : (startTime || endTime || null);
+
+        const isDateRange = scheduleType === 'date_range' || (!!startDate && !!endDate);
+        if (isDateRange) {
+            const dateLabel = startDate && endDate ? `${startDate} to ${endDate}` : (startDate || endDate || null);
+            if (dateLabel && timeLabel) return `${dateLabel} | ${timeLabel}`;
+            return dateLabel || timeLabel || 'N/A';
+        }
+
+        if (weeklyDays && timeLabel) return `${weeklyDays} | ${timeLabel}`;
+        if (weeklyDays) return weeklyDays;
+        return timeLabel || 'N/A';
+    };
+
+    const getEventRequiredRole = (event = {}) => {
+        const value = pickFirstText(event.required_role, event.requiredRole);
+        if (!value) return 'N/A';
+        if (value.toLowerCase() === 'all') return 'All Roles';
+        return value
+            .split(',')
+            .map((role) => role.trim())
+            .filter(Boolean)
+            .map((role) => role.charAt(0).toUpperCase() + role.slice(1))
+            .join(', ');
+    };
+
+    const getEventDescription = (event = {}) =>
+        pickFirstText(event.description, event.event_description, event.eventDescription) || 'No description';
+
     // Rendering Sub-tabs for Archive Center
     const renderArchiveTable = () => {
         if (activeSubTab === 'users') {
@@ -168,7 +236,7 @@ export const DataManagement = ({ adminSession }) => {
                             <tr className="text-slate-600">
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">ID Number</th>
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Full Name</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Program and Year</th>
+                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Department / Details</th>
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Archived Date</th>
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs text-right">Actions</th>
                             </tr>
@@ -176,29 +244,35 @@ export const DataManagement = ({ adminSession }) => {
                         <tbody className="divide-y divide-slate-100">
                             {archivedUsers.length === 0 ? (
                                 <tr><td colSpan="5" className="px-6 py-8 text-center text-slate-400">No archived users found.</td></tr>
-                            ) : archivedUsers.map(u => (
-                                <tr key={u.person_id} className="hover:bg-slate-50 transition-colors group">
-                                    <td className="px-5 py-3 font-mono font-medium text-slate-900">{u.id_number}</td>
-                                    <td className="px-5 py-3 font-medium text-slate-900">{u.first_name} {u.last_name}</td>
-                                    <td className="px-5 py-3">
-                                        <div className="flex flex-col">
-                                            <span className="font-medium text-slate-900">{u.affiliation}</span>
-                                            {u.role === 'student' && u.year_level && (
-                                                <span className="text-xs text-slate-500 font-medium">Year {u.year_level}</span>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td className="px-5 py-3 text-slate-500 font-medium">{new Date(u.archived_at).toLocaleString()}</td>
-                                    <td className="px-5 py-3 text-right space-x-2">
-                                        <button onClick={() => openConfirmModal('restore', 'user', u, 'person_id', 'first_name')} className="p-2 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-colors border border-transparent hover:border-emerald-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Restore User">
-                                            <RotateCcw className="w-4 h-4" />
-                                        </button>
-                                        <button onClick={() => openConfirmModal('delete', 'user', u, 'person_id', 'first_name')} className="p-2 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors border border-transparent hover:border-rose-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Purge User Permanently">
-                                            <Trash2 className="w-4 h-4" />
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))}
+                            ) : archivedUsers.map(u => {
+                                const isStudent = (u.role || '').toLowerCase() === 'student';
+                                const departmentLine = u.department_name || 'N/A';
+                                const detailLine = isStudent
+                                    ? `${u.program_name || 'N/A'}${u.year_level ? ` - Yr ${u.year_level}` : ''}`
+                                    : (u.position_title || 'N/A');
+
+                                return (
+                                    <tr key={u.person_id} className="hover:bg-slate-50 transition-colors group">
+                                        <td className="px-5 py-3 font-mono font-medium text-slate-900">{u.id_number}</td>
+                                        <td className="px-5 py-3 font-medium text-slate-900">{u.first_name} {u.last_name}</td>
+                                        <td className="px-5 py-3">
+                                            <div className="flex flex-col">
+                                                <span className="font-medium text-slate-900">{departmentLine}</span>
+                                                <span className="text-xs text-slate-500 font-medium">{detailLine}</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-5 py-3 text-slate-500">{new Date(u.archived_at).toLocaleString()}</td>
+                                        <td className="px-5 py-3 text-right space-x-2">
+                                            <button onClick={() => openConfirmModal('restore', 'user', u, 'person_id', 'first_name')} className="p-2 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-colors border border-transparent hover:border-emerald-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Restore User">
+                                                <RotateCcw className="w-4 h-4" />
+                                            </button>
+                                            <button onClick={() => openConfirmModal('delete', 'user', u, 'person_id', 'first_name')} className="p-2 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors border border-transparent hover:border-rose-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Purge User Permanently">
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>
@@ -224,8 +298,8 @@ export const DataManagement = ({ adminSession }) => {
                                     <>
                                         {archivedAcademic.departments.map(d => (
                                             <tr key={`dept-${d.id}`} className="hover:bg-slate-50 transition-colors group">
-                                                <td className="px-5 py-3 font-medium text-slate-900">{d.code}</td>
-                                                <td className="px-5 py-3">{d.name}</td>
+                                                <td className="px-5 py-3 font-medium text-slate-900">{getAcademicCode(d)}</td>
+                                                <td className="px-5 py-3 font-medium text-slate-900">{getAcademicName(d)}</td>
                                                 <td className="px-5 py-3"><span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded-md text-xs font-bold">Department</span></td>
                                                 <td className="px-5 py-3 text-slate-500">{new Date(d.archived_at).toLocaleString()}</td>
                                                 <td className="px-5 py-3 text-right space-x-2">
@@ -240,11 +314,11 @@ export const DataManagement = ({ adminSession }) => {
                                         ))}
                                         {archivedAcademic.programs.map(p => (
                                             <tr key={`prog-${p.id}`} className="hover:bg-slate-50 transition-colors group">
-                                                <td className="px-5 py-3 font-medium text-slate-900">{p.code}</td>
+                                                <td className="px-5 py-3 font-medium text-slate-900">{getAcademicCode(p)}</td>
                                                 <td className="px-5 py-3">
                                                     <div className="flex flex-col">
-                                                        <span>{p.name}</span>
-                                                        <span className="text-xs text-slate-500">{p.department_name}</span>
+                                                        <span className="font-medium text-slate-900">{getAcademicName(p)}</span>
+                                                        <span className="text-xs text-slate-500">{pickFirstText(p.department_name, p.departmentName) || 'N/A'}</span>
                                                     </div>
                                                 </td>
                                                 <td className="px-5 py-3"><span className="px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-xs font-bold">Program</span></td>
@@ -273,7 +347,8 @@ export const DataManagement = ({ adminSession }) => {
                         <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
                             <tr className="text-slate-600">
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Event Name</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Date & Time</th>
+                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Description</th>
+                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Date and Time</th>
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Required Role</th>
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Archived Date</th>
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs text-right">Actions</th>
@@ -281,12 +356,13 @@ export const DataManagement = ({ adminSession }) => {
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {archivedEvents.length === 0 ? (
-                                <tr><td colSpan="5" className="px-6 py-8 text-center text-slate-400">No archived events found.</td></tr>
+                                <tr><td colSpan="6" className="px-6 py-8 text-center text-slate-400">No archived events found.</td></tr>
                             ) : archivedEvents.map(e => (
                                 <tr key={e.event_id} className="hover:bg-slate-50 transition-colors group">
                                     <td className="px-5 py-3 font-medium text-slate-900">{e.event_name}</td>
-                                    <td className="px-5 py-3">{e.event_date} ({e.start_time} - {e.end_time})</td>
-                                    <td className="px-5 py-3 capitalize">{e.required_role}</td>
+                                    <td className="px-5 py-3 text-slate-500 max-w-xs truncate" title={getEventDescription(e)}>{getEventDescription(e)}</td>
+                                    <td className="px-5 py-3 text-slate-500">{getEventDateTime(e)}</td>
+                                    <td className="px-5 py-3 text-slate-500">{getEventRequiredRole(e)}</td>
                                     <td className="px-5 py-3 text-slate-500">{new Date(e.archived_at).toLocaleString()}</td>
                                     <td className="px-5 py-3 text-right space-x-2">
                                         <button onClick={() => openConfirmModal('restore', 'event', e, 'event_id', 'event_name')} className="p-2 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-colors border border-transparent hover:border-emerald-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Restore Event">
