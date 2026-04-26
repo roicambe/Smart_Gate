@@ -3875,7 +3875,8 @@ pub fn get_archived_users(pool: &DbPool) -> Result<Vec<serde_json::Value>, Strin
     let conn = pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.role, p.email, p.archived_at,
-                COALESCE(pr.program_name, d.department_name, '') as affiliation
+                COALESCE(pr.program_name, d.department_name, '') as affiliation,
+                s.year_level
          FROM persons p
          LEFT JOIN students s ON p.person_id = s.person_id
          LEFT JOIN programs pr ON s.program_id = pr.program_id
@@ -3895,7 +3896,8 @@ pub fn get_archived_users(pool: &DbPool) -> Result<Vec<serde_json::Value>, Strin
             "role": row.get::<_, String>(5)?,
             "email": row.get::<_, Option<String>>(6)?,
             "archived_at": row.get::<_, Option<String>>(7)?,
-            "affiliation": row.get::<_, String>(8)?
+            "affiliation": row.get::<_, String>(8)?,
+            "year_level": row.get::<_, Option<i64>>(9)?
         }))
     }).map_err(|e| e.to_string())?;
 

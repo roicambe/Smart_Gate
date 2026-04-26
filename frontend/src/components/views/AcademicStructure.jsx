@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Building, Plus, Search, Edit2, Trash2, X, Check, AlertTriangle, BookOpen, Filter } from 'lucide-react';
+import { Building, Plus, Search, Edit2, Trash2, Check, AlertTriangle, BookOpen, Filter } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from '../toast/ToastProvider';
+import { AdminModal } from '../common/AdminModal';
 
 export const AcademicStructure = ({ branding, adminSession }) => {
     const [activeTab, setActiveTab] = useState('department'); // 'department', 'program'
@@ -315,19 +316,14 @@ export const AcademicStructure = ({ branding, adminSession }) => {
 
             {/* Registration/Edit Form Component */}
             {(showRegisterModal || showEditModal) && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in">
-                    <div className="bg-black/90 backdrop-blur-3xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-xl overflow-y-auto max-h-[90vh] animate-in zoom-in-95 duration-200">
-                        <div className="px-8 py-6 border-b border-white/10 flex justify-between items-center sticky top-0 bg-black/50 backdrop-blur-md z-10">
-                            <div className="flex items-center gap-3">
-                                <div className={`p-2 bg-white/10 rounded-lg border border-white/20 `}>
-                                    {showEditModal ? <Edit2 className="w-5 h-5 text-amber-400" /> : <Plus className="w-5 h-5 text-emerald-400" />}
-                                </div>
-                                <h2 className="text-xl font-bold text-white tracking-wide">{showEditModal ? 'Edit' : 'Add'} {activeTab === 'department' ? 'Department' : 'Program'}</h2>
-                            </div>
-                            <button onClick={() => { setShowRegisterModal(false); setShowEditModal(false); }} className="text-white/50 hover:text-white transition-colors bg-white/5 p-2 rounded-xl hover:bg-white/10"><X className="w-5 h-5" /></button>
-                        </div>
-
-                        <form onSubmit={showEditModal ? handleEditSubmit : handleRegisterSubmit} className="p-8 space-y-6">
+                <AdminModal
+                    isOpen={showRegisterModal || showEditModal}
+                    onClose={() => { setShowRegisterModal(false); setShowEditModal(false); }}
+                    title={`${showEditModal ? 'Edit' : 'Add'} ${activeTab === 'department' ? 'Department' : 'Program'}`}
+                    icon={showEditModal ? <Edit2 className="w-5 h-5 text-amber-300" /> : <Plus className="w-5 h-5 text-emerald-300" />}
+                    size="lg"
+                >
+                    <form onSubmit={showEditModal ? handleEditSubmit : handleRegisterSubmit} className="space-y-6">
                             <div className="space-y-4">
                                 <div>
                                     <label className="block text-xs text-white/60 mb-1 font-medium">{activeTab === 'department' ? 'Department' : 'Program'} Code <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
@@ -367,30 +363,34 @@ export const AcademicStructure = ({ branding, adminSession }) => {
                                     <Check className="w-6 h-6" /> {showEditModal ? 'Save Changes' : 'Confirm & Add'}
                                 </button>
                             </div>
-                        </form>
-                    </div>
-                </div>
+                    </form>
+                </AdminModal>
             )}
 
             {/* Delete Confirmation Modal */}
             {showDeleteModal && selectedItem && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in">
-                    <div className="bg-rose-950/40 backdrop-blur-2xl border border-rose-500/30 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-                        <div className="p-8 flex flex-col items-center text-center space-y-6">
-                            <div className="w-20 h-20 bg-rose-500/20 rounded-full flex items-center justify-center border-4 border-rose-500/30">
-                                <AlertTriangle className="w-10 h-10 text-rose-400" />
-                            </div>
-                            <div className="space-y-2">
-                                <h2 className="text-2xl font-bold text-white capitalize">Archive {activeTab}?</h2>
-                                <p className="text-white/70">Are you sure you want to archive <span className="text-white font-semibold">{activeTab === 'department' ? selectedItem.department_code : selectedItem.program_code}</span>? This record will be moved to the Archive Center.</p>
-                            </div>
-                            <div className="flex gap-4 w-full pt-4">
-                                <button onClick={() => setShowDeleteModal(false)} className="flex-1 py-3 px-4 bg-white/5 hover:bg-white/10 text-white font-semibold rounded-xl transition-colors border border-white/10 focus:outline-none">Cancel</button>
-                                <button onClick={confirmDelete} className="flex-1 py-3 px-4 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl transition-all shadow-[0_0_20px_rgba(244,63,94,0.3)] hover:shadow-[0_0_30px_rgba(244,63,94,0.5)] border border-rose-400 focus:outline-none">Archive</button>
-                            </div>
+                <AdminModal
+                    isOpen={showDeleteModal}
+                    onClose={() => setShowDeleteModal(false)}
+                    title={`Archive ${activeTab}?`}
+                    tone="danger"
+                    icon={<AlertTriangle className="w-5 h-5 text-rose-300" />}
+                    size="md"
+                    footer={(
+                        <div className="flex gap-3">
+                            <button onClick={() => setShowDeleteModal(false)} className="flex-1 rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10">
+                                Cancel
+                            </button>
+                            <button onClick={confirmDelete} className="flex-1 rounded-xl border border-rose-300/40 bg-rose-500 px-4 py-3 text-sm font-bold text-white hover:bg-rose-400">
+                                Archive
+                            </button>
                         </div>
-                    </div>
-                </div>
+                    )}
+                >
+                    <p className="text-center text-sm text-rose-100/85">
+                        Are you sure you want to archive <span className="font-semibold text-rose-50">{activeTab === 'department' ? selectedItem.department_code : selectedItem.program_code}</span>? This record will be moved to the Archive Center.
+                    </p>
+                </AdminModal>
             )}
         </div>
     );

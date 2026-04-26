@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Database, Archive, Users, Building, Calendar, ShieldAlert, RefreshCw, Download, AlertTriangle, Trash2, RotateCcw } from 'lucide-react';
+import { 
+    Database, HardDrive, RefreshCw, Archive, Search, Filter, 
+    AlertTriangle, ShieldAlert, History, ShieldCheck, Check, 
+    Trash2, RotateCcw, Users, Building, Calendar, Download
+} from 'lucide-react';
 import { useToast } from '../toast/ToastProvider';
 import { save, open } from '@tauri-apps/plugin-dialog';
+import { AdminModal } from '../common/AdminModal';
 
 export const DataManagement = ({ adminSession }) => {
     const [activeTab, setActiveTab] = useState('archive_center');
@@ -162,8 +167,8 @@ export const DataManagement = ({ adminSession }) => {
                         <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
                             <tr className="text-slate-600">
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">ID Number</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Name</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Role / Affiliation</th>
+                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Full Name</th>
+                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Program and Year</th>
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Archived Date</th>
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs text-right">Actions</th>
                             </tr>
@@ -173,18 +178,24 @@ export const DataManagement = ({ adminSession }) => {
                                 <tr><td colSpan="5" className="px-6 py-8 text-center text-slate-400">No archived users found.</td></tr>
                             ) : archivedUsers.map(u => (
                                 <tr key={u.person_id} className="hover:bg-slate-50 transition-colors group">
-                                    <td className="px-5 py-3 font-medium text-slate-900">{u.id_number}</td>
-                                    <td className="px-5 py-3">{u.first_name} {u.last_name}</td>
+                                    <td className="px-5 py-3 font-mono font-medium text-slate-900">{u.id_number}</td>
+                                    <td className="px-5 py-3 font-medium text-slate-900">{u.first_name} {u.last_name}</td>
                                     <td className="px-5 py-3">
                                         <div className="flex flex-col">
-                                            <span className="capitalize font-medium">{u.role}</span>
-                                            <span className="text-xs text-slate-500">{u.affiliation}</span>
+                                            <span className="font-medium text-slate-900">{u.affiliation}</span>
+                                            {u.role === 'student' && u.year_level && (
+                                                <span className="text-xs text-slate-500 font-medium">Year {u.year_level}</span>
+                                            )}
                                         </div>
                                     </td>
-                                    <td className="px-5 py-3 text-slate-500">{new Date(u.archived_at).toLocaleString()}</td>
+                                    <td className="px-5 py-3 text-slate-500 font-medium">{new Date(u.archived_at).toLocaleString()}</td>
                                     <td className="px-5 py-3 text-right space-x-2">
-                                        <button onClick={() => openConfirmModal('restore', 'user', u, 'person_id', 'first_name')} className="px-3 py-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-md font-medium transition-colors">Restore</button>
-                                        <button onClick={() => openConfirmModal('delete', 'user', u, 'person_id', 'first_name')} className="px-3 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-md font-medium transition-colors">Purge</button>
+                                        <button onClick={() => openConfirmModal('restore', 'user', u, 'person_id', 'first_name')} className="p-2 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-colors border border-transparent hover:border-emerald-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Restore User">
+                                            <RotateCcw className="w-4 h-4" />
+                                        </button>
+                                        <button onClick={() => openConfirmModal('delete', 'user', u, 'person_id', 'first_name')} className="p-2 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors border border-transparent hover:border-rose-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Purge User Permanently">
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
                                     </td>
                                 </tr>
                             ))}
@@ -218,8 +229,12 @@ export const DataManagement = ({ adminSession }) => {
                                                 <td className="px-5 py-3"><span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded-md text-xs font-bold">Department</span></td>
                                                 <td className="px-5 py-3 text-slate-500">{new Date(d.archived_at).toLocaleString()}</td>
                                                 <td className="px-5 py-3 text-right space-x-2">
-                                                    <button onClick={() => openConfirmModal('restore', 'department', d, 'id', 'name')} className="px-3 py-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-md font-medium transition-colors">Restore</button>
-                                                    <button onClick={() => openConfirmModal('delete', 'department', d, 'id', 'name')} className="px-3 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-md font-medium transition-colors">Purge</button>
+                                                    <button onClick={() => openConfirmModal('restore', 'department', d, 'id', 'name')} className="p-2 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-colors border border-transparent hover:border-emerald-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Restore Department">
+                                                        <RotateCcw className="w-4 h-4" />
+                                                    </button>
+                                                    <button onClick={() => openConfirmModal('delete', 'department', d, 'id', 'name')} className="p-2 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors border border-transparent hover:border-rose-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Purge Department Permanently">
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
                                                 </td>
                                             </tr>
                                         ))}
@@ -235,8 +250,12 @@ export const DataManagement = ({ adminSession }) => {
                                                 <td className="px-5 py-3"><span className="px-2 py-1 bg-blue-50 text-blue-700 rounded-md text-xs font-bold">Program</span></td>
                                                 <td className="px-5 py-3 text-slate-500">{new Date(p.archived_at).toLocaleString()}</td>
                                                 <td className="px-5 py-3 text-right space-x-2">
-                                                    <button onClick={() => openConfirmModal('restore', 'program', p, 'id', 'name')} className="px-3 py-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-md font-medium transition-colors">Restore</button>
-                                                    <button onClick={() => openConfirmModal('delete', 'program', p, 'id', 'name')} className="px-3 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-md font-medium transition-colors">Purge</button>
+                                                    <button onClick={() => openConfirmModal('restore', 'program', p, 'id', 'name')} className="p-2 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-colors border border-transparent hover:border-emerald-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Restore Program">
+                                                        <RotateCcw className="w-4 h-4" />
+                                                    </button>
+                                                    <button onClick={() => openConfirmModal('delete', 'program', p, 'id', 'name')} className="p-2 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors border border-transparent hover:border-rose-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Purge Program Permanently">
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
                                                 </td>
                                             </tr>
                                         ))}
@@ -270,8 +289,12 @@ export const DataManagement = ({ adminSession }) => {
                                     <td className="px-5 py-3 capitalize">{e.required_role}</td>
                                     <td className="px-5 py-3 text-slate-500">{new Date(e.archived_at).toLocaleString()}</td>
                                     <td className="px-5 py-3 text-right space-x-2">
-                                        <button onClick={() => openConfirmModal('restore', 'event', e, 'event_id', 'event_name')} className="px-3 py-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-md font-medium transition-colors">Restore</button>
-                                        <button onClick={() => openConfirmModal('delete', 'event', e, 'event_id', 'event_name')} className="px-3 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-md font-medium transition-colors">Purge</button>
+                                        <button onClick={() => openConfirmModal('restore', 'event', e, 'event_id', 'event_name')} className="p-2 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-colors border border-transparent hover:border-emerald-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Restore Event">
+                                            <RotateCcw className="w-4 h-4" />
+                                        </button>
+                                        <button onClick={() => openConfirmModal('delete', 'event', e, 'event_id', 'event_name')} className="p-2 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors border border-transparent hover:border-rose-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Purge Event Permanently">
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
                                     </td>
                                 </tr>
                             ))}
@@ -429,63 +452,65 @@ export const DataManagement = ({ adminSession }) => {
 
             {/* Confirmation Modal */}
             {isConfirmModalOpen && confirmAction && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-                        {/* Modal Header */}
-                        <div className={`px-6 py-4 flex items-center gap-3 ${
-                            confirmAction.type === 'restore' ? 'bg-emerald-500' : 'bg-rose-500'
-                        } text-white`}>
-                            {confirmAction.type === 'restore' ? <RefreshCw className="w-6 h-6" /> : <AlertTriangle className="w-6 h-6" />}
-                            <h3 className="text-xl font-bold tracking-wide">{confirmAction.title}</h3>
+                <AdminModal
+                    isOpen={isConfirmModalOpen}
+                    onClose={() => setIsConfirmModalOpen(false)}
+                    title={confirmAction.title}
+                    tone={confirmAction.type === 'restore' ? 'default' : 'danger'}
+                    icon={confirmAction.type === 'restore'
+                        ? <RefreshCw className="w-5 h-5 text-emerald-300" />
+                        : <AlertTriangle className="w-5 h-5 text-rose-300" />}
+                    size="md"
+                    footer={(
+                        <div className="flex w-full items-center gap-3">
+                            <button
+                                onClick={() => setIsConfirmModalOpen(false)}
+                                disabled={isProcessing}
+                                className="rounded-xl border border-white/20 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white/85 transition-colors hover:bg-white/10 disabled:opacity-50"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={executeConfirmAction}
+                                disabled={confirmInput !== confirmAction.requiredText || isProcessing}
+                                className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
+                                    confirmAction.type === 'restore'
+                                        ? 'bg-emerald-500 text-black hover:bg-emerald-400'
+                                        : 'bg-rose-500 text-white hover:bg-rose-400'
+                                }`}
+                            >
+                                {isProcessing ? <RefreshCw className="h-5 w-5 animate-spin" /> : <Check className="h-5 w-5" />}
+                                {isProcessing ? 'Processing Action...' : `Confirm ${confirmAction.requiredText}`}
+                            </button>
                         </div>
-
-                        {/* Modal Body */}
-                        <div className="p-8 space-y-6">
-                            <div className="text-center">
-                                <p className="text-slate-600 mb-2">{confirmAction.message}</p>
-                                <p className="text-lg font-bold text-slate-900 bg-slate-100 py-2 px-4 rounded-lg inline-block border border-slate-200">
-                                    {confirmAction.targetName}
-                                </p>
+                    )}
+                >
+                    <div className="space-y-8">
+                            <div className="text-center space-y-4">
+                                <p className="text-white/70 leading-relaxed text-lg">{confirmAction.message}</p>
+                                <div className="py-3 px-6 bg-white/5 border border-white/10 rounded-2xl inline-block">
+                                    <p className="text-xl font-bold text-white tracking-wide">
+                                        {confirmAction.targetName}
+                                    </p>
+                                </div>
                             </div>
 
-                            <div className="space-y-2">
-                                <label className="block text-sm font-semibold text-slate-700 text-center">
-                                    To confirm, type <span className={`font-mono font-bold px-1.5 py-0.5 rounded ${confirmAction.type === 'restore' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>{confirmAction.requiredText}</span> below:
+                            <div className="space-y-4">
+                                <label className="block text-xs font-semibold text-white/40 text-center uppercase tracking-widest">
+                                    To confirm, type <span className={`font-mono font-bold px-2 py-0.5 rounded ${confirmAction.type === 'restore' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>{confirmAction.requiredText}</span> below
                                 </label>
                                 <input
                                     type="text"
                                     value={confirmInput}
                                     onChange={(e) => setConfirmInput(e.target.value)}
                                     placeholder={confirmAction.requiredText}
-                                    className="w-full text-center text-lg tracking-widest font-mono p-3 border-2 border-slate-200 rounded-xl focus:outline-none focus:border-slate-500 transition-colors"
+                                    className={`w-full text-center text-base tracking-widest font-mono px-4 py-3 bg-black/40 border-2 ${confirmAction.type === 'restore' ? 'border-emerald-500/30 focus:border-emerald-500' : 'border-rose-500/30 focus:border-rose-500'} rounded-2xl text-white placeholder-white/5 focus:outline-none focus:ring-4 ${confirmAction.type === 'restore' ? 'focus:ring-emerald-500/10' : 'focus:ring-rose-500/10'} transition-all shadow-inner`}
                                     autoFocus
                                 />
                             </div>
 
-                            {/* Modal Actions */}
-                            <div className="flex gap-3 pt-2">
-                                <button
-                                    onClick={() => setIsConfirmModalOpen(false)}
-                                    disabled={isProcessing}
-                                    className="flex-1 py-3 text-slate-600 font-semibold hover:bg-slate-100 rounded-xl transition-colors disabled:opacity-50"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={executeConfirmAction}
-                                    disabled={confirmInput !== confirmAction.requiredText || isProcessing}
-                                    className={`flex-1 py-3 text-white font-bold rounded-xl transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed ${
-                                        confirmAction.type === 'restore'
-                                            ? 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/30'
-                                            : 'bg-rose-600 hover:bg-rose-700 shadow-rose-500/30'
-                                    }`}
-                                >
-                                    {isProcessing ? 'Processing...' : 'Confirm'}
-                                </button>
-                            </div>
-                        </div>
                     </div>
-                </div>
+                </AdminModal>
             )}
         </div>
     );
