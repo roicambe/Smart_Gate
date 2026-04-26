@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { FileText, Search, RefreshCw, Filter, Calendar, Download, FileSpreadsheet, Loader2, ChevronLeft, ChevronRight, Eye, X } from 'lucide-react';
+import { FileText, Search, RefreshCw, Filter, Calendar, Download, FileSpreadsheet, Loader2, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import jsPDF from 'jspdf';
@@ -8,6 +8,7 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { useToast } from '../toast/ToastProvider';
 import { drawInstitutionalHeader, prepareInstitutionalHeaderAssets } from '../../utils/pdfInstitutionalHeader';
+import { AdminModal } from '../common/AdminModal';
 
 // ─── Human-Readable Translator (Dual-Layer) ──────────────────────────────────
 // Layer 1: getShortSummary() — concise 3-4 word label for the table column.
@@ -836,23 +837,17 @@ export const AuditTrail = ({ branding, adminSession }) => {
 
             {/* View Details Modal */}
             {showViewModal && selectedLog && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in">
-                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
-                        <div className="bg-slate-50 border-b border-slate-200 p-6 flex justify-between items-center">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-indigo-50 rounded-xl border border-indigo-100 text-indigo-600">
-                                    <FileText className="w-5 h-5" />
-                                </div>
-                                <div>
-                                    <h2 className="text-xl font-bold text-slate-900">Audit Log Details</h2>
-                                    <p className="text-sm text-slate-500">Full record of this system change.</p>
-                                </div>
-                            </div>
-                            <button onClick={() => setShowViewModal(false)} className="text-slate-400 hover:bg-slate-200 hover:text-slate-600 p-2 rounded-xl transition-colors">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-                        <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+                <AdminModal
+                    isOpen={showViewModal}
+                    onClose={() => setShowViewModal(false)}
+                    title="Audit Log Details"
+                    subtitle="Full record of this system change."
+                    icon={<FileText className="w-5 h-5 text-slate-300" />}
+                    tone="light"
+                    size="lg"
+                    bodyClassName="space-y-6"
+                >
+                    <div className="space-y-6">
                             {/* Meta Info Grid */}
                             <div className="grid grid-cols-2 gap-y-4 gap-x-6 text-sm">
                                 <div>
@@ -954,9 +949,8 @@ export const AuditTrail = ({ branding, adminSession }) => {
                                     </div>
                                 );
                             })()}
-                        </div>
                     </div>
-                </div>
+                </AdminModal>
             )}
         </div>
     );

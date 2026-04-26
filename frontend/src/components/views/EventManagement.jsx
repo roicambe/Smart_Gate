@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Plus, Search, Edit2, Trash2, X, Check, AlertTriangle, Eye, Filter } from 'lucide-react';
+import { Calendar, Plus, Search, Edit2, Trash2, Check, AlertTriangle, Eye, Filter } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from '../toast/ToastProvider';
+import { AdminModal } from '../common/AdminModal';
 
 const EVENT_ROLE_OPTIONS = [
     { value: 'all', label: 'All Roles' },
@@ -407,23 +408,19 @@ export const EventManagement = ({ branding, adminSession }) => {
             </div>
 
             {(showRegisterModal || showEditModal) && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in">
-                    <div className="bg-black/90 backdrop-blur-3xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-5xl animate-in zoom-in-95 duration-200 overflow-hidden flex flex-col max-h-[90vh]">
-                        <div className="px-6 py-4 border-b border-white/10 flex justify-between items-center bg-black/50 backdrop-blur-md shrink-0">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-white/10 rounded-lg border border-white/20">
-                                    {showEditModal ? <Edit2 className="w-5 h-5 text-amber-400" /> : <Plus className="w-5 h-5 text-emerald-400" />}
-                                </div>
-                                <h2 className="text-xl font-bold text-white tracking-wide">{showEditModal ? 'Edit Event' : 'Add Event'}</h2>
-                            </div>
-                            <button onClick={() => { setShowRegisterModal(false); setShowEditModal(false); }} className="text-white/50 hover:text-white transition-colors bg-white/5 p-2 rounded-xl hover:bg-white/10"><X className="w-5 h-5" /></button>
-                        </div>
-
-                        <form onSubmit={showEditModal ? handleEditSubmit : handleRegisterSubmit} className="flex flex-col flex-1 overflow-hidden">
-                            <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <AdminModal
+                    isOpen={showRegisterModal || showEditModal}
+                    onClose={() => { setShowRegisterModal(false); setShowEditModal(false); }}
+                    title={showEditModal ? 'Edit Event' : 'Add Event'}
+                    icon={showEditModal ? <Edit2 className="w-5 h-5 text-amber-300" /> : <Plus className="w-5 h-5 text-emerald-300" />}
+                    size="xl"
+                    bodyClassName="p-0"
+                >
+                    <form onSubmit={showEditModal ? handleEditSubmit : handleRegisterSubmit} className="flex flex-col flex-1 overflow-hidden">
+                            <div className="flex-1">
+                                <div className="grid grid-cols-1 gap-6 pb-8 lg:grid-cols-2">
                                     {/* Left Column: Basic Info & Schedule */}
-                                    <div className="space-y-5">
+                                    <div className="space-y-4">
                                         <div className="flex items-center gap-2 mb-2">
                                             <div className="w-1 h-4 bg-emerald-500 rounded-full"></div>
                                             <h3 className="text-sm font-bold text-white/90 uppercase tracking-wider">Basic Information</h3>
@@ -506,7 +503,7 @@ export const EventManagement = ({ branding, adminSession }) => {
                                     </div>
 
                                     {/* Right Column: Targeting & Requirements */}
-                                    <div className="lg:pl-8 space-y-5">
+                                    <div className="space-y-4 lg:pl-6">
                                         <div className="flex items-center gap-2 mb-2">
                                             <div className="w-1 h-4 bg-blue-500 rounded-full"></div>
                                             <h3 className="text-sm font-bold text-white/90 uppercase tracking-wider">Targeting & Requirements</h3>
@@ -587,29 +584,25 @@ export const EventManagement = ({ branding, adminSession }) => {
                                 </div>
                             </div>
 
-                            <div className="p-6 pt-2 border-t border-white/10 bg-black/30 shrink-0">
+                            <div className="shrink-0 border-t border-white/10 px-5 pt-3">
                                 <button type="submit" className={`w-full ${showEditModal ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-[0_0_20px_rgba(245,158,11,0.2)]' : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_20px_rgba(16,185,129,0.2)]'} font-bold text-lg py-4 rounded-xl transition-all focus:outline-none focus:ring-4 focus:ring-white/40 flex justify-center items-center gap-2 hover:scale-[1.01]`}>
                                     <Check className="w-6 h-6" /> {showEditModal ? 'Save Event Configuration' : 'Create New Event'}
                                 </button>
                             </div>
                         </form>
-                    </div>
-                </div>
+                </AdminModal>
             )}
 
             {showViewModal && selectedEvent && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in">
-                    <div className="bg-white border border-slate-200 rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-                        <div className="px-8 py-6 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-blue-100 rounded-lg border border-blue-200">
-                                    <Eye className="w-5 h-5 text-blue-600" />
-                                </div>
-                                <h2 className="text-xl font-bold text-slate-900 tracking-wide">Event Details</h2>
-                            </div>
-                            <button onClick={() => setShowViewModal(false)} className="text-slate-500 hover:text-slate-900 transition-colors bg-slate-100 p-2 rounded-xl hover:bg-slate-200"><X className="w-5 h-5" /></button>
-                        </div>
-                        <div className="p-8 space-y-5">
+                <AdminModal
+                    isOpen={showViewModal}
+                    onClose={() => setShowViewModal(false)}
+                    title="Event Details"
+                    icon={<Eye className="w-5 h-5 text-slate-300" />}
+                    tone="light"
+                    size="lg"
+                >
+                    <div className="space-y-5">
                             <div>
                                 <p className="text-xs uppercase tracking-wider text-slate-500">Event Name</p>
                                 <p className="text-lg font-semibold text-slate-900">{selectedEvent.event_name}</p>
@@ -648,29 +641,33 @@ export const EventManagement = ({ branding, adminSession }) => {
                                     <p className="text-slate-800 font-medium">{selectedEvent.is_enabled ? 'Enabled' : 'Disabled'}</p>
                                 </div>
                             </div>
-                        </div>
                     </div>
-                </div>
+                </AdminModal>
             )}
 
             {showDeleteModal && selectedEvent && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in">
-                    <div className="bg-rose-950/40 backdrop-blur-2xl border border-rose-500/30 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-                        <div className="p-8 flex flex-col items-center text-center space-y-6">
-                            <div className="w-20 h-20 bg-rose-500/20 rounded-full flex items-center justify-center border-4 border-rose-500/30">
-                                <AlertTriangle className="w-10 h-10 text-rose-400" />
-                            </div>
-                            <div className="space-y-2">
-                                <h2 className="text-2xl font-bold text-white">Archive Event?</h2>
-                                <p className="text-white/70">Are you sure you want to archive <span className="text-white font-semibold">{selectedEvent.event_name}</span>? This record will be moved to the Archive Center.</p>
-                            </div>
-                            <div className="flex gap-4 w-full pt-4">
-                                <button onClick={() => setShowDeleteModal(false)} className="flex-1 py-3 px-4 bg-white/5 hover:bg-white/10 text-white font-semibold rounded-xl transition-colors border border-white/10 focus:outline-none">Cancel</button>
-                                <button onClick={confirmDelete} className="flex-1 py-3 px-4 bg-rose-500 hover:bg-rose-600 text-white font-bold rounded-xl transition-all shadow-[0_0_20px_rgba(244,63,94,0.3)] hover:shadow-[0_0_30px_rgba(244,63,94,0.5)] border border-rose-400 focus:outline-none">Archive</button>
-                            </div>
+                <AdminModal
+                    isOpen={showDeleteModal}
+                    onClose={() => setShowDeleteModal(false)}
+                    title="Archive Event?"
+                    tone="danger"
+                    icon={<AlertTriangle className="w-5 h-5 text-rose-300" />}
+                    size="md"
+                    footer={(
+                        <div className="flex gap-3">
+                            <button onClick={() => setShowDeleteModal(false)} className="flex-1 rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm font-semibold text-white hover:bg-white/10">
+                                Cancel
+                            </button>
+                            <button onClick={confirmDelete} className="flex-1 rounded-xl border border-rose-300/40 bg-rose-500 px-4 py-3 text-sm font-bold text-white hover:bg-rose-400">
+                                Archive
+                            </button>
                         </div>
-                    </div>
-                </div>
+                    )}
+                >
+                    <p className="text-center text-sm text-rose-100/85">
+                        Are you sure you want to archive <span className="font-semibold text-rose-50">{selectedEvent.event_name}</span>? This record will be moved to the Archive Center.
+                    </p>
+                </AdminModal>
             )}
         </div>
     );

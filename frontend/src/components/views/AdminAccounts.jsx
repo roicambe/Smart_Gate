@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { CheckCircle2, Edit2, KeyRound, ShieldCheck, Trash2, UserPlus, X } from 'lucide-react';
+import { CheckCircle2, Edit2, KeyRound, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
+import { AdminModal } from '../common/AdminModal';
 
 const ROLE_OPTIONS = ['System Administrator', 'Gate Supervisor'];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -288,24 +289,15 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
             </div>
 
             {showAddModal && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in">
-                    <div className="bg-black/90 backdrop-blur-3xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-2xl overflow-y-auto max-h-[90vh] animate-in zoom-in-95 duration-200">
-                        <div className="px-8 py-6 border-b border-white/10 flex items-center justify-between sticky top-0 bg-black/50 backdrop-blur-md z-10">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-white/10 rounded-lg border border-white/20">
-                                    <UserPlus className="h-5 w-5" />
-                                </div>
-                                <div>
-                                    <h2 className="text-xl font-bold tracking-wide text-white">Add New Admin/Account</h2>
-                                    <p className="text-sm text-white/60">Issue a temporary password and a verified notification email.</p>
-                                </div>
-                            </div>
-                            <button onClick={() => setShowAddModal(false)} className="text-white/50 hover:text-white transition-colors bg-white/5 p-2 rounded-xl hover:bg-white/10">
-                                <X className="h-5 w-5" />
-                            </button>
-                        </div>
-
-                        <form onSubmit={handleAdd} className="space-y-6 p-8">
+                <AdminModal
+                    isOpen={showAddModal}
+                    onClose={() => setShowAddModal(false)}
+                    title="Add New Admin/Account"
+                    subtitle="Issue a temporary password and a verified notification email."
+                    icon={<UserPlus className="h-5 w-5 text-indigo-300" />}
+                    size="lg"
+                >
+                    <form onSubmit={handleAdd} className="space-y-6">
                             <div className="grid gap-5">
                                 <div>
                                     <label className="mb-1 block text-xs font-medium text-white/60">
@@ -422,21 +414,19 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                                     <CheckCircle2 className="h-6 w-6" /> Confirm & Register Account
                                 </button>
                             </div>
-                        </form>
-                    </div>
-                </div>
+                    </form>
+                </AdminModal>
             )}
 
             {showResetModal && selectedAccount && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in">
-                    <div className="w-full max-w-sm overflow-hidden rounded-3xl border border-white/20 bg-black/90 shadow-2xl backdrop-blur-3xl animate-in zoom-in-95 duration-200">
-                        <div className="flex items-center justify-between border-b border-white/10 bg-black/50 p-6">
-                            <h2 className="text-xl font-bold tracking-wide text-white">Force Password Reset</h2>
-                            <button onClick={() => setShowResetModal(false)} className="rounded-xl bg-white/5 p-2 text-white/50 transition-colors hover:bg-white/10 hover:text-white">
-                                <X className="h-5 w-5" />
-                            </button>
-                        </div>
-                        <form onSubmit={handleResetPassword} className="space-y-6 p-8">
+                <AdminModal
+                    isOpen={showResetModal}
+                    onClose={() => setShowResetModal(false)}
+                    title="Force Password Reset"
+                    icon={<KeyRound className="h-5 w-5 text-rose-300" />}
+                    size="md"
+                >
+                    <form onSubmit={handleResetPassword} className="space-y-6">
                             <p className="mb-4 text-sm leading-relaxed text-white/70">
                                 Set a new temporary passcode for <span className="font-bold tracking-wide text-white">{selectedAccount.username}</span>. The next sign-in will require OTP activation.
                             </p>
@@ -455,29 +445,21 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                                     <KeyRound className="h-5 w-5" /> Overwrite Passcode
                                 </button>
                             </div>
-                        </form>
-                    </div>
-                </div>
+                    </form>
+                </AdminModal>
             )}
 
             {showEditModal && selectedAccount && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm animate-in fade-in">
-                    <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl animate-in zoom-in-95 duration-200">
-                        <div className="flex items-center justify-between border-b border-slate-200 bg-white px-8 py-6">
-                            <div className="flex items-center gap-3">
-                                <div className="rounded-xl border border-slate-200 bg-slate-50 p-2 text-amber-500">
-                                    <Edit2 className="h-5 w-5" />
-                                </div>
-                                <div>
-                                    <h2 className="text-xl font-bold tracking-wide text-slate-900">Edit Account Info</h2>
-                                    <p className="text-sm text-slate-500">Update identity and notification details.</p>
-                                </div>
-                            </div>
-                            <button onClick={() => setShowEditModal(false)} className="rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700">
-                                <X className="h-5 w-5" />
-                            </button>
-                        </div>
-                        <form onSubmit={handleEditInfo} className="space-y-5 p-8">
+                <AdminModal
+                    isOpen={showEditModal}
+                    onClose={() => setShowEditModal(false)}
+                    title="Edit Account Info"
+                    subtitle="Update identity and notification details."
+                    icon={<Edit2 className="h-5 w-5 text-amber-500" />}
+                    tone="light"
+                    size="md"
+                >
+                    <form onSubmit={handleEditInfo} className="space-y-5">
                             <p className="-mt-2 mb-2 text-sm text-slate-500">Password is not editable here.</p>
                             <div>
                                 <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -521,30 +503,21 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                                     <CheckCircle2 className="h-5 w-5" /> Save Changes
                                 </button>
                             </div>
-                        </form>
-                    </div>
-                </div>
+                    </form>
+                </AdminModal>
             )}
 
             {showDeleteModal && selectedAccount && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in">
-                    <div className="w-full max-w-md overflow-hidden rounded-3xl border border-rose-200 bg-white shadow-2xl animate-in zoom-in-95 duration-200">
-                        <div className="flex items-center justify-between border-b border-rose-100 bg-rose-50/70 px-8 py-6">
-                            <div className="flex items-center gap-3">
-                                <div className="rounded-xl border border-rose-200 bg-white p-2 text-rose-600">
-                                    <Trash2 className="h-5 w-5" />
-                                </div>
-                                <div>
-                                    <h2 className="text-xl font-bold tracking-wide text-slate-900">Delete Administrator Account</h2>
-                                    <p className="text-sm text-slate-500">This action permanently removes the selected account.</p>
-                                </div>
-                            </div>
-                            <button onClick={() => setShowDeleteModal(false)} className="rounded-xl p-2 text-slate-400 transition-colors hover:bg-white hover:text-slate-700">
-                                <X className="h-5 w-5" />
-                            </button>
-                        </div>
-
-                        <div className="space-y-5 p-8">
+                <AdminModal
+                    isOpen={showDeleteModal}
+                    onClose={() => setShowDeleteModal(false)}
+                    title="Delete Administrator Account"
+                    subtitle="This action permanently removes the selected account."
+                    icon={<Trash2 className="h-5 w-5 text-rose-300" />}
+                    tone="danger"
+                    size="md"
+                >
+                    <div className="space-y-5">
                             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
                                 <p className="font-semibold text-slate-900">{selectedAccount.full_name}</p>
                                 <p>{selectedAccount.username}</p>
@@ -572,9 +545,8 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                                     <Trash2 className="h-4 w-4" /> Delete Account
                                 </button>
                             </div>
-                        </div>
                     </div>
-                </div>
+                </AdminModal>
             )}
         </div>
     );
