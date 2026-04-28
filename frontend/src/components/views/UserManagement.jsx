@@ -487,7 +487,10 @@ export const UserManagement = ({ adminSession }) => {
         <div className="w-full h-full min-h-0 space-y-6 animate-in slide-in-from-bottom-4 duration-500 relative flex flex-col">
             <div className="flex justify-between items-center">
                 <div>
-                    <h1 className="text-3xl font-bold text-slate-900 mb-2">User Registry</h1>
+                    <h1 className="text-3xl font-bold text-slate-900 mb-2 flex items-center gap-3">
+                        <Users className="w-8 h-8 text-emerald-500" />
+                        User Registry
+                    </h1>
                     <p className="text-slate-500">Manage students, professors, staff, and visitors.</p>
                 </div>
                 {isSystemAdministrator && (

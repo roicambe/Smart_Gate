@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Upload, X, Save, Image as ImageIcon } from 'lucide-react';
+import { Upload, X, Save, Image as ImageIcon, ChevronDown, FileText } from 'lucide-react';
 import plpLogo from '../../../imgs/plp-logo.png';
 import pasigSeal from '../../../imgs/pasig_seal.png';
 import pasigUmaagos from '../../../imgs/pasig_umaagos.png';
+import { SettingsSectionHeader } from '../common/SettingsSectionHeader';
 
 export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, showToast }) => {
     const isSystemAdministrator = adminSession?.role === 'System Administrator';
@@ -22,6 +23,7 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
     const [secondary1Enabled, setSecondary1Enabled] = useState(true);
     const [secondary2Enabled, setSecondary2Enabled] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
+    const [isPdfSettingsOpen, setIsPdfSettingsOpen] = useState(false);
 
     useEffect(() => {
         if (branding) {
@@ -141,122 +143,89 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
         );
     }
 
+    const previewPrimaryLogo = primaryLogo || branding?.system_logo || plpLogo;
+    const previewSecondaryLogo1 = secondaryLogo1 || pasigSeal;
+    const previewSecondaryLogo2 = secondaryLogo2 || pasigUmaagos;
+    const previewSystemName = name.trim() || 'Smart Gate System';
+    const previewPrimaryCircleClass = primaryCircle ? 'rounded-full' : 'rounded-none';
+    const previewSecondary1CircleClass = secondary1Circle ? 'rounded-full' : 'rounded-none';
+    const previewSecondary2CircleClass = secondary2Circle ? 'rounded-full' : 'rounded-none';
+
     return (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 w-full max-h-[calc(100vh-120px)] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-slate-800">System Identity & Branding</h2>
-                <button
-                    onClick={handleSave}
-                    disabled={isSaving}
-                    className="flex items-center gap-2 px-5 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-70 transition-all shadow-md shadow-blue-500/10"
-                >
-                    {isSaving ? (
-                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    ) : (
-                        <Save size={16} />
-                    )}
-                    {isSaving ? 'Saving...' : 'Save Changes'}
-                </button>
-            </div>
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 w-full flex flex-col animate-in fade-in duration-500">
+            <SettingsSectionHeader
+                icon={ImageIcon}
+                title="System Identity & Branding"
+                description="Maintain university identity, header branding, and PDF report defaults."
+                iconWrapperClassName="border-violet-200 bg-violet-50 text-violet-600"
+                action={(
+                    <button
+                        onClick={handleSave}
+                        disabled={isSaving}
+                        className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-blue-700 focus:outline-none disabled:opacity-70 flex-shrink-0"
+                    >
+                        {isSaving ? (
+                            <div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin"></div>
+                        ) : (
+                            <Save size={16} />
+                        )}
+                        {isSaving ? 'Saving...' : 'Save Changes'}
+                    </button>
+                )}
+            />
 
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                {/* Left Column - Main Settings */}
-                <div className="lg:col-span-8 space-y-6">
-                    <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">
-                            System / University Name
-                        </label>
-                        <input
-                            type="text"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                            placeholder="e.g., Pamantasan ng Lungsod ni Roi"
-                        />
-                    </div>
+            <div className="flex flex-col gap-6">
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-shrink-0">
+                        <div className="lg:col-span-8 min-w-0">
+                            <section className="rounded-xl border border-slate-200 bg-slate-50/60 p-3.5 space-y-3 h-full">
+                                <div>
+                                    <h3 className="text-base font-semibold text-slate-800">University Identity</h3>
+                                    <p className="text-sm text-slate-500 mt-1">
+                                        Keep the official institution name and visual branding together.
+                                    </p>
+                                </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-2">
-                                PDF System Title
-                            </label>
-                            <input
-                                type="text"
-                                value={systemTitle}
-                                onChange={(e) => setSystemTitle(e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                                placeholder="e.g., SMART GATE"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-2">
-                                Contact Phone
-                            </label>
-                            <input
-                                type="text"
-                                value={reportPhone}
-                                onChange={(e) => setReportPhone(e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                                placeholder="e.g., (106) 628-1014"
-                            />
-                        </div>
-                    </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                        System / University Name
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={name}
+                                        onChange={(e) => setName(e.target.value)}
+                                        className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                                        placeholder="e.g., Pamantasan ng Lungsod ni Roi"
+                                    />
+                                </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-2">
-                                Contact Email
-                            </label>
-                            <input
-                                type="text"
-                                value={reportEmail}
-                                onChange={(e) => setReportEmail(e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                                placeholder="e.g., info@plpasig.edu.ph"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-2">
-                                Contact Address
-                            </label>
-                            <input
-                                type="text"
-                                value={reportAddress}
-                                onChange={(e) => setReportAddress(e.target.value)}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                                placeholder="e.g., Pasig City, Philippines"
-                            />
-                        </div>
-                    </div>
-
-                    <div className="space-y-4">
-                        <label className="block text-sm font-semibold text-slate-700">
-                            Institutional Branding Logos
-                        </label>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div className="space-y-2.5">
+                                    <label className="block text-sm font-semibold text-slate-700">
+                                        Institutional Branding Logos
+                                    </label>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
                             {/* Primary Logo */}
-                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col items-center gap-3">
+                            <div className="bg-white p-3 rounded-xl border border-slate-200 flex flex-col items-center gap-2.5">
                                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Primary (Right)</p>
                                 <div className="relative">
-                                    <div className="w-24 h-24 rounded-full overflow-hidden shadow-sm bg-white border border-slate-200 flex items-center justify-center">
+                                    <div className="w-20 h-20 rounded-full overflow-hidden shadow-sm bg-white border border-slate-200 flex items-center justify-center">
                                         {primaryLogo ? (
                                             <img src={primaryLogo} alt="Primary Logo" className="w-full h-full object-cover" />
                                         ) : (
-                                            <img src={plpLogo} alt="Default Logo" className="w-12 h-12 object-contain opacity-40 grayscale" />
+                                            <img src={plpLogo} alt="Default Logo" className="w-10 h-10 object-contain opacity-40 grayscale" />
                                         )}
                                     </div>
                                     {primaryLogo && (
                                         <button onClick={() => removeLogo('primary')} className="absolute -top-1 -right-1 bg-rose-500 text-white rounded-full p-1 shadow-md hover:bg-rose-600 transition-all"><X size={12} /></button>
                                     )}
                                 </div>
-                                <div className="flex flex-col w-full gap-2">
-                                    <label htmlFor="primary-upload" className="w-full flex items-center justify-center gap-2 py-2 bg-white hover:bg-slate-100 text-slate-600 rounded-lg text-sm font-medium cursor-pointer transition-colors border border-slate-200">
+                                <div className="flex flex-col w-full gap-1">
+                                    <label htmlFor="primary-upload" className="w-full flex items-center justify-center gap-2 py-1.5 bg-white hover:bg-slate-100 text-slate-600 rounded-lg text-sm font-medium cursor-pointer transition-colors border border-slate-200">
                                         <Upload size={16} /> Upload
                                     </label>
                                     <input type="file" id="primary-upload" accept="image/*" className="hidden" onChange={(e) => handleFileChange(e, 'primary')} />
 
-                                    <div className="flex items-center justify-between px-1 mt-1">
-                                        <span className="text-sm font-medium text-slate-500">Circle Format</span>
+                                    <div className="flex items-center justify-between px-1">
+                                        <span className="text-xs font-medium text-slate-500">Circle Format</span>
                                         <button
                                             type="button"
                                             onClick={() => setPrimaryCircle(v => !v)}
@@ -268,8 +237,8 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                                         </button>
                                     </div>
 
-                                    <div className="flex items-center justify-between px-1 mt-1">
-                                        <span className="text-sm font-medium text-slate-500">Enable Logo</span>
+                                    <div className="flex items-center justify-between px-1">
+                                        <span className="text-xs font-medium text-slate-500">Enable Logo</span>
                                         <button
                                             type="button"
                                             onClick={() => setPrimaryEnabled(v => !v)}
@@ -284,28 +253,28 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                             </div>
 
                             {/* Secondary Logo 1 */}
-                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col items-center gap-3">
+                            <div className="bg-white p-3 rounded-xl border border-slate-200 flex flex-col items-center gap-2.5">
                                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Secondary 1 (Left)</p>
                                 <div className="relative">
-                                    <div className="w-24 h-24 rounded-full overflow-hidden shadow-sm bg-white border border-slate-200 flex items-center justify-center">
+                                    <div className="w-20 h-20 rounded-full overflow-hidden shadow-sm bg-white border border-slate-200 flex items-center justify-center">
                                         {secondaryLogo1 ? (
                                             <img src={secondaryLogo1} alt="Secondary Logo 1" className="w-full h-full object-cover" />
                                         ) : (
-                                            <img src={pasigSeal} alt="Pasig Seal" className="w-12 h-12 object-contain opacity-40 grayscale" />
+                                            <img src={pasigSeal} alt="Pasig Seal" className="w-10 h-10 object-contain opacity-40 grayscale" />
                                         )}
                                     </div>
                                     {secondaryLogo1 && (
                                         <button onClick={() => removeLogo('secondary1')} className="absolute -top-1 -right-1 bg-rose-500 text-white rounded-full p-1 shadow-md hover:bg-rose-600 transition-all"><X size={12} /></button>
                                     )}
                                 </div>
-                                <div className="flex flex-col w-full gap-2">
-                                    <label htmlFor="secondary1-upload" className="w-full flex items-center justify-center gap-2 py-2 bg-white hover:bg-slate-100 text-slate-600 rounded-lg text-sm font-medium cursor-pointer transition-colors border border-slate-200">
+                                <div className="flex flex-col w-full gap-1">
+                                    <label htmlFor="secondary1-upload" className="w-full flex items-center justify-center gap-2 py-1.5 bg-white hover:bg-slate-100 text-slate-600 rounded-lg text-sm font-medium cursor-pointer transition-colors border border-slate-200">
                                         <Upload size={16} /> Upload
                                     </label>
                                     <input type="file" id="secondary1-upload" accept="image/*" className="hidden" onChange={(e) => handleFileChange(e, 'secondary1')} />
 
-                                    <div className="flex items-center justify-between px-1 mt-1">
-                                        <span className="text-sm font-medium text-slate-500">Circle Format</span>
+                                    <div className="flex items-center justify-between px-1">
+                                        <span className="text-xs font-medium text-slate-500">Circle Format</span>
                                         <button
                                             type="button"
                                             onClick={() => setSecondary1Circle(v => !v)}
@@ -317,8 +286,8 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                                         </button>
                                     </div>
 
-                                    <div className="flex items-center justify-between px-1 mt-1">
-                                        <span className="text-sm font-medium text-slate-500">Enable Logo</span>
+                                    <div className="flex items-center justify-between px-1">
+                                        <span className="text-xs font-medium text-slate-500">Enable Logo</span>
                                         <button
                                             type="button"
                                             onClick={() => setSecondary1Enabled(v => !v)}
@@ -333,28 +302,28 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                             </div>
 
                             {/* Secondary Logo 2 */}
-                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col items-center gap-3">
+                            <div className="bg-white p-3 rounded-xl border border-slate-200 flex flex-col items-center gap-2.5">
                                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Secondary 2 (Middle)</p>
                                 <div className="relative">
-                                    <div className="w-24 h-24 rounded-full overflow-hidden shadow-sm bg-white border border-slate-200 flex items-center justify-center">
+                                    <div className="w-20 h-20 rounded-full overflow-hidden shadow-sm bg-white border border-slate-200 flex items-center justify-center">
                                         {secondaryLogo2 ? (
                                             <img src={secondaryLogo2} alt="Secondary Logo 2" className="w-full h-full object-cover" />
                                         ) : (
-                                            <img src={pasigUmaagos} alt="Pasig Umaagos" className="w-12 h-12 object-contain opacity-40 grayscale" />
+                                            <img src={pasigUmaagos} alt="Pasig Umaagos" className="w-10 h-10 object-contain opacity-40 grayscale" />
                                         )}
                                     </div>
                                     {secondaryLogo2 && (
                                         <button onClick={() => removeLogo('secondary2')} className="absolute -top-1 -right-1 bg-rose-500 text-white rounded-full p-1 shadow-md hover:bg-rose-600 transition-all"><X size={12} /></button>
                                     )}
                                 </div>
-                                <div className="flex flex-col w-full gap-2">
-                                    <label htmlFor="secondary2-upload" className="w-full flex items-center justify-center gap-2 py-2 bg-white hover:bg-slate-100 text-slate-600 rounded-lg text-sm font-medium cursor-pointer transition-colors border border-slate-200">
+                                <div className="flex flex-col w-full gap-1">
+                                    <label htmlFor="secondary2-upload" className="w-full flex items-center justify-center gap-2 py-1.5 bg-white hover:bg-slate-100 text-slate-600 rounded-lg text-sm font-medium cursor-pointer transition-colors border border-slate-200">
                                         <Upload size={16} /> Upload
                                     </label>
                                     <input type="file" id="secondary2-upload" accept="image/*" className="hidden" onChange={(e) => handleFileChange(e, 'secondary2')} />
 
-                                    <div className="flex items-center justify-between px-1 mt-1">
-                                        <span className="text-sm font-medium text-slate-500">Circle Format</span>
+                                    <div className="flex items-center justify-between px-1">
+                                        <span className="text-xs font-medium text-slate-500">Circle Format</span>
                                         <button
                                             type="button"
                                             onClick={() => setSecondary2Circle(v => !v)}
@@ -366,8 +335,8 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                                         </button>
                                     </div>
 
-                                    <div className="flex items-center justify-between px-1 mt-1">
-                                        <span className="text-sm font-medium text-slate-500">Enable Logo</span>
+                                    <div className="flex items-center justify-between px-1">
+                                        <span className="text-xs font-medium text-slate-500">Enable Logo</span>
                                         <button
                                             type="button"
                                             onClick={() => setSecondary2Enabled(v => !v)}
@@ -380,40 +349,176 @@ export const SystemBrandingPanel = ({ branding, fetchBranding, adminSession, sho
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                </div>
+                                    </div>
+                                </div>
 
-                {/* Right Column - Help & Info */}
-                <div className="lg:col-span-4 flex flex-col gap-4">
-                    <div className="bg-blue-50/50 p-5 rounded-xl border border-blue-100 h-full">
-                        <h3 className="text-sm font-bold text-blue-800 uppercase tracking-widest mb-3 flex items-center gap-2">
-                            <ImageIcon size={16} /> Header Layout
-                        </h3>
-                        <div className="text-sm text-slate-600 leading-relaxed space-y-3">
-                            <span>The logos in the application header are arranged from left to right as described below:</span>
-                            <div className="mt-4 space-y-2">
-                                <div className="flex items-center gap-2">
-                                    <span className="w-5 h-5 flex items-center justify-center bg-blue-600 text-white text-xs rounded-full font-bold">1</span>
-                                    <span className="font-semibold text-slate-800 text-sm">Secondary Logo 1</span>
+                            </section>
+                        </div>
+
+                        <div className="lg:col-span-4 min-w-0">
+                            <aside className="rounded-xl border border-blue-100 bg-blue-50/60 p-3.5 h-full flex flex-col">
+                                <div className="mb-2.5">
+                                    <h3 className="text-sm font-bold text-blue-800 uppercase tracking-widest flex items-center gap-2">
+                                        <ImageIcon size={16} /> Header Branding Layout
+                                    </h3>
+                                    <p className="mt-1 text-xs text-slate-600">
+                                        Preview the current header arrangement.
+                                    </p>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="w-5 h-5 flex items-center justify-center bg-blue-600 text-white text-xs rounded-full font-bold">2</span>
-                                    <span className="font-semibold text-slate-800 text-sm">Secondary Logo 2</span>
+
+                                <div className="flex-1 flex flex-col gap-2.5">
+                                    <div className="rounded-xl border border-slate-200 bg-slate-900 p-2.5 shadow-sm">
+                                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                                            Header Preview
+                                        </div>
+                                        <div className="mt-1.5 flex items-center gap-2 overflow-hidden rounded-lg border border-white/10 bg-white/5 px-2 py-1.5">
+                                            <div className="flex items-center gap-2 flex-shrink-0">
+                                                {branding?.secondary_logo_1_enabled !== false && (
+                                                    <div className={`h-7 w-7 overflow-hidden bg-white/95 flex items-center justify-center ${previewSecondary1CircleClass}`}>
+                                                        <img
+                                                            src={previewSecondaryLogo1}
+                                                            alt="Secondary Logo 1 preview"
+                                                            className={`h-full w-full ${secondary1Circle ? 'object-cover' : 'object-contain'}`}
+                                                        />
+                                                    </div>
+                                                )}
+                                                {branding?.secondary_logo_2_enabled !== false && (
+                                                    <div className={`h-7 w-7 overflow-hidden bg-white/95 flex items-center justify-center ${previewSecondary2CircleClass}`}>
+                                                        <img
+                                                            src={previewSecondaryLogo2}
+                                                            alt="Secondary Logo 2 preview"
+                                                            className={`h-full w-full ${secondary2Circle ? 'object-cover' : 'object-contain'}`}
+                                                        />
+                                                    </div>
+                                                )}
+                                                {branding?.primary_logo_enabled !== false && (
+                                                    <div className={`h-7 w-7 overflow-hidden bg-white/95 flex items-center justify-center ${previewPrimaryCircleClass}`}>
+                                                        <img
+                                                            src={previewPrimaryLogo}
+                                                            alt="Primary Logo preview"
+                                                            className={`h-full w-full ${primaryCircle ? 'object-cover' : 'object-contain'}`}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="min-w-0">
+                                                <div className="truncate text-xs font-semibold text-white">
+                                                    {previewSystemName}
+                                                </div>
+                                                <div className="text-[11px] text-slate-400">
+                                                    Left to right arrangement
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="rounded-xl border border-blue-100 bg-white/80 p-2.5">
+                                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-blue-700">
+                                            Logo Order
+                                        </div>
+                                        <div className="mt-2 space-y-1">
+                                            <div className="flex items-center gap-2.5 rounded-lg bg-slate-50 px-2.5 py-1.5">
+                                                <span className="w-5.5 h-5.5 flex items-center justify-center bg-blue-600 text-white text-xs rounded-full font-bold">1</span>
+                                                <span className="font-semibold text-slate-800 text-xs">Secondary Logo 1</span>
+                                            </div>
+                                            <div className="flex items-center gap-2.5 rounded-lg bg-slate-50 px-2.5 py-1.5">
+                                                <span className="w-5.5 h-5.5 flex items-center justify-center bg-blue-600 text-white text-xs rounded-full font-bold">2</span>
+                                                <span className="font-semibold text-slate-800 text-xs">Secondary Logo 2</span>
+                                            </div>
+                                            <div className="flex items-center gap-2.5 rounded-lg bg-slate-50 px-2.5 py-1.5">
+                                                <span className="w-5.5 h-5.5 flex items-center justify-center bg-blue-600 text-white text-xs rounded-full font-bold">3</span>
+                                                <span className="font-semibold text-slate-800 text-xs">Primary Logo</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="mt-auto rounded-xl border border-blue-100 bg-white/70 px-3 py-2">
+                                        <p className="text-[11px] text-slate-500">
+                                            Upload PNG or JPG files up to 2MB. Circle format clips each logo directly in the application header.
+                                        </p>
+                                    </div>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="w-5 h-5 flex items-center justify-center bg-blue-600 text-white text-xs rounded-full font-bold">3</span>
-                                    <span className="font-semibold text-slate-800 text-sm">Primary Logo</span>
-                                </div>
-                            </div>
-                            <div className="mt-6 pt-4 border-t border-blue-100">
-                                <p className="text-xs text-slate-500 italic">
-                                    Max file size: 2MB (PNG/JPG). Toggles enable circular clipping for Each logo.
-                                </p>
+                            </aside>
+                        </div>
+                        </div>
+
+                        <div className="min-w-0">
+                            <div className="w-full rounded-xl border border-slate-200 bg-white overflow-hidden">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsPdfSettingsOpen((prev) => !prev)}
+                                    className={`w-full px-4 py-3.5 bg-slate-50/80 flex items-center justify-between text-left ${isPdfSettingsOpen ? 'border-b border-slate-200' : ''}`}
+                                >
+                                    <div className="flex items-center gap-3 min-w-0">
+                                        <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center flex-shrink-0">
+                                            <FileText size={16} />
+                                        </div>
+                                        <div className="min-w-0">
+                                            <h3 className="text-base font-semibold text-slate-800">PDF Settings</h3>
+                                            <p className="text-sm text-slate-500 truncate">Report title and contact details used in generated PDFs.</p>
+                                        </div>
+                                    </div>
+                                    <ChevronDown size={18} className={`text-slate-500 transition-transform flex-shrink-0 ${isPdfSettingsOpen ? 'rotate-180' : ''}`} />
+                                </button>
+
+                                {isPdfSettingsOpen && (
+                                    <div className="p-8 space-y-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                            PDF Title
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={systemTitle}
+                                            onChange={(e) => setSystemTitle(e.target.value)}
+                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                                            placeholder="e.g., SMART GATE"
+                                        />
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                                Contact Phone
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={reportPhone}
+                                                onChange={(e) => setReportPhone(e.target.value)}
+                                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                                                placeholder="e.g., (106) 628-1014"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                                Contact Email
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={reportEmail}
+                                                onChange={(e) => setReportEmail(e.target.value)}
+                                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                                                placeholder="e.g., info@plpasig.edu.ph"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                            Contact Address
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={reportAddress}
+                                            onChange={(e) => setReportAddress(e.target.value)}
+                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                                            placeholder="e.g., Pasig City, Philippines"
+                                        />
+                                    </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
-                    </div>
-                </div>
             </div>
         </div>
     );
