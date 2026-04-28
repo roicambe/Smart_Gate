@@ -332,7 +332,7 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
     const secondaryLogo1 = (branding && branding.secondary_logo_1 && branding.secondary_logo_1 !== "") ? branding.secondary_logo_1 : pasigSeal;
     const secondaryLogo2 = (branding && branding.secondary_logo_2 && branding.secondary_logo_2 !== "") ? branding.secondary_logo_2 : pasigUmaagos;
     const systemName = (branding && branding.system_name) ? branding.system_name : "Smart Gate System";
-    
+
     // Individual Circle Formatting
     const primaryCircleClass = branding?.primary_circle ? "rounded-full" : "rounded-none";
     const secondary1CircleClass = branding?.secondary1_circle ? "rounded-full" : "rounded-none";
@@ -441,7 +441,7 @@ const HeaderBar = ({ setView, isAdminLoggedIn, setIsAdminLoggedIn, branding, onA
                                     </p>
                                 </div>
                             </div>
-                            
+
                             {/* Decorative Elements */}
                             <div className="absolute inset-0 bg-gradient-to-br from-brand-600/10 to-transparent pointer-events-none" />
                             <div className="absolute -top-32 -left-32 h-80 w-80 rounded-full bg-brand-500/10 blur-3xl pointer-events-none" />

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Settings } from 'lucide-react';
 import { MyAccount } from './MyAccount';
 import { AdminAccounts } from './AdminAccounts';
 import { SystemBrandingPanel } from './SystemBrandingPanel';
@@ -18,7 +19,10 @@ export const SystemSettings = ({ setIsAdminLoggedIn, setView, adminSession, bran
 
             <div className="flex justify-between items-center mb-2">
                 <div>
-                    <h1 className="text-3xl font-bold text-slate-900 mb-2">System Settings</h1>
+                    <h1 className="text-3xl font-bold text-slate-900 mb-2 flex items-center gap-3">
+                        <Settings className="w-8 h-8 text-emerald-500" />
+                        System Settings
+                    </h1>
                     <p className="text-slate-500">Manage administrator credentials and system configurations.</p>
                 </div>
             </div>
@@ -60,7 +64,7 @@ export const SystemSettings = ({ setIsAdminLoggedIn, setView, adminSession, bran
                 </div>
             </div>
 
-            <div className="flex-1 min-h-0 relative">
+            <div className="flex-1 min-h-0 relative overflow-y-auto pr-1">
                 {activeTab === 'my_account' && (
                     <div className="space-y-6">
                         <MyAccount adminSession={adminSession} setIsAdminLoggedIn={setIsAdminLoggedIn} setView={setView} showToast={notify} />

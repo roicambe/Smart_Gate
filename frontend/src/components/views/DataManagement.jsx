@@ -96,6 +96,7 @@ export const DataManagement = ({ adminSession }) => {
                     setTimeout(() => window.location.reload(), 3000);
                 }
             });
+            setConfirmInput('');
             setIsConfirmModalOpen(true);
         } catch (error) {
             showToast({ type: 'error', message: error.toString() });
@@ -153,6 +154,17 @@ export const DataManagement = ({ adminSession }) => {
         } finally {
             setIsProcessing(false);
         }
+    };
+    const canSubmitConfirmAction =
+        !!confirmAction &&
+        confirmInput === confirmAction.requiredText &&
+        !isProcessing;
+
+    const handleConfirmInputKeyDown = (event) => {
+        if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+        event.preventDefault();
+        if (!canSubmitConfirmAction) return;
+        executeConfirmAction();
     };
 
     const formatBytes = (bytes) => {
@@ -386,7 +398,10 @@ export const DataManagement = ({ adminSession }) => {
             {/* Header */}
             <div className="flex justify-between items-center mb-6">
                 <div>
-                    <h1 className="text-3xl font-bold text-slate-900 mb-2">Data Management</h1>
+                    <h1 className="text-3xl font-bold text-slate-900 mb-2 flex items-center gap-3">
+                        <Database className="w-8 h-8 text-emerald-500" />
+                        Data Management
+                    </h1>
                     <p className="text-slate-500">Manage archived records, system backups, and database integrity.</p>
                 </div>
                 <button onClick={loadAllData} className="p-2 bg-white text-slate-600 hover:bg-slate-100 border border-slate-200 rounded-lg shadow-sm transition-colors">
@@ -548,7 +563,7 @@ export const DataManagement = ({ adminSession }) => {
                             </button>
                             <button
                                 onClick={executeConfirmAction}
-                                disabled={confirmInput !== confirmAction.requiredText || isProcessing}
+                                disabled={!canSubmitConfirmAction}
                                 className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition-all disabled:cursor-not-allowed disabled:opacity-50 ${
                                     confirmAction.type === 'restore'
                                         ? 'bg-emerald-500 text-black hover:bg-emerald-400'
@@ -579,6 +594,7 @@ export const DataManagement = ({ adminSession }) => {
                                     type="text"
                                     value={confirmInput}
                                     onChange={(e) => setConfirmInput(e.target.value)}
+                                    onKeyDown={handleConfirmInputKeyDown}
                                     placeholder={confirmAction.requiredText}
                                     className={`w-full text-center text-base tracking-widest font-mono px-4 py-3 bg-black/40 border-2 ${confirmAction.type === 'restore' ? 'border-emerald-500/30 focus:border-emerald-500' : 'border-rose-500/30 focus:border-rose-500'} rounded-2xl text-white placeholder-white/5 focus:outline-none focus:ring-4 ${confirmAction.type === 'restore' ? 'focus:ring-emerald-500/10' : 'focus:ring-rose-500/10'} transition-all shadow-inner`}
                                     autoFocus

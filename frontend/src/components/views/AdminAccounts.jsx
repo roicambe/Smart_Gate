@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { CheckCircle2, Edit2, KeyRound, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
 import { AdminModal } from '../common/AdminModal';
+import { SettingsSectionHeader } from '../common/SettingsSectionHeader';
 
 const ROLE_OPTIONS = ['System Administrator', 'Gate Supervisor'];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -186,24 +187,21 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
     };
 
     return (
-        <div className="relative flex min-h-0 w-full flex-col space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="mb-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <div className="mb-1 flex h-10 w-10 items-center justify-center rounded-lg border border-indigo-100 bg-indigo-50 text-indigo-600">
-                        <ShieldCheck className="h-5 w-5" />
-                    </div>
-                    <div>
-                        <h2 className="text-xl font-bold tracking-wide text-slate-900">Administrator Registry</h2>
-                        <p className="text-sm text-slate-500">Oversee platform supervisors and configure role assignments.</p>
-                    </div>
-                </div>
-                <button
-                    onClick={() => setShowAddModal(true)}
-                    className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 font-bold text-white shadow-sm transition-all hover:bg-indigo-700 focus:outline-none"
-                >
-                    <UserPlus className="h-4 w-4" /> New Account
-                </button>
-            </div>
+        <div className="relative flex min-h-0 w-full flex-col space-y-6 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+            <SettingsSectionHeader
+                icon={ShieldCheck}
+                title="Administrator Registry"
+                description="Oversee platform supervisors and configure role assignments."
+                iconWrapperClassName="border-emerald-200 bg-emerald-50 text-emerald-600"
+                action={(
+                    <button
+                        onClick={() => setShowAddModal(true)}
+                        className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-indigo-700 focus:outline-none"
+                    >
+                        <UserPlus className="h-5 w-5" /> New Account
+                    </button>
+                )}
+            />
 
             <div className="min-h-0 w-full overflow-y-auto rounded-xl border border-slate-200">
                 <table className="w-full text-left text-sm text-slate-600">
@@ -455,51 +453,55 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                     onClose={() => setShowEditModal(false)}
                     title="Edit Account Info"
                     subtitle="Update identity and notification details."
-                    icon={<Edit2 className="h-5 w-5 text-amber-500" />}
-                    tone="light"
+                    icon={<Edit2 className="h-5 w-5 text-amber-300" />}
                     size="md"
                 >
-                    <form onSubmit={handleEditInfo} className="space-y-5">
-                            <p className="-mt-2 mb-2 text-sm text-slate-500">Password is not editable here.</p>
-                            <div>
-                                <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                    Username <span className="ml-0.5 text-rose-500">*</span>
-                                </label>
-                                <input
-                                    required
-                                    type="text"
-                                    value={editForm.username}
-                                    onChange={(event) => setEditForm({ ...editForm, username: event.target.value })}
-                                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-800 outline-none transition focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
-                                />
+                    <form onSubmit={handleEditInfo} className="space-y-6">
+                            <p className="-mt-2 mb-2 text-sm text-white/50">Password is not editable here.</p>
+                            <div className="grid gap-5">
+                                <div>
+                                    <label className="mb-1 block text-xs font-medium text-white/60">
+                                        Username <span className="ml-0.5 text-rose-500">*</span>
+                                    </label>
+                                    <input
+                                        required
+                                        type="text"
+                                        value={editForm.username}
+                                        onChange={(event) => setEditForm({ ...editForm, username: event.target.value })}
+                                        className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white placeholder-white/20 focus:outline-none focus:ring-2 focus:ring-white/20"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="mb-1 block text-xs font-medium text-white/60">
+                                        Name <span className="ml-0.5 text-rose-500">*</span>
+                                    </label>
+                                    <input
+                                        required
+                                        type="text"
+                                        value={editForm.full_name}
+                                        onChange={(event) => setEditForm({ ...editForm, full_name: event.target.value })}
+                                        className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white placeholder-white/20 focus:outline-none focus:ring-2 focus:ring-white/20"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="mb-1 block text-xs font-medium text-white/60">
+                                        Contact/Notification Email <span className="ml-0.5 text-rose-500">*</span>
+                                    </label>
+                                    <input
+                                        required
+                                        type="email"
+                                        value={editForm.email}
+                                        onChange={(event) => setEditForm({ ...editForm, email: event.target.value })}
+                                        className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-white placeholder-white/20 focus:outline-none focus:ring-2 focus:ring-white/20"
+                                        placeholder="security.officer@plp.edu.ph"
+                                    />
+                                </div>
                             </div>
-                            <div>
-                                <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                    Name <span className="ml-0.5 text-rose-500">*</span>
-                                </label>
-                                <input
-                                    required
-                                    type="text"
-                                    value={editForm.full_name}
-                                    onChange={(event) => setEditForm({ ...editForm, full_name: event.target.value })}
-                                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-800 outline-none transition focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
-                                />
-                            </div>
-                            <div>
-                                <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                    Contact/Notification Email <span className="ml-0.5 text-rose-500">*</span>
-                                </label>
-                                <input
-                                    required
-                                    type="email"
-                                    value={editForm.email}
-                                    onChange={(event) => setEditForm({ ...editForm, email: event.target.value })}
-                                    className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-800 outline-none transition focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
-                                    placeholder="security.officer@plp.edu.ph"
-                                />
-                            </div>
-                            <div className="pt-4">
-                                <button type="submit" className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500 py-3.5 font-bold text-slate-950 transition-all hover:bg-amber-400 focus:outline-none focus:ring-4 focus:ring-amber-100">
+                            <div className="pt-2">
+                                <button
+                                    type="submit"
+                                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500 py-3.5 font-bold text-slate-950 shadow-[0_0_20px_rgba(245,158,11,0.2)] transition-all hover:bg-amber-400 hover:shadow-[0_0_30px_rgba(245,158,11,0.4)] focus:outline-none focus:ring-4 focus:ring-white/40 hover:scale-[1.01]"
+                                >
                                     <CheckCircle2 className="h-5 w-5" /> Save Changes
                                 </button>
                             </div>

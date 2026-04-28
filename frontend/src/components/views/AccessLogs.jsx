@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
-    Search, Filter, RefreshCw, Calendar, ArrowUpRight, ArrowDownLeft, Download, FileText, FileSpreadsheet, Loader2, ChevronLeft, ChevronRight
+    History, Search, Filter, RefreshCw, Calendar, ArrowUpRight, ArrowDownLeft, Download, FileText, FileSpreadsheet, Loader2, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
@@ -641,7 +641,8 @@ export const AccessLogs = ({ branding, adminSession }) => {
             {/* Header Title Section */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-slate-900">
+                    <h1 className="text-3xl font-bold text-slate-900 mb-2 flex items-center gap-3">
+                        <History className="w-8 h-8 text-emerald-500" />
                         {activeTab === 'gateLogs' ? 'General Gate Logs' : 'Event Attendance'}
                     </h1>
                     <p className="text-slate-500 mt-1">
@@ -763,20 +764,6 @@ export const AccessLogs = ({ branding, adminSession }) => {
                     {/* Academic Filters & Event Filter (Only for Event Logs) */}
                     {activeTab === 'eventLogs' && (
                         <>
-                            {/* Event Filter */}
-                            <select
-                                value={eventFilter}
-                                onChange={(e) => setEventFilter(e.target.value)}
-                                className="bg-slate-50 border border-slate-200 text-slate-700 sm:text-sm rounded-lg focus:ring-slate-500 focus:border-slate-500 block w-full sm:w-auto p-2 outline-none"
-                            >
-                                <option value="All">All Events</option>
-                                {uniqueEvents.map(eventName => (
-                                    <option key={eventName} value={eventName}>
-                                        {eventName}
-                                    </option>
-                                ))}
-                            </select>
-
                             {/* Program Filter */}
                             <select
                                 value={programFilter}
@@ -788,6 +775,20 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                 {filteredPrograms.map(prog => (
                                     <option key={prog.program_id} value={prog.program_id}>
                                         {prog.program_code}
+                                    </option>
+                                ))}
+                            </select>
+
+                            {/* Event Filter */}
+                            <select
+                                value={eventFilter}
+                                onChange={(e) => setEventFilter(e.target.value)}
+                                className="bg-slate-50 border border-slate-200 text-slate-700 sm:text-sm rounded-lg focus:ring-slate-500 focus:border-slate-500 block w-full sm:w-auto p-2 outline-none"
+                            >
+                                <option value="All">All Events</option>
+                                {uniqueEvents.map(eventName => (
+                                    <option key={eventName} value={eventName}>
+                                        {eventName}
                                     </option>
                                 ))}
                             </select>
