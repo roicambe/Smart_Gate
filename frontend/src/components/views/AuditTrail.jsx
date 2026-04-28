@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { FileText, Search, RefreshCw, Filter, Calendar, Download, FileSpreadsheet, Loader2, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
+import { ShieldAlert, FileText, Search, RefreshCw, Filter, Calendar, Download, FileSpreadsheet, Loader2, ChevronLeft, ChevronRight, Eye } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import jsPDF from 'jspdf';
@@ -618,7 +618,7 @@ export const AuditTrail = ({ branding, adminSession }) => {
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900 flex items-center gap-3">
-                        <FileText className="w-8 h-8 text-indigo-600" />
+                        <ShieldAlert className="w-8 h-8 text-emerald-500" />
                         Audit Trail
                     </h1>
                     <p className="text-slate-500 mt-1">Read-only log of all system configuration changes.</p>
