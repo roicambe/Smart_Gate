@@ -3,6 +3,7 @@ import { Keyboard, QrCode, ScanFace, Users, LogIn, LogOut, ChevronLeft, ArrowRig
 import { invoke } from "@tauri-apps/api/core";
 import { QRScannerOverlay } from "./QRScannerOverlay";
 import { VisitorPassPrinter } from "./VisitorPassPrinter";
+import { FaceScannerModal } from "./FaceScannerModal";
 import { extractScanId } from "../utils/patternHunter";
 import { useGhostScannerListener } from "../hooks/useGhostScannerListener";
 import { useToast } from "./toast/ToastProvider";
@@ -68,6 +69,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
     const [showVisitorModal, setShowVisitorModal] = useState(false);
     const [manualId, setManualId] = useState("");
     const [showQRScanner, setShowQRScanner] = useState(false);
+    const [showFaceScanner, setShowFaceScanner] = useState(false);
     const [showPrintModal, setShowPrintModal] = useState(false);
     const [printPassData, setPrintPassData] = useState(null);
     const [activeScanCard, setActiveScanCard] = useState(null);
@@ -76,7 +78,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
     const scanCardTimerRef = useRef(null);
     const scanCardRequestIdRef = useRef(0);
     const { showSuccess, showError, showWarning } = useToast();
-    const isAnyModalOpen = showManualModal || showVisitorModal || showQRScanner || showPrintModal;
+    const isAnyModalOpen = showManualModal || showVisitorModal || showQRScanner || showFaceScanner || showPrintModal;
 
     const [visitorForm, setVisitorForm] = useState({
         firstName: '',
@@ -412,7 +414,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
 
                     {/* Face Recognition */}
                     <button 
-                        onClick={() => showWarning("Hardware Integration in Progress: Please use Manual ID for now.")}
+                        onClick={() => setShowFaceScanner(true)}
                         className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]">
                         <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
                             <ScanFace className="w-12 h-12 drop-shadow-md" />
@@ -475,7 +477,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
                     {/* Face Recognition (Bottom Row) */}
                     <div className="w-full sm:w-1/2 mx-auto justify-self-center">
                         <button 
-                            onClick={() => showWarning("Hardware Integration in Progress: Please use Manual ID for now.")}
+                            onClick={() => setShowFaceScanner(true)}
                             className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]">
                             <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
                                 <ScanFace className="w-12 h-12 drop-shadow-md" />
@@ -669,6 +671,36 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
                         } catch (error) {
                             console.error(error);
                             showError("System Error. Failed to process ID.");
+                        }
+                    }}
+                />
+            )}
+
+            {/* Face Scanner Modal */}
+            {showFaceScanner && (
+                <FaceScannerModal
+                    scannerFunction={isEntrance ? 'entrance' : 'exit'}
+                    onClose={() => setShowFaceScanner(false)}
+                    onIdentify={async (scannedId) => {
+                        setShowFaceScanner(false);
+                        try {
+                            const result = await invoke('manual_id_entry', {
+                                idNumber: scannedId,
+                                scannerFunction: isEntrance ? 'entrance' : 'exit'
+                            });
+
+                            if (result.success) {
+                                await showScanSuccessFeedback({
+                                    result,
+                                    scannedId,
+                                    modalActive: false
+                                });
+                            } else {
+                                showError(result.message);
+                            }
+                        } catch (error) {
+                            console.error(error);
+                            showError("System Error. Failed to process identified face.");
                         }
                     }}
                 />

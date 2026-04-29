@@ -1099,35 +1099,35 @@ export const UserManagement = ({ adminSession, branding }) => {
                     isOpen={showViewModal}
                     onClose={() => setShowViewModal(false)}
                     title="Profile Details"
-                    icon={<Eye className="w-5 h-5 text-slate-300" />}
-                    tone="light"
+                    icon={<Eye className="w-5 h-5 text-white" />}
+                    tone="default"
                     size="md"
                 >
                     <div className="space-y-6">
-                            <div className="flex items-center gap-4 border-b border-slate-100 pb-6">
-                                <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-2xl font-bold">
+                            <div className="flex items-center gap-4 border-b border-white/10 pb-6">
+                                <div className="w-16 h-16 bg-blue-500/20 rounded-full border border-blue-400/30 flex items-center justify-center text-blue-300 text-2xl font-bold">
                                     {selectedUser.first_name.charAt(0)}
                                 </div>
                                 <div>
-                                    <h3 className="text-lg font-bold text-slate-900">{selectedUser.first_name} {selectedUser.middle_name} {selectedUser.last_name || ''}</h3>
-                                    <p className="text-sm font-mono text-slate-500">{selectedUser.id_number}</p>
+                                    <h3 className="text-lg font-bold text-white">{selectedUser.first_name} {selectedUser.middle_name} {selectedUser.last_name || ''}</h3>
+                                    <p className="text-sm font-mono text-white/50">{selectedUser.id_number}</p>
                                 </div>
                             </div>
                             <div className="grid grid-cols-2 gap-y-4 gap-x-6 text-sm">
-                                <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Role</p><p className="font-semibold text-slate-900 capitalize">{activeRole}</p></div>
+                                <div><p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Role</p><p className="font-semibold text-white capitalize">{activeRole}</p></div>
                                 {activeRole === 'visitor' ? (
                                     <>
-                                        <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Contact Number</p><p className="font-semibold text-slate-900">{selectedUser.contact_number || 'N/A'}</p></div>
-                                        <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Email</p><p className="font-semibold text-slate-900">{selectedUser.email || 'N/A'}</p></div>
-                                        <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Purpose</p><p className="font-semibold text-slate-900">{selectedUser.purpose_of_visit}</p></div>
-                                        <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Person to Visit</p><p className="font-semibold text-slate-900">{selectedUser.person_to_visit || 'N/A'}</p></div>
-                                        <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Reg. Date/Time</p><p className="font-semibold text-slate-900">{selectedUser.created_at ? new Date(selectedUser.created_at).toLocaleString() : '--'}</p></div>
-                                        <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Exit Time</p><p className="font-semibold text-slate-900">{selectedUser.time_out ? new Date(selectedUser.time_out).toLocaleString() : '--'}</p></div>
+                                        <div><p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Contact Number</p><p className="font-semibold text-white">{selectedUser.contact_number || 'N/A'}</p></div>
+                                        <div><p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Email</p><p className="font-semibold text-white">{selectedUser.email || 'N/A'}</p></div>
+                                        <div><p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Purpose</p><p className="font-semibold text-white">{selectedUser.purpose_of_visit}</p></div>
+                                        <div><p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Person to Visit</p><p className="font-semibold text-white">{selectedUser.person_to_visit || 'N/A'}</p></div>
+                                        <div><p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Reg. Date/Time</p><p className="font-semibold text-white">{selectedUser.created_at ? new Date(selectedUser.created_at).toLocaleString() : '--'}</p></div>
+                                        <div><p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Exit Time</p><p className="font-semibold text-white">{selectedUser.time_out ? new Date(selectedUser.time_out).toLocaleString() : '--'}</p></div>
                                         {selectedUser.email && (
-                                            <div className="col-span-2 mt-4 pt-4 border-t border-slate-100 flex justify-center">
+                                            <div className="col-span-2 mt-4 pt-4 border-t border-white/10 flex justify-center">
                                                 <button
                                                     onClick={() => handleSendVisitorEmail(selectedUser.id_number)}
-                                                    className="flex items-center gap-2 bg-emerald-600 text-white hover:bg-emerald-700 px-6 py-2.5 rounded-xl font-bold shadow-md transition-all active:scale-95"
+                                                    className="flex items-center gap-2 bg-emerald-600 text-white hover:bg-emerald-500 px-6 py-2.5 rounded-xl font-bold shadow-lg transition-all active:scale-95 shadow-emerald-600/20"
                                                 >
                                                     <Mail className="w-5 h-5" /> Send QR Digital Pass
                                                 </button>
@@ -1138,20 +1138,23 @@ export const UserManagement = ({ adminSession, branding }) => {
                                     <>
                                         {activeRole === 'student' && (
                                             <>
-                                                <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Program</p><p className="font-semibold text-slate-900">{selectedUser.program_name}</p></div>
-                                                <div><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Year Level</p><p className="font-semibold text-slate-900">{selectedUser.year_level}</p></div>
-                                                <div className="col-span-2"><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Classification</p><p className={`font-bold ${selectedUser.is_irregular ? 'text-amber-600' : 'text-slate-900'}`}>{selectedUser.is_irregular ? 'Irregular' : 'Regular'}</p></div>
+                                                <div><p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Program</p><p className="font-semibold text-white">{selectedUser.program_name}</p></div>
+                                                <div><p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Year Level</p><p className="font-semibold text-white">{selectedUser.year_level}</p></div>
+                                                <div className="col-span-2"><p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Classification</p><p className={`font-bold ${selectedUser.is_irregular ? 'text-amber-400' : 'text-white'}`}>{selectedUser.is_irregular ? 'Irregular' : 'Regular'}</p></div>
                                             </>
                                         )}
                                         {(activeRole === 'professor' || activeRole === 'staff') && (
                                             <>
-                                                <div className="col-span-2"><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Department</p><p className="font-semibold text-slate-900">{selectedUser.department_name}</p></div>
-                                                <div className="col-span-2"><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Position/Title</p><p className="font-semibold text-slate-900">{selectedUser.position_title}</p></div>
+                                                <div className="col-span-2"><p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Department</p><p className="font-semibold text-white">{selectedUser.department_name}</p></div>
+                                                <div className="col-span-2"><p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Position/Title</p><p className="font-semibold text-white">{selectedUser.position_title}</p></div>
                                             </>
                                         )}
-                                        <div className="col-span-2"><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Email</p><p className="font-semibold text-slate-900">{selectedUser.email || 'N/A'}</p></div>
-                                        <div className="col-span-2"><p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Contact Number</p><p className="font-semibold text-slate-900">{selectedUser.contact_number || 'N/A'}</p></div>
-                                        <div className="col-span-2 pt-2"><span className={`inline-flex px-3 py-1.5 text-xs font-bold rounded-full ${selectedUser.is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>{selectedUser.is_active ? 'Active Profile' : 'Inactive Profile'}</span></div>
+                                        <div><p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Email</p><p className="font-semibold text-white truncate max-w-[150px]">{selectedUser.email || 'N/A'}</p></div>
+                                        <div><p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Status</p>
+                                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${selectedUser.is_active ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30' : 'bg-rose-500/20 text-rose-300 border border-rose-400/30'}`}>
+                                                {selectedUser.is_active ? 'Active' : 'Inactive'}
+                                            </span>
+                                        </div>
                                     </>
                                 )}
                             </div>
