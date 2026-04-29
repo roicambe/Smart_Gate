@@ -197,6 +197,7 @@ pub struct ScanResult {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ScanPersonDetails {
+    pub person_id: i64,
     pub role: String,
     pub id_number: String,
     pub first_name: String,

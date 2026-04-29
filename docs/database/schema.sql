@@ -34,6 +34,17 @@ CREATE TABLE IF NOT EXISTS persons (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Stores ArcFace 512-dim face vectors for recognition.
+-- One "master" (centroid) vector per person — averaged from enrollment samples.
+-- Embedding stored as BLOB: 512 x float32 = 2048 bytes.
+CREATE TABLE IF NOT EXISTS face_embeddings (
+    embedding_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    person_id    INTEGER NOT NULL UNIQUE,
+    embedding    BLOB NOT NULL,
+    enrolled_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (person_id) REFERENCES persons(person_id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS students (
     person_id INTEGER PRIMARY KEY,
     program_id INTEGER NOT NULL,

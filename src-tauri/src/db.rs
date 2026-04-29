@@ -589,6 +589,183 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
     Ok(pool)
 }
 
+// ------ Face Embedding Storage ------
+
+/// Persist a face embedding (512 × f32 = 2048 bytes) for a person.
+/// Uses INSERT OR REPLACE so re-enrollment overwrites the old vector.
+pub fn save_face_embedding(
+    pool: &DbPool,
+    person_id: i64,
+    embedding: &[f32; 512],
+) -> Result<(), String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    // Convert [f32; 512] → &[u8] (2048 bytes) — zero-copy via bytemuck-style cast
+    let bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(embedding.as_ptr() as *const u8, 512 * 4)
+    };
+
+    conn.execute(
+        "INSERT OR REPLACE INTO face_embeddings (person_id, embedding, enrolled_at)
+         VALUES (?1, ?2, datetime('now', 'localtime'))",
+        params![person_id, bytes],
+    )
+    .map_err(|e| format!("Failed to save face embedding for person {person_id}: {e}"))?;
+
+    log::info!("Saved face embedding for person_id={person_id}");
+    Ok(())
+}
+
+/// Load all face embeddings from the database.
+/// Returns `(person_id, [f32; 512])` pairs for bulk-loading the HNSW index.
+pub fn load_all_face_embeddings(
+    pool: &DbPool,
+) -> Result<Vec<(i64, [f32; 512])>, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT fe.person_id, fe.embedding
+             FROM face_embeddings fe
+             JOIN persons p ON p.person_id = fe.person_id
+             WHERE p.is_active = 1 AND p.is_archived = 0",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let iter = stmt
+        .query_map([], |row| {
+            let person_id: i64 = row.get(0)?;
+            let blob: Vec<u8> = row.get(1)?;
+            Ok((person_id, blob))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut results = Vec::new();
+    for item in iter {
+        let (person_id, blob) = item.map_err(|e| e.to_string())?;
+
+        if blob.len() != 512 * 4 {
+            log::warn!(
+                "Skipping person_id={person_id}: embedding blob is {} bytes (expected 2048)",
+                blob.len()
+            );
+            continue;
+        }
+
+        // Convert &[u8] back to [f32; 512]
+        let mut embedding = [0.0f32; 512];
+        for (i, chunk) in blob.chunks_exact(4).enumerate() {
+            embedding[i] = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        }
+
+        results.push((person_id, embedding));
+    }
+
+    log::info!("Loaded {} face embeddings from database", results.len());
+    Ok(results)
+}
+
+/// Remove a face embedding for a person (e.g., when un-enrolling).
+pub fn delete_face_embedding(pool: &DbPool, person_id: i64) -> Result<(), String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM face_embeddings WHERE person_id = ?1",
+        params![person_id],
+    )
+    .map_err(|e| format!("Failed to delete face embedding for person {person_id}: {e}"))?;
+
+    log::info!("Deleted face embedding for person_id={person_id}");
+    Ok(())
+}
+
+/// Returns the face registration status of all non-visitor, non-archived persons.
+/// Used by the admin Face Recognition Management panel.
+pub fn get_persons_face_status(pool: &DbPool) -> Result<Vec<serde_json::Value>, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT
+                p.person_id,
+                p.id_number,
+                p.first_name,
+                COALESCE(p.middle_name, '') AS middle_name,
+                p.last_name,
+                p.role,
+                p.is_active,
+                p.email,
+                p.contact_number,
+                CASE WHEN fe.embedding_id IS NOT NULL THEN 1 ELSE 0 END AS face_registered,
+                fe.enrolled_at,
+                COALESCE(emp_dept.department_name, stu_dept.department_name) AS department_name,
+                prog.program_name,
+                stu.year_level,
+                emp.position_title,
+                stu.is_irregular
+             FROM persons p
+             LEFT JOIN face_embeddings fe ON fe.person_id = p.person_id
+             LEFT JOIN students stu ON p.person_id = stu.person_id
+             LEFT JOIN programs prog ON stu.program_id = prog.program_id
+             LEFT JOIN departments stu_dept ON prog.department_id = stu_dept.department_id
+             LEFT JOIN employees emp ON p.person_id = emp.person_id
+             LEFT JOIN departments emp_dept ON emp.department_id = emp_dept.department_id
+             WHERE p.role != 'visitor' AND p.is_archived = 0
+             ORDER BY p.last_name, p.first_name",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            let person_id: i64 = row.get(0)?;
+            let id_number: String = row.get(1)?;
+            let first_name: String = row.get(2)?;
+            let middle_name: String = row.get(3)?;
+            let last_name: String = row.get(4)?;
+            let role: String = row.get(5)?;
+            let is_active: bool = row.get(6)?;
+            let email: Option<String> = row.get(7)?;
+            let contact_number: Option<String> = row.get(8)?;
+            let face_registered: bool = row.get(9)?;
+            let enrolled_at: Option<String> = row.get(10)?;
+            let department_name: Option<String> = row.get(11)?;
+            let program_name: Option<String> = row.get(12)?;
+            let year_level: Option<i32> = row.get(13)?;
+            let position_title: Option<String> = row.get(14)?;
+            let is_irregular: Option<bool> = row.get(15)?;
+
+            // Table format: First Last only (as requested)
+            let full_name = format!("{} {}", first_name, last_name);
+
+            Ok(serde_json::json!({
+                "person_id": person_id,
+                "id_number": id_number,
+                "first_name": first_name,
+                "middle_name": middle_name,
+                "last_name": last_name,
+                "full_name": full_name,
+                "role": role,
+                "is_active": is_active,
+                "email": email,
+                "contact_number": contact_number,
+                "face_registered": face_registered,
+                "enrolled_at": enrolled_at,
+                "department_name": department_name,
+                "program_name": program_name,
+                "year_level": year_level,
+                "position_title": position_title,
+                "is_irregular": is_irregular.unwrap_or(false),
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row.map_err(|e| e.to_string())?);
+    }
+
+    Ok(results)
+}
+
 // ------ Academic Structure CRUD Operations ------
 
 pub fn add_department(pool: &DbPool, department: Department, active_admin_id: i64) -> Result<i64, String> {
@@ -2211,6 +2388,16 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
     }
 }
 
+pub fn get_id_number_from_person_id(pool: &DbPool, person_id: i64) -> Result<String, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT id_number FROM persons WHERE person_id = ?1",
+        params![person_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| format!("Failed to find ID number for person_id {}: {}", person_id, e))
+}
+
 pub fn manual_id_entry(
     pool: &DbPool,
     id_number: &str,
@@ -2357,6 +2544,7 @@ pub fn get_scan_person_details(
     conn.query_row(
         "
         SELECT
+            p.person_id,
             p.role,
             p.id_number,
             p.first_name,
@@ -2377,14 +2565,15 @@ pub fn get_scan_person_details(
         params![id_number],
         |row| {
             Ok(ScanPersonDetails {
-                role: row.get(0)?,
-                id_number: row.get(1)?,
-                first_name: row.get(2)?,
-                middle_name: row.get(3)?,
-                last_name: row.get(4)?,
-                department_name: row.get(5)?,
-                program_name: row.get(6)?,
-                year_level: row.get(7)?,
+                person_id: row.get(0)?,
+                role: row.get(1)?,
+                id_number: row.get(2)?,
+                first_name: row.get(3)?,
+                middle_name: row.get(4)?,
+                last_name: row.get(5)?,
+                department_name: row.get(6)?,
+                program_name: row.get(7)?,
+                year_level: row.get(8)?,
             })
         },
     )

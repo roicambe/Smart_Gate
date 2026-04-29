@@ -35,3 +35,17 @@ qrcode-generator = "5.0.0"
 base64 = "0.22.1"
 dotenvy = "0.15.7"
 calamine = "0.26"
+
+# --- Face Recognition ---
+# ONNX Runtime: runs SCRFD (detection) and ArcFace (embedding) models
+# rc.9 is the last version supporting Rust 1.77 (rc.10+ requires 1.81)
+# Must pin ort-sys too — ort allows ^rc.6 which resolves to rc.12 with breaking TLS changes
+ort = "=2.0.0-rc.9"
+ort-sys = "=2.0.0-rc.9"
+# N-dimensional arrays for tensor I/O with ONNX models
+ndarray = "0.16"
+# Hierarchical Navigable Small World graph for fast vector search (O log n)
+hnsw_rs = "0.3"
+# Image decoding, resizing, and pixel manipulation
+image = "0.24"
+rayon = "1.10"

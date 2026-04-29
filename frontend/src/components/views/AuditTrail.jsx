@@ -842,8 +842,8 @@ export const AuditTrail = ({ branding, adminSession }) => {
                     onClose={() => setShowViewModal(false)}
                     title="Audit Log Details"
                     subtitle="Full record of this system change."
-                    icon={<FileText className="w-5 h-5 text-slate-300" />}
-                    tone="light"
+                    icon={<FileText className="w-5 h-5 text-white" />}
+                    tone="default"
                     size="lg"
                     bodyClassName="space-y-6"
                 >
@@ -851,43 +851,43 @@ export const AuditTrail = ({ branding, adminSession }) => {
                             {/* Meta Info Grid */}
                             <div className="grid grid-cols-2 gap-y-4 gap-x-6 text-sm">
                                 <div>
-                                    <p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Log ID</p>
-                                    <p className="font-semibold text-slate-900 font-mono">{selectedLog.audit_id}</p>
+                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Log ID</p>
+                                    <p className="font-semibold text-white font-mono">{selectedLog.audit_id}</p>
                                 </div>
                                 <div>
-                                    <p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Performed By</p>
-                                    <p className="font-semibold text-slate-900">{selectedLog.admin_full_name}</p>
-                                    <p className="text-slate-400 text-xs font-mono">@{selectedLog.admin_username} · ID #{selectedLog.admin_id}</p>
+                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Performed By</p>
+                                    <p className="font-semibold text-white">{selectedLog.admin_full_name}</p>
+                                    <p className="text-white/30 text-xs font-mono">@{selectedLog.admin_username} · ID #{selectedLog.admin_id}</p>
                                 </div>
                                 <div>
-                                    <p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Action</p>
-                                    <span className={`inline-flex px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${selectedLog.action_type === 'INSERT' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
-                                        selectedLog.action_type === 'UPDATE' ? 'bg-amber-100 text-amber-700 border-amber-200' :
-                                            selectedLog.action_type === 'DELETE' ? 'bg-rose-100 text-rose-700 border-rose-200' :
-                                                'bg-slate-100 text-slate-700 border-slate-200'
+                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Action</p>
+                                    <span className={`inline-flex px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${selectedLog.action_type === 'INSERT' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30' :
+                                        selectedLog.action_type === 'UPDATE' ? 'bg-amber-500/20 text-amber-300 border-amber-400/30' :
+                                            selectedLog.action_type === 'DELETE' ? 'bg-rose-500/20 text-rose-300 border-rose-400/30' :
+                                                'bg-white/5 text-white/50 border-white/10'
                                         }`}>
                                         {selectedLog.action_type}
                                     </span>
                                 </div>
                                 <div>
-                                    <p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Timestamp</p>
-                                    <p className="font-semibold text-slate-900 font-mono text-xs">{formatDate(selectedLog.created_at)}</p>
+                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Timestamp</p>
+                                    <p className="font-semibold text-white font-mono text-xs">{formatDate(selectedLog.created_at)}</p>
                                 </div>
                                 <div>
-                                    <p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Target Table</p>
-                                    <p className="font-semibold text-slate-900">{getFriendlyTableName(selectedLog.target_table)} <span className="text-slate-400 font-mono text-xs">({selectedLog.target_table})</span></p>
+                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Target Table</p>
+                                    <p className="font-semibold text-white">{getFriendlyTableName(selectedLog.target_table)} <span className="text-white/30 font-mono text-xs">({selectedLog.target_table})</span></p>
                                 </div>
                                 <div>
-                                    <p className="text-slate-500 mb-1 text-xs uppercase tracking-wider font-semibold">Target ID</p>
-                                    <p className="font-semibold text-slate-900 font-mono">{selectedLog.target_id || '-'}</p>
+                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Target ID</p>
+                                    <p className="font-semibold text-white font-mono">{selectedLog.target_id || '-'}</p>
                                 </div>
                             </div>
 
                             {/* Human-Readable Summary */}
-                            <div className="border-t border-slate-100 pt-5">
-                                <p className="text-slate-500 mb-2 text-xs uppercase tracking-wider font-semibold">Summary</p>
-                                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
-                                    <p className="text-sm text-slate-800 leading-relaxed font-medium">
+                            <div className="border-t border-white/10 pt-5">
+                                <p className="text-white/40 mb-2 text-xs uppercase tracking-wider font-semibold">Summary</p>
+                                <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                                    <p className="text-sm text-white/90 leading-relaxed font-medium italic">
                                         {translateAuditLog(selectedLog)}
                                     </p>
                                 </div>
@@ -898,14 +898,14 @@ export const AuditTrail = ({ branding, adminSession }) => {
                                 const changes = getDetailedChanges(selectedLog);
                                 if (changes.length === 0) return null;
                                 return (
-                                    <div className="border-t border-slate-100 pt-5">
-                                        <p className="text-slate-500 mb-3 text-xs uppercase tracking-wider font-semibold">
+                                    <div className="border-t border-white/10 pt-5">
+                                        <p className="text-white/40 mb-3 text-xs uppercase tracking-wider font-semibold">
                                             {selectedLog.action_type === 'UPDATE' ? 'Field Changes' : selectedLog.action_type === 'INSERT' ? 'New Values' : 'Removed Values'}
                                         </p>
-                                        <div className="rounded-xl border border-slate-200 overflow-x-auto bg-white">
+                                        <div className="rounded-xl border border-white/10 overflow-x-auto bg-black/20">
                                             <table className="w-full text-sm text-left">
-                                                <thead className="bg-slate-50 border-b border-slate-200">
-                                                    <tr className="text-xs uppercase text-slate-500">
+                                                <thead className="bg-white/5 border-b border-white/10">
+                                                    <tr className="text-xs uppercase text-white/40">
                                                         <th className="px-4 py-2.5 font-semibold tracking-wider">Field</th>
                                                         {selectedLog.action_type === 'UPDATE' ? (
                                                             <>
@@ -917,25 +917,25 @@ export const AuditTrail = ({ branding, adminSession }) => {
                                                         )}
                                                     </tr>
                                                 </thead>
-                                                <tbody className="divide-y divide-slate-100">
+                                                <tbody className="divide-y divide-white/5">
                                                     {changes.map((change, idx) => (
-                                                        <tr key={idx} className={change.changed ? 'bg-amber-50/40' : ''}>
-                                                            <td className="px-4 py-2 font-medium text-slate-700 whitespace-nowrap">{change.field}</td>
+                                                        <tr key={idx} className={change.changed ? 'bg-amber-400/5' : ''}>
+                                                            <td className="px-4 py-2 font-medium text-white/80 whitespace-nowrap">{change.field}</td>
                                                             {selectedLog.action_type === 'UPDATE' ? (
                                                                 <>
-                                                                    <td className={`px-4 py-2 font-mono text-xs whitespace-nowrap ${change.changed ? 'text-rose-600 line-through' : 'text-slate-500'}`}>
+                                                                    <td className={`px-4 py-2 font-mono text-xs whitespace-nowrap ${change.changed ? 'text-rose-400 line-through' : 'text-white/40'}`}>
                                                                         <div className="max-w-[150px] sm:max-w-[220px] overflow-x-auto pb-1 [scrollbar-width:thin]">
                                                                             {change.oldValue || '-'}
                                                                         </div>
                                                                     </td>
-                                                                    <td className={`px-4 py-2 font-mono text-xs whitespace-nowrap ${change.changed ? 'text-emerald-600 font-semibold' : 'text-slate-500'}`}>
+                                                                    <td className={`px-4 py-2 font-mono text-xs whitespace-nowrap ${change.changed ? 'text-emerald-400 font-semibold' : 'text-white/40'}`}>
                                                                         <div className="max-w-[150px] sm:max-w-[220px] overflow-x-auto pb-1 [scrollbar-width:thin]">
                                                                             {change.newValue || '-'}
                                                                         </div>
                                                                     </td>
                                                                 </>
                                                             ) : (
-                                                                <td className="px-4 py-2 font-mono text-xs text-slate-700 whitespace-nowrap">
+                                                                <td className="px-4 py-2 font-mono text-xs text-white/70 whitespace-nowrap">
                                                                     <div className="max-w-[150px] sm:max-w-[300px] overflow-x-auto pb-1 [scrollbar-width:thin]">
                                                                         {change.newValue || change.oldValue || '-'}
                                                                     </div>

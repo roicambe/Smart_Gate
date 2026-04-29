@@ -4,6 +4,8 @@ use crate::models::*;
 use serde::Serialize;
 use std::process::Command;
 use tauri::State;
+use base64;
+use image;
 
 #[tauri::command]
 pub fn get_persons(pool: State<'_, DbPool>) -> Result<Vec<Person>, String> {
@@ -503,6 +505,14 @@ pub fn manual_id_entry(
 }
 
 #[tauri::command]
+pub fn get_id_number_from_person_id(
+    pool: State<'_, DbPool>,
+    person_id: i64,
+) -> Result<String, String> {
+    db::get_id_number_from_person_id(&pool, person_id)
+}
+
+#[tauri::command]
 pub fn get_scan_person_details(
     pool: State<'_, DbPool>,
     id_number: String,
@@ -552,8 +562,23 @@ pub fn update_user(
 }
 
 #[tauri::command]
-pub fn delete_user(pool: State<'_, DbPool>, person_id: i64, role: String, active_admin_id: i64) -> Result<(), String> {
-    db::delete_user(&pool, person_id, &role, active_admin_id)
+pub fn delete_user(
+    pool: State<'_, DbPool>, 
+    person_id: i64, 
+    role: String, 
+    active_admin_id: i64,
+    pipeline_state: State<'_, std::sync::Mutex<Option<crate::face_recognition::pipeline::RecognitionPipeline>>>,
+) -> Result<(), String> {
+    db::delete_user(&pool, person_id, &role, active_admin_id)?;
+    
+    // Refresh the face index since an active user was removed
+    let mut guard = pipeline_state.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(pipeline) = guard.as_mut() {
+        let embeddings = db::load_all_face_embeddings(&pool).unwrap_or_default();
+        pipeline.refresh_index(embeddings);
+    }
+    
+    Ok(())
 }
 
 #[tauri::command]
@@ -887,8 +912,22 @@ pub fn get_archived_academic(pool: State<'_, DbPool>) -> Result<serde_json::Valu
 }
 
 #[tauri::command]
-pub fn restore_user(pool: State<'_, DbPool>, person_id: i64, active_admin_id: i64) -> Result<(), String> {
-    db::restore_user(&pool, person_id, active_admin_id)
+pub fn restore_user(
+    pool: State<'_, DbPool>, 
+    person_id: i64, 
+    active_admin_id: i64,
+    pipeline_state: State<'_, std::sync::Mutex<Option<crate::face_recognition::pipeline::RecognitionPipeline>>>,
+) -> Result<(), String> {
+    db::restore_user(&pool, person_id, active_admin_id)?;
+    
+    // Refresh the face index after restoration
+    let mut guard = pipeline_state.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(pipeline) = guard.as_mut() {
+        let embeddings = db::load_all_face_embeddings(&pool).unwrap_or_default();
+        pipeline.refresh_index(embeddings);
+    }
+    
+    Ok(())
 }
 
 #[tauri::command]
@@ -907,8 +946,22 @@ pub fn restore_program(pool: State<'_, DbPool>, program_id: i64, active_admin_id
 }
 
 #[tauri::command]
-pub fn permanent_delete_user(pool: State<'_, DbPool>, person_id: i64, active_admin_id: i64) -> Result<(), String> {
-    db::permanent_delete_user(&pool, person_id, active_admin_id)
+pub fn permanent_delete_user(
+    pool: State<'_, DbPool>, 
+    person_id: i64, 
+    active_admin_id: i64,
+    pipeline_state: State<'_, std::sync::Mutex<Option<crate::face_recognition::pipeline::RecognitionPipeline>>>,
+) -> Result<(), String> {
+    db::permanent_delete_user(&pool, person_id, active_admin_id)?;
+
+    // Refresh the face index after permanent deletion
+    let mut guard = pipeline_state.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(pipeline) = guard.as_mut() {
+        let embeddings = db::load_all_face_embeddings(&pool).unwrap_or_default();
+        pipeline.refresh_index(embeddings);
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -941,4 +994,119 @@ pub fn restore_database(app_handle: tauri::AppHandle, source_path: String) -> Re
 #[tauri::command]
 pub fn get_database_stats(app_handle: tauri::AppHandle, pool: State<'_, DbPool>) -> Result<serde_json::Value, String> {
     db::get_database_stats(&app_handle, &pool)
+}
+
+// --- Face Recognition Commands ---
+
+#[tauri::command]
+pub async fn identify_person_face(
+    image_base64: String,
+    pipeline_state: tauri::State<'_, std::sync::Mutex<Option<crate::face_recognition::pipeline::RecognitionPipeline>>>,
+) -> Result<Vec<crate::face_recognition::RecognitionResult>, String> {
+    // 1. Decode base64 image
+    let img_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, image_base64)
+        .map_err(|e| format!("Base64 decode error: {}", e))?;
+    
+    let img = image::load_from_memory(&img_bytes)
+        .map_err(|e| format!("Image load error: {}", e))?
+        .to_rgb8();
+    
+    let (width, height) = img.dimensions();
+    
+    // 2. Run recognition
+    let guard = pipeline_state.lock().unwrap();
+    let pipeline = guard.as_ref()
+        .ok_or_else(|| "Face Recognition is not available. ONNX models are not installed.".to_string())?;
+    pipeline.recognize_frame(&img, width, height)
+}
+
+#[tauri::command]
+pub async fn enroll_person_face(
+    person_id: i64,
+    images_base64: Vec<String>,
+    pool: tauri::State<'_, crate::db::DbPool>,
+    pipeline_state: tauri::State<'_, std::sync::Mutex<Option<crate::face_recognition::pipeline::RecognitionPipeline>>>,
+) -> Result<bool, String> {
+    let total_images = images_base64.len();
+    use rayon::prelude::*;
+
+    // 1. Process each image in the batch in parallel
+    let embeddings: Vec<crate::face_recognition::FaceEmbedding> = {
+        // Lock the pipeline briefly to get a reference for the parallel processing
+        let guard = pipeline_state.lock().unwrap_or_else(|e| e.into_inner());
+        let pipeline = guard.as_ref()
+            .ok_or_else(|| "Face Recognition is not available. ONNX models are not installed.".to_string())?;
+
+        images_base64
+            .par_iter()
+            .enumerate()
+            .filter_map(|(idx, b64)| {
+                let img_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64).ok()?;
+                let img = image::load_from_memory(&img_bytes).ok()?.to_rgb8();
+                let (width, height) = img.dimensions();
+                
+                // This call is thread-safe because pipeline is Sync and extract_embeddings is &self
+                let mut face_embeddings = pipeline.extract_embeddings(img.as_raw(), width, height).ok()?;
+                let best_face = face_embeddings.pop()?;
+                
+                log::info!("Parallel enrollment image {}/{}: face detected", idx + 1, total_images);
+                Some(best_face)
+            })
+            .collect()
+    }; // The lock (guard) is dropped here automatically
+
+    // Be lenient: accept enrollment if we got at least 1 face from the batch
+    if embeddings.is_empty() {
+        return Err(format!(
+            "No faces could be detected in any of the {} enrollment images. Please ensure your face is clearly visible and well-lit.",
+            total_images
+        ));
+    }
+
+    log::info!("Computing centroid from {}/{} successful detections", embeddings.len(), total_images);
+
+    // 2. Compute the "Golden Embedding" (Centroid)
+    let golden_embedding = crate::face_recognition::pipeline::RecognitionPipeline::compute_centroid(&embeddings);
+
+    // 3. Save to Database
+    crate::db::save_face_embedding(&pool, person_id, &golden_embedding)
+        .map_err(|e| format!("Failed to save embedding to DB: {}", e))?;
+
+    // 4. Update the live HNSW Index
+    {
+        let mut guard = pipeline_state.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(ref mut pipeline) = *guard {
+            pipeline.enroll(person_id, golden_embedding);
+        }
+    }
+    
+    log::info!("Successfully enrolled person_id={} with centroid of {} faces", person_id, embeddings.len());
+    
+    Ok(true)
+}
+
+#[tauri::command]
+pub fn get_face_registration_status(
+    pool: State<'_, DbPool>,
+) -> Result<Vec<serde_json::Value>, String> {
+    db::get_persons_face_status(&pool)
+}
+
+#[tauri::command]
+pub fn reset_face_data(
+    person_id: i64,
+    pool: State<'_, DbPool>,
+    pipeline_state: State<'_, std::sync::Mutex<Option<crate::face_recognition::pipeline::RecognitionPipeline>>>,
+) -> Result<bool, String> {
+    db::delete_face_embedding(&pool, person_id)?;
+    
+    // Refresh the in-memory index
+    let mut guard = pipeline_state.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(pipeline) = guard.as_mut() {
+        let embeddings = db::load_all_face_embeddings(&pool).unwrap_or_default();
+        pipeline.refresh_index(embeddings);
+    }
+
+    log::info!("Admin reset face data for person_id={}", person_id);
+    Ok(true)
 }
