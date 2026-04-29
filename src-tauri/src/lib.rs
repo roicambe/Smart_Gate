@@ -4,6 +4,7 @@ pub mod commands;
 pub mod db;
 pub mod email;
 pub mod models;
+pub mod face_recognition;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -20,7 +21,28 @@ pub fn run() {
                 )?;
             }
             let pool = db::init_db(app.handle()).expect("Failed to initialize database");
+            
+            // --- Initialize Face Recognition Pipeline ---
+            // Graceful: if ONNX models are not present, the app still starts.
+            // Face recognition commands will return errors until models are placed.
+            let face_config = face_recognition::PipelineConfig::default();
+            let pipeline_opt = match face_recognition::pipeline::RecognitionPipeline::new(face_config) {
+                Ok(mut pipeline) => {
+                    // Load existing embeddings from DB into the HNSW index
+                    let embeddings = db::load_all_face_embeddings(&pool).unwrap_or_default();
+                    let count = embeddings.len();
+                    pipeline.enroll_batch(embeddings);
+                    log::info!("Face Recognition Pipeline ready. Loaded {} embeddings.", count);
+                    Some(pipeline)
+                }
+                Err(e) => {
+                    log::warn!("Face Recognition Pipeline not available: {}. Place ONNX models in the models/ folder to enable.", e);
+                    None
+                }
+            };
+            
             app.manage(pool);
+            app.manage(std::sync::Mutex::new(pipeline_opt));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -91,6 +113,11 @@ pub fn run() {
             commands::backup_database,
             commands::restore_database,
             commands::get_database_stats,
+            commands::identify_person_face,
+            commands::enroll_person_face,
+            commands::get_face_registration_status,
+            commands::reset_face_data,
+            commands::get_id_number_from_person_id,
             email::send_visitor_qr,
             email::send_verification_otp
         ])

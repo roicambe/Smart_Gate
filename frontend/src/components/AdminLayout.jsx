@@ -9,6 +9,7 @@ import { AcademicStructure } from './views/AcademicStructure';
 import { EventManagement } from './views/EventManagement';
 import { AuditTrail } from './views/AuditTrail';
 import { DataManagement } from './views/DataManagement';
+import { FaceRecognitionManagement } from './views/FaceRecognitionManagement';
 
 export const AdminLayout = ({ view, setView, setIsAdminLoggedIn, adminSession, branding, fetchBranding }) => {
     const isSystemAdministrator = adminSession?.role === 'System Administrator';
@@ -36,6 +37,7 @@ export const AdminLayout = ({ view, setView, setIsAdminLoggedIn, adminSession, b
 
             case 'admin_academic': return <AcademicStructure branding={branding} adminSession={adminSession} />;
             case 'admin_events': return <EventManagement branding={branding} adminSession={adminSession} />;
+            case 'admin_face': return <FaceRecognitionManagement adminSession={adminSession} branding={branding} />;
             case 'admin_audit': return <AuditTrail branding={branding} adminSession={adminSession} />;
             case 'admin_data': return <DataManagement adminSession={adminSession} />;
             default:

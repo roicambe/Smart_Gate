@@ -617,47 +617,61 @@ export const EventManagement = ({ branding, adminSession }) => {
                     isOpen={showViewModal}
                     onClose={() => setShowViewModal(false)}
                     title="Event Details"
-                    icon={<Eye className="w-5 h-5 text-slate-300" />}
-                    tone="light"
+                    icon={<Eye className="w-5 h-5 text-white" />}
+                    tone="default"
                     size="lg"
                 >
-                    <div className="space-y-5">
-                            <div>
-                                <p className="text-xs uppercase tracking-wider text-slate-500">Event Name</p>
-                                <p className="text-lg font-semibold text-slate-900">{selectedEvent.event_name}</p>
+                    <div className="space-y-6">
+                            <div className="flex items-center gap-4 border-b border-white/10 pb-6">
+                                <div className="w-12 h-12 bg-emerald-500/20 rounded-xl border border-emerald-400/30 flex items-center justify-center text-emerald-300">
+                                    <Calendar className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h3 className="text-xl font-bold text-white">{selectedEvent.event_name}</h3>
+                                    <p className="text-sm text-white/50">{selectedEvent.schedule_type === 'date_range' ? 'Special Event' : 'Recurring Event'}</p>
+                                </div>
                             </div>
-                            <div>
-                                <p className="text-xs uppercase tracking-wider text-slate-500">Description</p>
-                                <p className="text-slate-700 whitespace-pre-wrap">{selectedEvent.description || 'No description provided.'}</p>
-                            </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+
+                            <div className="space-y-6">
                                 <div>
-                                    <p className="text-xs uppercase tracking-wider text-slate-500">Schedule</p>
-                                    <p className="text-slate-800 font-medium">{formatScheduleLabel(selectedEvent)}</p>
+                                    <p className="text-xs uppercase tracking-wider text-white/40 mb-2 font-semibold">Description</p>
+                                    <p className="text-white/80 text-sm leading-relaxed whitespace-pre-wrap bg-white/5 p-4 rounded-xl border border-white/10">{selectedEvent.description || 'No description provided.'}</p>
                                 </div>
-                                <div>
-                                    <p className="text-xs uppercase tracking-wider text-slate-500">Time</p>
-                                    <p className="text-slate-800 font-medium">{selectedEvent.start_time} - {selectedEvent.end_time}</p>
-                                </div>
-                                <div>
-                                    <p className="text-xs uppercase tracking-wider text-slate-500">Allowed Roles</p>
-                                    <p className="text-slate-800 font-medium">{formatRequiredRoleLabel(selectedEvent.required_role)}</p>
-                                </div>
-                                {(selectedEvent.required_role.includes('all') || selectedEvent.required_role.includes('student')) && (
-                                    <>
-                                        <div>
-                                            <p className="text-xs uppercase tracking-wider text-slate-500">Target Programs</p>
-                                            <p className="text-slate-800 font-medium">{formatRequiredPrograms(selectedEvent.required_programs, programs)}</p>
-                                        </div>
-                                        <div>
-                                            <p className="text-xs uppercase tracking-wider text-slate-500">Target Year Levels</p>
-                                            <p className="text-slate-800 font-medium">{formatRequiredYearLevels(selectedEvent.required_year_levels)}</p>
-                                        </div>
-                                    </>
-                                )}
-                                <div>
-                                    <p className="text-xs uppercase tracking-wider text-slate-500">Status</p>
-                                    <p className="text-slate-800 font-medium">{selectedEvent.is_enabled ? 'Enabled' : 'Disabled'}</p>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                                    <div>
+                                        <p className="text-xs uppercase tracking-wider text-white/40 mb-1 font-semibold">Schedule</p>
+                                        <p className="text-white font-medium">{formatScheduleLabel(selectedEvent)}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs uppercase tracking-wider text-white/40 mb-1 font-semibold">Time</p>
+                                        <p className="text-white font-medium font-mono bg-white/5 px-2 py-1 rounded w-fit">{selectedEvent.start_time} - {selectedEvent.end_time}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs uppercase tracking-wider text-white/40 mb-1 font-semibold">Allowed Roles</p>
+                                        <p className="text-white font-medium capitalize">{formatRequiredRoleLabel(selectedEvent.required_role)}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs uppercase tracking-wider text-white/40 mb-1 font-semibold">Status</p>
+                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${selectedEvent.is_enabled ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30' : 'bg-rose-500/20 text-rose-300 border border-rose-400/30'}`}>
+                                            {selectedEvent.is_enabled ? 'Active' : 'Disabled'}
+                                        </span>
+                                    </div>
+
+                                    {(selectedEvent.required_role.includes('all') || selectedEvent.required_role.includes('student')) && (
+                                        <>
+                                            <div className="col-span-1 md:col-span-2 border-t border-white/5 pt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                <div>
+                                                    <p className="text-xs uppercase tracking-wider text-white/40 mb-1 font-semibold">Target Programs</p>
+                                                    <p className="text-white font-medium text-sm">{formatRequiredPrograms(selectedEvent.required_programs, programs)}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-xs uppercase tracking-wider text-white/40 mb-1 font-semibold">Target Year Levels</p>
+                                                    <p className="text-white font-medium text-sm">{formatRequiredYearLevels(selectedEvent.required_year_levels)}</p>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
                             </div>
                     </div>
