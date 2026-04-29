@@ -328,6 +328,20 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
     let _ = conn.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('primary_logo', '')", params![]);
     let _ = conn.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('secondary_logo_1', '')", params![]);
     let _ = conn.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('secondary_logo_2', '')", params![]);
+    let _ = conn.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('strict_email_domain', 'true')", params![]);
+    let _ = conn.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('enable_face_recognition', 'false')", params![]);
+
+    // Force strict_email_domain to true once for existing installations
+    let email_migration_check: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM settings WHERE setting_key = 'email_domain_migration_v1'",
+        [],
+        |row| row.get(0)
+    ).unwrap_or(0);
+
+    if email_migration_check == 0 {
+        let _ = conn.execute("UPDATE settings SET setting_value = 'true' WHERE setting_key = 'strict_email_domain'", []);
+        let _ = conn.execute("INSERT INTO settings (setting_key, setting_value) VALUES ('email_domain_migration_v1', 'true')", []);
+    }
 
     // Admin RBAC updates and role normalization.
     if !table_has_column(&conn, "events", "schedule_type")? {
@@ -1016,6 +1030,25 @@ pub fn register_user(
     active_admin_id: Option<i64>,
 ) -> Result<i64, String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
+
+    if role != "visitor" {
+        let strict_email: bool = conn.query_row(
+            "SELECT setting_value FROM settings WHERE setting_key = 'strict_email_domain'",
+            [],
+            |row| row.get::<_, String>(0).map(|v| v == "1" || v.to_lowercase() == "true")
+        ).unwrap_or(false);
+
+        if strict_email {
+            if let Some(ref email_val) = email {
+                if !email_val.to_lowercase().ends_with("@plpasig.edu.ph") {
+                    return Err("Invalid email domain. Only @plpasig.edu.ph is allowed for university members.".to_string());
+                }
+            } else {
+                return Err("Email is required for university members when strict domain is enabled.".to_string());
+            }
+        }
+    }
+
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
@@ -1199,6 +1232,12 @@ pub fn bulk_import_users_from_excel(
     let mut imported_ids: Vec<String> = Vec::new();
     let mut error_logs: Vec<String> = Vec::new();
 
+    let strict_email: bool = conn.query_row(
+        "SELECT setting_value FROM settings WHERE setting_key = 'strict_email_domain'",
+        [],
+        |row| row.get::<_, String>(0).map(|v| v == "1" || v.to_lowercase() == "true")
+    ).unwrap_or(false);
+
     for (row_idx, row) in rows.enumerate() {
         let line_number = row_idx + 2;
         let get_col = |idx_opt: Option<usize>| -> String {
@@ -1220,6 +1259,18 @@ pub fn bulk_import_users_from_excel(
             failed_count += 1;
             error_logs.push(format!("Row {line_number}: Missing required fields (id_number, first_name, or last_name)."));
             continue;
+        }
+
+        if strict_email {
+            if email.is_empty() {
+                failed_count += 1;
+                error_logs.push(format!("Row {line_number}: [{first_name} {last_name}] Email is required when strict domain is enabled."));
+                continue;
+            } else if !email.to_lowercase().ends_with("@plpasig.edu.ph") {
+                failed_count += 1;
+                error_logs.push(format!("Row {line_number}: [{first_name} {last_name}] Invalid email domain. Only @plpasig.edu.ph is allowed."));
+                continue;
+            }
         }
 
         let duplicate_count: i64 = conn
@@ -1383,6 +1434,25 @@ pub fn update_user(
     active_admin_id: i64,
 ) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
+
+    if role != "visitor" {
+        let strict_email: bool = conn.query_row(
+            "SELECT setting_value FROM settings WHERE setting_key = 'strict_email_domain'",
+            [],
+            |row| row.get::<_, String>(0).map(|v| v == "1" || v.to_lowercase() == "true")
+        ).unwrap_or(false);
+
+        if strict_email {
+            if let Some(ref email_val) = email {
+                if !email_val.to_lowercase().ends_with("@plpasig.edu.ph") {
+                    return Err("Invalid email domain. Only @plpasig.edu.ph is allowed for university members.".to_string());
+                }
+            } else {
+                return Err("Email is required for university members when strict domain is enabled.".to_string());
+            }
+        }
+    }
+
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let old_data: Option<serde_json::Value> = tx.query_row(
@@ -3371,6 +3441,8 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
     let mut primary_logo_enabled: bool = true;
     let mut secondary_logo_1_enabled: bool = true;
     let mut secondary_logo_2_enabled: bool = true;
+    let mut strict_email_domain: bool = false;
+    let mut enable_face_recognition: bool = false;
 
     let mut stmt = conn
         .prepare("SELECT setting_key, setting_value FROM settings")
@@ -3402,6 +3474,8 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
                 "primary_logo_enabled" => primary_logo_enabled = value == "1" || value.to_lowercase() == "true",
                 "secondary_logo_1_enabled" => secondary_logo_1_enabled = value == "1" || value.to_lowercase() == "true",
                 "secondary_logo_2_enabled" => secondary_logo_2_enabled = value == "1" || value.to_lowercase() == "true",
+                "strict_email_domain" => strict_email_domain = value == "1" || value.to_lowercase() == "true",
+                "enable_face_recognition" => enable_face_recognition = value == "1" || value.to_lowercase() == "true",
                 "circle_logo_format" => {
                     // Legacy support: if individual ones aren't set yet, they could inherit this
                     // but we'll prioritize individual ones.
@@ -3427,6 +3501,8 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
         primary_logo_enabled,
         secondary_logo_1_enabled,
         secondary_logo_2_enabled,
+        strict_email_domain,
+        enable_face_recognition,
     })
 }
 
@@ -3448,6 +3524,8 @@ pub fn update_system_branding(
     primary_logo_enabled: bool,
     secondary_logo_1_enabled: bool,
     secondary_logo_2_enabled: bool,
+    strict_email_domain: bool,
+    enable_face_recognition: bool,
 ) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
 
@@ -3600,6 +3678,18 @@ pub fn update_system_branding(
         "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary_logo_2_enabled', ?1)
          ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
         params![if secondary_logo_2_enabled { "1" } else { "0" }],
+    ).map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('strict_email_domain', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![if strict_email_domain { "1" } else { "0" }],
+    ).map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('enable_face_recognition', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![if enable_face_recognition { "1" } else { "0" }],
     ).map_err(|e| e.to_string())?;
 
     tx.commit().map_err(|e| e.to_string())?;

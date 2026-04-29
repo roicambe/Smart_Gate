@@ -172,4 +172,6 @@ INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES
     ('report_address', 'Alkalde Jose St. Kapasigan Pasig City, Philippines 1600'),
     ('report_phone', '(106) 628-1014'),
     ('report_email', 'info@plpasig.edu.ph'),
-    ('system_logo', '');
+    ('system_logo', ''),
+    ('strict_email_domain', 'true'),
+    ('enable_face_recognition', 'false');
