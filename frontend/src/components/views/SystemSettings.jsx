@@ -3,6 +3,7 @@ import { Settings } from 'lucide-react';
 import { MyAccount } from './MyAccount';
 import { AdminAccounts } from './AdminAccounts';
 import { SystemBrandingPanel } from './SystemBrandingPanel';
+import { SystemConfigurationPanel } from './SystemConfigurationPanel';
 import { useToast } from '../toast/ToastProvider';
 
 export const SystemSettings = ({ setIsAdminLoggedIn, setView, adminSession, branding, fetchBranding }) => {
@@ -48,10 +49,18 @@ export const SystemSettings = ({ setIsAdminLoggedIn, setView, adminSession, bran
                                     : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/50'
                                     }`}
                             >
-                                Institutional Branding
+                                System Branding
                             </button>
                             <button
-                                onClick={() => setActiveTab('admin_accounts')}
+                                onClick={() => setActiveTab('system_configuration')}
+                                className={`px-6 py-2.5 rounded-lg font-medium transition-all duration-300 ${activeTab === 'system_configuration'
+                                    ? 'bg-white text-slate-900 shadow-sm border border-slate-200'
+                                    : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/50'
+                                    }`}
+                            >
+                                System Configuration
+                            </button>
+                            <button onClick={() => setActiveTab('admin_accounts')}
                                 className={`px-6 py-2.5 rounded-lg font-medium transition-all duration-300 ${activeTab === 'admin_accounts'
                                     ? 'bg-white text-slate-900 shadow-sm border border-slate-200'
                                     : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200/50'
@@ -70,9 +79,7 @@ export const SystemSettings = ({ setIsAdminLoggedIn, setView, adminSession, bran
                         <MyAccount adminSession={adminSession} setIsAdminLoggedIn={setIsAdminLoggedIn} setView={setView} showToast={notify} />
                     </div>
                 )}
-                {activeTab === 'system_branding' && isSystemAdministrator && (
-                    <SystemBrandingPanel branding={branding} fetchBranding={fetchBranding} adminSession={adminSession} showToast={notify} />
-                )}
+                {activeTab === 'system_branding' && isSystemAdministrator && ( <SystemBrandingPanel branding={branding} fetchBranding={fetchBranding} adminSession={adminSession} showToast={notify} /> )} {activeTab === 'system_configuration' && isSystemAdministrator && ( <SystemConfigurationPanel branding={branding} fetchBranding={fetchBranding} adminSession={adminSession} showToast={notify} /> )}
                 {activeTab === 'admin_accounts' && isSystemAdministrator && (
                     <AdminAccounts adminSession={adminSession} showToast={notify} />
                 )}
@@ -80,3 +87,5 @@ export const SystemSettings = ({ setIsAdminLoggedIn, setView, adminSession, bran
         </div>
     );
 };
+
+

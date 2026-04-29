@@ -32,7 +32,7 @@ export const AdminLayout = ({ view, setView, setIsAdminLoggedIn, adminSession, b
             case 'admin_dashboard': return <AdminDashboard branding={branding} adminSession={adminSession} />;
             case 'admin_access_logs': return <AccessLogs branding={branding} adminSession={adminSession} />;
             case 'admin_settings': return <SystemSettings setIsAdminLoggedIn={setIsAdminLoggedIn} setView={setView} adminSession={adminSession} branding={branding} fetchBranding={fetchBranding} />;
-            case 'admin_users': return <UserManagement adminSession={adminSession} />;
+            case 'admin_users': return <UserManagement adminSession={adminSession} branding={branding} />;
 
             case 'admin_academic': return <AcademicStructure branding={branding} adminSession={adminSession} />;
             case 'admin_events': return <EventManagement branding={branding} adminSession={adminSession} />;
