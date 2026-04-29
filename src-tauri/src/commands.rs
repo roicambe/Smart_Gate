@@ -589,6 +589,8 @@ pub fn update_system_branding(
     primary_logo_enabled: Option<bool>,
     secondary_logo_1_enabled: Option<bool>,
     secondary_logo_2_enabled: Option<bool>,
+    strict_email_domain: Option<bool>,
+    enable_face_recognition: Option<bool>,
 ) -> Result<(), String> {
     db::update_system_branding(
         &pool,
@@ -608,6 +610,8 @@ pub fn update_system_branding(
         primary_logo_enabled.unwrap_or(true),
         secondary_logo_1_enabled.unwrap_or(true),
         secondary_logo_2_enabled.unwrap_or(true),
+        strict_email_domain.unwrap_or(false),
+        enable_face_recognition.unwrap_or(false),
     )
 }
 

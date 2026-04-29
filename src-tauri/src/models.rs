@@ -267,6 +267,8 @@ pub struct SystemBranding {
     pub primary_logo_enabled: bool,
     pub secondary_logo_1_enabled: bool,
     pub secondary_logo_2_enabled: bool,
+    pub strict_email_domain: bool,
+    pub enable_face_recognition: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
