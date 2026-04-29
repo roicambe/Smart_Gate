@@ -5,7 +5,7 @@ import { SettingsSectionHeader } from '../common/SettingsSectionHeader';
 
 export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession, showToast }) => {
     const isSystemAdministrator = adminSession?.role === 'System Administrator';
-    const [strictEmailDomain, setStrictEmailDomain] = useState(true);
+    const [strictEmailDomain, setStrictEmailDomain] = useState(false);
     const [enableFaceRecognition, setEnableFaceRecognition] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
 
@@ -105,9 +105,9 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
                         />
                         <label
                             htmlFor="strict-email-toggle"
-                            className="h-full w-full cursor-pointer rounded-full bg-slate-300 transition-colors peer-checked:bg-blue-600 peer-disabled:opacity-50"
+                            className="h-full w-full cursor-pointer rounded-full bg-slate-300 transition-all duration-300 ease-in-out peer-checked:bg-blue-600 peer-disabled:opacity-50"
                         />
-                        <div className="absolute left-1 top-1 h-6 w-6 rounded-full bg-white transition-transform peer-checked:translate-x-6 shadow-sm" />
+                        <div className="absolute left-1 top-1 h-6 w-6 rounded-full bg-white transition-all duration-300 ease-in-out peer-checked:translate-x-6 shadow-sm pointer-events-none" />
                     </div>
                 </div>
 
@@ -140,9 +140,9 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
                         />
                         <label
                             htmlFor="face-recog-toggle"
-                            className="h-full w-full cursor-pointer rounded-full bg-slate-300 transition-colors peer-checked:bg-blue-600 peer-disabled:opacity-50"
+                            className="h-full w-full cursor-pointer rounded-full bg-slate-300 transition-all duration-300 ease-in-out peer-checked:bg-blue-600 peer-disabled:opacity-50"
                         />
-                        <div className="absolute left-1 top-1 h-6 w-6 rounded-full bg-white transition-transform peer-checked:translate-x-6 shadow-sm" />
+                        <div className="absolute left-1 top-1 h-6 w-6 rounded-full bg-white transition-all duration-300 ease-in-out peer-checked:translate-x-6 shadow-sm pointer-events-none" />
                     </div>
                 </div>
             </div>
