@@ -1,11 +1,67 @@
-import React, { useState, useEffect } from "react";
-import { Keyboard, QrCode, ScanFace, ChevronLeft, ArrowRight, Calendar } from "lucide-react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Keyboard, QrCode, ScanFace, ChevronLeft, ArrowRight, Calendar, X } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { QRScannerOverlay } from "./QRScannerOverlay";
 import { extractScanId } from "../utils/patternHunter";
 import { useToast } from "./toast/ToastProvider";
+import { FaceScannerModal } from "./FaceScannerModal";
 
-export const EventActionMenu = ({ setView }) => {
+const ID_CARD_DURATION_MS = 1000;
+const DETAILED_TOAST_ROLES = new Set(["student", "professor", "staff"]);
+
+const formatRoleLabel = (role) => (
+    role
+        ? role.charAt(0).toUpperCase() + role.slice(1)
+        : "N/A"
+);
+
+const getYearLevelLabel = (yearLevel) => {
+    if (yearLevel === null || yearLevel === undefined) {
+        return null;
+    }
+
+    const suffixes = ["th", "st", "nd", "rd"];
+    const mod100 = yearLevel % 100;
+    const suffix = (mod100 >= 11 && mod100 <= 13)
+        ? "th"
+        : (suffixes[yearLevel % 10] || "th");
+
+    return `${yearLevel}${suffix} Year`;
+};
+
+const getProgramYearLabel = (programName, yearLevel) => {
+    const yearLabel = getYearLevelLabel(yearLevel);
+
+    if (programName && yearLabel) {
+        return `${programName} - ${yearLabel}`;
+    }
+
+    return programName || yearLabel || null;
+};
+
+const getFullNameLabel = ({ first_name, middle_name, last_name }) => (
+    [first_name, middle_name, last_name]
+        .filter(Boolean)
+        .join(" ")
+);
+
+const getDetailedToastMessage = (scanDetails) => {
+    const messageLines = [
+        `Role: ${formatRoleLabel(scanDetails.role)}`,
+        `Name: ${getFullNameLabel(scanDetails)}`,
+        `ID: ${scanDetails.id_number}`,
+        `Department: ${scanDetails.department_name || "N/A"}`
+    ];
+
+    const programYear = getProgramYearLabel(scanDetails.program_name, scanDetails.year_level);
+    if (programYear) {
+        messageLines.push(`Program & Year: ${programYear}`);
+    }
+
+    return messageLines.join("\n");
+};
+
+export const EventActionMenu = ({ setView, branding }) => {
     const [showManualModal, setShowManualModal] = useState(false);
     const [showQrScanner, setShowQrScanner] = useState(false);
     const [manualId, setManualId] = useState("");
@@ -13,10 +69,74 @@ export const EventActionMenu = ({ setView }) => {
     const [programs, setPrograms] = useState([]);
     const [selectedEventId, setSelectedEventId] = useState(null);
     const [isProcessingScanner, setIsProcessingScanner] = useState(false);
+    const [showFaceScanner, setShowFaceScanner] = useState(false);
     const [flashGreen, setFlashGreen] = useState(false);
+    const [activeScanCard, setActiveScanCard] = useState(null);
+    const scanCardTimerRef = useRef(null);
+    const scanCardRequestIdRef = useRef(0);
     const { showSuccess, showError, showWarning, showProcessing } = useToast();
 
-    const isModalOpen = showManualModal || showQrScanner;
+    const clearScanCardTimer = useCallback(() => {
+        if (scanCardTimerRef.current) {
+            window.clearTimeout(scanCardTimerRef.current);
+            scanCardTimerRef.current = null;
+        }
+    }, []);
+
+    const showScanCard = useCallback((scanDetails) => {
+        clearScanCardTimer();
+        setActiveScanCard(scanDetails);
+        scanCardTimerRef.current = window.setTimeout(() => {
+            setActiveScanCard(null);
+        }, ID_CARD_DURATION_MS);
+    }, [clearScanCardTimer]);
+
+    const dismissScanCard = useCallback(() => {
+        clearScanCardTimer();
+        setActiveScanCard(null);
+    }, [clearScanCardTimer]);
+
+    const showScanSuccessFeedback = useCallback(async ({
+        result,
+        scannedId,
+        fallbackMessage,
+        modalActive
+    }) => {
+        const successMessage = fallbackMessage || `${result.message} - ${result.person_name} (${result.role})`;
+        const normalizedRole = (result.role || "").toString().trim().toLowerCase();
+        const shouldShowDetailedToast = modalActive && DETAILED_TOAST_ROLES.has(normalizedRole);
+
+        if (modalActive && !shouldShowDetailedToast) {
+            showSuccess(successMessage);
+            return;
+        }
+
+        const requestId = ++scanCardRequestIdRef.current;
+        try {
+            const details = await invoke("get_scan_person_details", { idNumber: scannedId });
+            if (requestId !== scanCardRequestIdRef.current) {
+                return;
+            }
+
+            if (details) {
+                if (modalActive) {
+                    showSuccess(getDetailedToastMessage(details));
+                    return;
+                }
+
+                showScanCard(details);
+                return;
+            }
+        } catch (error) {
+            console.error("Failed to fetch scan person details:", error);
+        }
+
+        if (requestId === scanCardRequestIdRef.current) {
+            showSuccess(successMessage);
+        }
+    }, [showSuccess, showScanCard]);
+
+    const isModalOpen = showManualModal || showQrScanner || showFaceScanner;
 
     const getLocalDateKey = (date) => {
         const year = date.getFullYear();
@@ -129,7 +249,11 @@ export const EventActionMenu = ({ setView }) => {
             });
 
             if (result.success) {
-                showSuccess(`Attendance Recorded: ${result.message} - ${result.person_name} (${result.role})`);
+                await showScanSuccessFeedback({
+                    result,
+                    scannedId: manualId,
+                    modalActive: true
+                });
             } else {
                 showError(result.message);
             }
@@ -156,7 +280,13 @@ export const EventActionMenu = ({ setView }) => {
 
             if (result.success) {
                 const eventName = events.find(e => e.event_id === parseInt(selectedEventId, 10))?.event_name || 'Event';
-                showSuccess(`Attendance Recorded: ${eventName} - ${result.person_name} (${result.role})`);
+                
+                await showScanSuccessFeedback({
+                    result,
+                    scannedId,
+                    fallbackMessage: `Attendance Recorded: ${eventName} - ${result.person_name} (${result.role})`,
+                    modalActive: isModalOpen
+                });
                 
                 playSuccessBeep();
                 setFlashGreen(true);
@@ -390,7 +520,16 @@ export const EventActionMenu = ({ setView }) => {
                     <p className="text-white/70 text-base">Scan Digital ID</p>
                 </button>
 
-                <button onClick={() => showWarning("Hardware Integration Pending: Face Recognition is currently unavailable for Event Attendance.")} className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]">
+                <button 
+                    onClick={() => {
+                        if (branding?.enable_face_recognition) {
+                            setShowFaceScanner(true);
+                        } else {
+                            showWarning("Biometric verification is currently unavailable. Please contact the system administrator for support.");
+                        }
+                    }}
+                    className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]"
+                >
                     <div className="h-20 w-20 bg-white/10 text-white rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:bg-white/20 transition-all duration-300 shadow-lg border border-white/20">
                         <ScanFace className="w-10 h-10 drop-shadow-md" />
                     </div>
@@ -398,6 +537,50 @@ export const EventActionMenu = ({ setView }) => {
                     <p className="text-white/70 text-base">Automatic scanning</p>
                 </button>
             </div>
+            {activeScanCard && (
+                <div className="pointer-events-none fixed inset-0 z-[200] flex items-center justify-center px-4">
+                    <div className="pointer-events-auto relative w-full max-w-2xl rounded-3xl border border-white/20 bg-black/80 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
+                        <button
+                            type="button"
+                            onClick={dismissScanCard}
+                            className="absolute right-4 top-4 rounded-lg p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
+                            aria-label="Close ID card"
+                        >
+                            <X className="h-5 w-5" />
+                        </button>
+                        <div className="mb-6">
+                            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200/85">
+                                ID Card
+                            </p>
+                            <h3 className="mt-2 text-4xl font-extrabold text-white">
+                                {getFullNameLabel(activeScanCard)}
+                            </h3>
+                        </div>
+                        <div className="grid grid-cols-1 gap-4 text-base text-slate-100 sm:grid-cols-2">
+                            <div>
+                                <p className="text-xs uppercase tracking-widest text-slate-300/80">Role</p>
+                                <p className="mt-1 text-xl font-semibold">{formatRoleLabel(activeScanCard.role)}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase tracking-widest text-slate-300/80">ID Number</p>
+                                <p className="mt-1 text-xl font-semibold">{activeScanCard.id_number}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs uppercase tracking-widest text-slate-300/80">Department</p>
+                                <p className="mt-1 font-semibold">{activeScanCard.department_name || "N/A"}</p>
+                            </div>
+                            {getProgramYearLabel(activeScanCard.program_name, activeScanCard.year_level) && (
+                                <div>
+                                    <p className="text-xs uppercase tracking-widest text-slate-300/80">Program & Year</p>
+                                    <p className="mt-1 font-semibold">
+                                        {getProgramYearLabel(activeScanCard.program_name, activeScanCard.year_level)}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Manual ID Modal */}
             {showManualModal && (
@@ -445,6 +628,17 @@ export const EventActionMenu = ({ setView }) => {
                     }} 
                     onClose={() => setShowQrScanner(false)} 
                     scannerFunction="event" 
+                />
+            )}
+
+            {showFaceScanner && (
+                <FaceScannerModal 
+                    scannerFunction="event"
+                    onClose={() => setShowFaceScanner(false)}
+                    onIdentify={(scannedId) => {
+                        setShowFaceScanner(false);
+                        handleQrScan(scannedId);
+                    }}
                 />
             )}
         </div>

@@ -63,7 +63,7 @@ const getDetailedToastMessage = (scanDetails) => {
     return messageLines.join("\n");
 };
 
-export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) => {
+export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, branding }) => {
     const isEntrance = view === 'action_entrance';
     const [showManualModal, setShowManualModal] = useState(false);
     const [showVisitorModal, setShowVisitorModal] = useState(false);
@@ -414,7 +414,13 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
 
                     {/* Face Recognition */}
                     <button 
-                        onClick={() => setShowFaceScanner(true)}
+                        onClick={() => {
+                            if (branding?.enable_face_recognition) {
+                                setShowFaceScanner(true);
+                            } else {
+                                showWarning("Biometric verification is currently unavailable. Please contact the system administrator for support.");
+                            }
+                        }}
                         className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]">
                         <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
                             <ScanFace className="w-12 h-12 drop-shadow-md" />
@@ -477,7 +483,13 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false }) =>
                     {/* Face Recognition (Bottom Row) */}
                     <div className="w-full sm:w-1/2 mx-auto justify-self-center">
                         <button 
-                            onClick={() => setShowFaceScanner(true)}
+                            onClick={() => {
+                                if (branding?.enable_face_recognition) {
+                                    setShowFaceScanner(true);
+                                } else {
+                                    showWarning("Biometric verification is currently unavailable. Please contact the system administrator for support.");
+                                }
+                            }}
                             className="group relative flex items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-left focus:outline-none focus:ring-4 focus:ring-white/30 w-full h-full min-h-[160px]">
                             <div className="h-24 w-24 bg-white/10 text-white rounded-2xl flex items-center justify-center mr-8 group-hover:scale-110 group-hover:bg-white/20 group-hover:text-white transition-all duration-300 shadow-lg border border-white/20 flex-shrink-0">
                                 <ScanFace className="w-12 h-12 drop-shadow-md" />
