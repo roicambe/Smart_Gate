@@ -99,7 +99,7 @@ export const FaceRecognitionManagement = ({ adminSession, branding }) => {
             <div className="flex justify-between items-center">
                 <div>
                     <h1 className="text-3xl font-bold text-slate-900 mb-2 flex items-center gap-3">
-                        <ScanFace className="w-8 h-8 text-blue-500" />
+                        <ScanFace className="w-8 h-8 text-emerald-500" />
                         Face Recognition
                     </h1>
                     <p className="text-slate-500">Monitor and manage biometric face data for all university members.</p>
@@ -144,7 +144,7 @@ export const FaceRecognitionManagement = ({ adminSession, branding }) => {
             </div>
 
             {/* Filters */}
-            <div className="p-3 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div className="p-3 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row justify-end items-center gap-4">
                 <div className="flex gap-2 items-center">
                     <div className="flex items-center gap-2 px-3 py-2.5 bg-slate-50 rounded-xl border border-slate-200 w-44">
                         <Filter className="w-4 h-4 text-slate-400 shrink-0" />

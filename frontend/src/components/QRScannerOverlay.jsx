@@ -179,7 +179,8 @@ export const QRScannerOverlay = ({ onScan, onClose, scannerFunction }) => {
 
                 <div className="mt-8 text-center animate-in slide-in-from-bottom-4 bg-black/40 px-8 py-4 rounded-3xl border border-white/10 backdrop-blur-md w-full max-w-[420px]">
                     <h2 className="text-2xl font-bold text-white tracking-wide mb-2">
-                        {scannerFunction === 'entrance' ? 'Incoming Registration' : 'Outgoing Registration'}
+                        {scannerFunction === 'entrance' ? 'Incoming Registration' : 
+                         scannerFunction === 'event' ? 'Event Attendance' : 'Outgoing Registration'}
                     </h2>
                     <p className={`text-lg transition-colors ${
                         isSuccess ? 'text-emerald-400 font-bold' : 'text-white/70 font-medium'
