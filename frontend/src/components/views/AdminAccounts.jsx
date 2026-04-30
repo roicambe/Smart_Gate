@@ -189,8 +189,8 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
     return (
         <div className="relative flex min-h-0 w-full flex-col space-y-6 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
             <SettingsSectionHeader
-                icon={ShieldCheck}
-                title="Administrator Registry"
+                icon={UserPlus}
+                title="Administrative Registry"
                 description="Oversee platform supervisors and configure role assignments."
                 iconWrapperClassName="border-emerald-200 bg-emerald-50 text-emerald-600"
                 action={(
@@ -297,6 +297,41 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                 >
                     <form onSubmit={handleAdd} className="space-y-6">
                             <div className="grid gap-5">
+                                <div className="space-y-3">
+                                    <label className="block text-sm font-semibold text-white/80">Role Allocation</label>
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                        {ROLE_OPTIONS.map((role) => {
+                                            const active = addForm.role === role;
+                                            return (
+                                                <label
+                                                    key={role}
+                                                    className={`flex cursor-pointer flex-col justify-center rounded-2xl border px-4 py-4 transition-all ${active ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'bg-black/40 border-white/10 text-white/50 hover:border-white/30'}`}
+                                                >
+                                                    <input
+                                                        type="radio"
+                                                        name="role"
+                                                        value={role}
+                                                        checked={active}
+                                                        onChange={(event) => {
+                                                            const nextRole = event.target.value;
+                                                            setHasCustomizedPassword(false);
+                                                            setAddForm((current) => ({
+                                                                ...current,
+                                                                role: nextRole,
+                                                                password: getSuggestedPassword(current.full_name, nextRole),
+                                                            }));
+                                                        }}
+                                                        className="sr-only"
+                                                    />
+                                                    <span className="mb-1 font-bold">{role}</span>
+                                                    <span className="text-xs leading-tight opacity-70">
+                                                        {role === 'System Administrator' ? 'Full system access' : 'Gate operations access'}
+                                                    </span>
+                                                </label>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
                                 <div>
                                     <label className="mb-1 block text-xs font-medium text-white/60">
                                         Username <span className="ml-0.5 text-rose-500">*</span>
@@ -365,42 +400,6 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                                             Auto-filled from the provided name to keep first-login credentials easy, but you can still edit it.
                                         </p>
                                     )}
-                                </div>
-
-                                <div className="space-y-3">
-                                    <label className="block text-sm font-semibold text-white/80">Role Allocation</label>
-                                    <div className="grid gap-3 sm:grid-cols-2">
-                                        {ROLE_OPTIONS.map((role) => {
-                                            const active = addForm.role === role;
-                                            return (
-                                                <label
-                                                    key={role}
-                                                    className={`flex cursor-pointer flex-col justify-center rounded-2xl border px-4 py-4 transition-all ${active ? 'bg-indigo-600/20 border-indigo-500 text-indigo-400' : 'bg-black/40 border-white/10 text-white/50 hover:border-white/30'}`}
-                                                >
-                                                    <input
-                                                        type="radio"
-                                                        name="role"
-                                                        value={role}
-                                                        checked={active}
-                                                        onChange={(event) => {
-                                                            const nextRole = event.target.value;
-                                                            setHasCustomizedPassword(false);
-                                                            setAddForm((current) => ({
-                                                                ...current,
-                                                                role: nextRole,
-                                                                password: getSuggestedPassword(current.full_name, nextRole),
-                                                            }));
-                                                        }}
-                                                        className="sr-only"
-                                                    />
-                                                    <span className="mb-1 font-bold">{role}</span>
-                                                    <span className="text-xs leading-tight opacity-70">
-                                                        {role === 'System Administrator' ? 'Full system access' : 'Gate operations access'}
-                                                    </span>
-                                                </label>
-                                            );
-                                        })}
-                                    </div>
                                 </div>
                             </div>
 

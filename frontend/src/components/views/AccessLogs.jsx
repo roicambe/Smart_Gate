@@ -288,7 +288,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
         showProcessing("Preparing Excel export...");
 
         try {
-            const uniName = (branding && branding.system_name) ? branding.system_name : "Pamantasan ng Lungsod ni Roi";
+            const uniName = (branding && branding.system_name) ? branding.system_name : "Pamantasan ng Lungsod ng Pasig";
             const sysName = activeTab === 'gateLogs' ? "Smart Gate - General Gate Logs" : "Smart Gate - Event Attendance";
             
             let dateRangeStr = "All Time";

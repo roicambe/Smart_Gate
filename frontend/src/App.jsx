@@ -14,7 +14,7 @@ function App() {
     
     // System Branding State
     const [branding, setBranding] = useState({
-        system_name: "Pamantasan ng Lungsod ni Roi",
+        system_name: "Pamantasan ng Lungsod ng Pasig",
         system_logo: "" // Default empty, HeaderBar will handle fallback to default logo
     });
 
@@ -60,9 +60,10 @@ function App() {
                             view={view}
                             setView={setView}
                             isGhostScannerDisabled={isAdminOverlayOpen}
+                            branding={branding}
                         />
                     )}
-                    {view === "action_event" && <EventActionMenu setView={setView} />}
+                    {view === "action_event" && <EventActionMenu setView={setView} branding={branding} />}
                     {view.startsWith("admin_") && adminSession && (
                         <AdminLayout 
                             view={view} 
