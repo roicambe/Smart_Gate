@@ -1174,6 +1174,28 @@ pub fn get_students(pool: &DbPool) -> Result<Vec<StudentDetails>, String> {
     Ok(list)
 }
 
+pub fn promote_all_students(pool: &DbPool, active_admin_id: i64) -> Result<(), String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "UPDATE students SET year_level = year_level + 1 WHERE year_level IS NOT NULL",
+        params![],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "UPDATE",
+        "students",
+        0,
+        Some("Bulk Promotion".to_string()),
+        Some("All students year levels incremented by 1".to_string()),
+    );
+
+    Ok(())
+}
+
 pub fn add_employee(pool: &DbPool, employee: Employee) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     conn.execute(
@@ -2855,10 +2877,11 @@ pub fn add_admin_account(
     let username = username.trim();
     let full_name = full_name.trim();
     let email = email.trim();
-    let normalized_password = if role == "Gate Supervisor" {
+    let password = password.trim();
+    let normalized_password = if password.is_empty() && role == "Gate Supervisor" {
         generate_gate_supervisor_password(full_name)
     } else {
-        password.trim().to_string()
+        password.to_string()
     };
 
     if username.is_empty() || full_name.is_empty() || normalized_password.is_empty() {
@@ -2870,6 +2893,16 @@ pub fn add_admin_account(
     }
 
     let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let strict_email: bool = conn.query_row(
+        "SELECT setting_value FROM settings WHERE setting_key = 'strict_email_domain'",
+        [],
+        |row| row.get::<_, String>(0).map(|v| v == "1" || v.to_lowercase() == "true")
+    ).unwrap_or(false);
+
+    if strict_email && !email.to_lowercase().ends_with("@plpasig.edu.ph") {
+        return Err("Institutional Email Required: Administrator accounts must use a @plpasig.edu.ph address.".to_string());
+    }
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     conn.execute(
         "INSERT INTO accounts (username, password_hash, full_name, email, role, is_first_login, activation_otp, activation_otp_expires_at, created_at)
@@ -2996,6 +3029,16 @@ pub fn update_admin_info(
     }
 
     let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let strict_email: bool = conn.query_row(
+        "SELECT setting_value FROM settings WHERE setting_key = 'strict_email_domain'",
+        [],
+        |row| row.get::<_, String>(0).map(|v| v == "1" || v.to_lowercase() == "true")
+    ).unwrap_or(false);
+
+    if strict_email && !email.to_lowercase().ends_with("@plpasig.edu.ph") {
+        return Err("Institutional Email Required: Administrator accounts must use a @plpasig.edu.ph address.".to_string());
+    }
 
     let (old_username, old_full_name, old_email): (String, String, Option<String>) = conn.query_row(
         "SELECT username, full_name, email FROM accounts WHERE account_id = ?1",

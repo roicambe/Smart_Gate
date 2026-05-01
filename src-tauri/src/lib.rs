@@ -99,6 +99,7 @@ pub fn run() {
             commands::update_system_branding,
             commands::get_available_printers,
             commands::print_receipt_image_silent,
+            commands::promote_all_students,
             commands::get_archived_users,
             commands::get_archived_events,
             commands::get_archived_academic,

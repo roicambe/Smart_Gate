@@ -104,6 +104,11 @@ pub fn add_student(pool: State<'_, DbPool>, student: Student) -> Result<(), Stri
 }
 
 #[tauri::command]
+pub fn promote_all_students(pool: State<'_, DbPool>, active_admin_id: i64) -> Result<(), String> {
+    db::promote_all_students(&pool, active_admin_id)
+}
+
+#[tauri::command]
 pub fn get_employees(pool: State<'_, DbPool>) -> Result<Vec<EmployeeDetails>, String> {
     db::get_employees(&pool)
 }
