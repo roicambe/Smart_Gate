@@ -185,4 +185,4 @@ INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES
     ('report_email', 'info@plpasig.edu.ph'),
     ('system_logo', ''),
     ('strict_email_domain', 'true'),
-    ('enable_face_recognition', 'false');
+    ('enable_face_recognition', 'true');
