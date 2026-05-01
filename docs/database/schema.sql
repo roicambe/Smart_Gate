@@ -17,16 +17,13 @@ CREATE TABLE IF NOT EXISTS programs (
     FOREIGN KEY (department_id) REFERENCES departments(department_id)
 );
 
--- User Management
+-- User Management (Normalized)
 CREATE TABLE IF NOT EXISTS persons (
     person_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    id_number VARCHAR UNIQUE NOT NULL, -- Renamed from school_id_number
-    role TEXT CHECK(role IN ('student', 'professor', 'staff', 'visitor')) NOT NULL,
+    id_number VARCHAR UNIQUE NOT NULL,
     first_name VARCHAR NOT NULL,
     middle_name VARCHAR NULL,
     last_name VARCHAR NOT NULL,
-    email VARCHAR NULL,               -- Added: Normalized contact data
-    contact_number VARCHAR NULL,      -- Added: Normalized contact data
     face_template_path VARCHAR NULL,
     is_active BOOLEAN NOT NULL DEFAULT 1,
     is_archived BOOLEAN NOT NULL DEFAULT 0,
@@ -34,9 +31,29 @@ CREATE TABLE IF NOT EXISTS persons (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Stores ArcFace 512-dim face vectors for recognition.
--- One "master" (centroid) vector per person — averaged from enrollment samples.
--- Embedding stored as BLOB: 512 x float32 = 2048 bytes.
+CREATE TABLE IF NOT EXISTS roles (
+    role_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    role_name TEXT UNIQUE NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS person_roles (
+    person_id INTEGER NOT NULL,
+    role_id INTEGER NOT NULL,
+    PRIMARY KEY (person_id, role_id),
+    FOREIGN KEY (person_id) REFERENCES persons(person_id) ON DELETE CASCADE,
+    FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS person_contacts (
+    contact_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    person_id INTEGER NOT NULL,
+    contact_type TEXT CHECK(contact_type IN ('email', 'phone')) NOT NULL,
+    contact_value TEXT NOT NULL,
+    is_primary BOOLEAN NOT NULL DEFAULT 0,
+    FOREIGN KEY (person_id) REFERENCES persons(person_id) ON DELETE CASCADE
+);
+
+-- Biometrics
 CREATE TABLE IF NOT EXISTS face_embeddings (
     embedding_id INTEGER PRIMARY KEY AUTOINCREMENT,
     person_id    INTEGER NOT NULL UNIQUE,
@@ -45,11 +62,13 @@ CREATE TABLE IF NOT EXISTS face_embeddings (
     FOREIGN KEY (person_id) REFERENCES persons(person_id) ON DELETE CASCADE
 );
 
+-- Subtype tables
 CREATE TABLE IF NOT EXISTS students (
     person_id INTEGER PRIMARY KEY,
     program_id INTEGER NOT NULL,
     year_level INTEGER NULL,
-    FOREIGN KEY (person_id) REFERENCES persons(person_id),
+    is_irregular BOOLEAN NOT NULL DEFAULT 0,
+    FOREIGN KEY (person_id) REFERENCES persons(person_id) ON DELETE CASCADE,
     FOREIGN KEY (program_id) REFERENCES programs(program_id)
 );
 
@@ -57,14 +76,14 @@ CREATE TABLE IF NOT EXISTS visitors (
     person_id INTEGER PRIMARY KEY,
     purpose_of_visit VARCHAR NOT NULL,
     person_to_visit VARCHAR NOT NULL,
-    FOREIGN KEY (person_id) REFERENCES persons(person_id)
+    FOREIGN KEY (person_id) REFERENCES persons(person_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS employees (
     person_id INTEGER PRIMARY KEY,
     department_id INTEGER NOT NULL,
     position_title VARCHAR NOT NULL,
-    FOREIGN KEY (person_id) REFERENCES persons(person_id),
+    FOREIGN KEY (person_id) REFERENCES persons(person_id) ON DELETE CASCADE,
     FOREIGN KEY (department_id) REFERENCES departments(department_id)
 );
 
@@ -75,56 +94,78 @@ CREATE TABLE IF NOT EXISTS scanners (
     function TEXT CHECK(function IN ('entrance', 'exit', 'event')) NOT NULL
 );
 
--- Logging & Events
-CREATE TABLE IF NOT EXISTS entry_logs (
-    log_id INTEGER PRIMARY KEY AUTOINCREMENT, -- SQLite uses INTEGER for bigints
-    person_id INTEGER NOT NULL,
-    scanner_id INTEGER NOT NULL,
-    scanned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (person_id) REFERENCES persons(person_id),
-    FOREIGN KEY (scanner_id) REFERENCES scanners(scanner_id)
-);
-
+-- Events & Scheduling (Normalized)
 CREATE TABLE IF NOT EXISTS events (
     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_name VARCHAR UNIQUE NOT NULL,
     description TEXT NULL,
-    schedule_type VARCHAR NULL DEFAULT 'weekly',
-    event_date VARCHAR NOT NULL,
-    start_date VARCHAR NULL,
-    end_date VARCHAR NULL,
-    start_time TIME NOT NULL,
-    end_time TIME NOT NULL,
-    required_role TEXT NOT NULL,
     is_enabled BOOLEAN NOT NULL DEFAULT 1,
     is_archived BOOLEAN NOT NULL DEFAULT 0,
     archived_at DATETIME NULL
 );
 
-CREATE TABLE IF NOT EXISTS event_attendance (
-    attendance_id INTEGER PRIMARY KEY AUTOINCREMENT,
+CREATE TABLE IF NOT EXISTS event_weekly (
+    schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id INTEGER NOT NULL,
-    person_id INTEGER NOT NULL,
-    scanned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    status TEXT CHECK(status IN ('On Time', 'Late')) NOT NULL DEFAULT 'On Time',
-    FOREIGN KEY (event_id) REFERENCES events(event_id),
-    FOREIGN KEY (person_id) REFERENCES persons(person_id)
+    day_of_week TEXT NOT NULL, -- Monday, Tuesday, etc.
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    UNIQUE(event_id, day_of_week, start_time, end_time),
+    FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE
 );
 
-INSERT OR IGNORE INTO events (event_name, description, schedule_type, event_date, start_time, end_time, required_role, is_enabled)  
-VALUES ('Flag Ceremony', 'Official weekly campus flag ceremony', 'weekly', 'Monday', '07:30', '08:00', 'all', 1);
+CREATE TABLE IF NOT EXISTS event_date_range (
+    schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    UNIQUE(event_id, start_date, end_date, start_time, end_time),
+    FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS event_required_roles (
+    event_id INTEGER NOT NULL,
+    role_id INTEGER NOT NULL,
+    PRIMARY KEY (event_id, role_id),
+    FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE,
+    FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE CASCADE
+);
+
+-- Unified Activity Logs
+CREATE TABLE IF NOT EXISTS activity_logs (
+    log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    person_id INTEGER NOT NULL,
+    scanner_id INTEGER NOT NULL,
+    activity_type TEXT CHECK(activity_type IN ('entrance', 'exit', 'event')) NOT NULL,
+    event_id INTEGER NULL, -- Links to events table if activity_type is 'event'
+    scanned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status TEXT NULL, -- 'On Time', 'Late' for events, NULL for gate
+    FOREIGN KEY (person_id) REFERENCES persons(person_id),
+    FOREIGN KEY (scanner_id) REFERENCES scanners(scanner_id),
+    FOREIGN KEY (event_id) REFERENCES events(event_id)
+);
 
 -- Admin
-CREATE TABLE IF NOT EXISTS audit_logs (
-    audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    admin_id INTEGER NOT NULL, 
-    action_type TEXT CHECK(action_type IN ('INSERT', 'READ', 'UPDATE', 'DELETE')) NOT NULL,
-    target_table VARCHAR NOT NULL,
-    target_id INTEGER NOT NULL,
-    old_values JSON NULL,
-    new_values JSON NULL,
+CREATE TABLE IF NOT EXISTS audit_events (
+    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action_type TEXT CHECK(action_type IN ('CREATE', 'UPDATE', 'DELETE', 'ARCHIVE', 'RESTORE')) NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id INTEGER NOT NULL,
+    entity_label TEXT NOT NULL,
+    performed_by INTEGER NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (admin_id) REFERENCES accounts(account_id)
+    FOREIGN KEY (performed_by) REFERENCES accounts(account_id)
+);
+
+CREATE TABLE IF NOT EXISTS audit_changes (
+    change_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id INTEGER NOT NULL,
+    field_name TEXT NOT NULL,
+    old_value TEXT NULL,
+    new_value TEXT NULL,
+    FOREIGN KEY (event_id) REFERENCES audit_events(event_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS accounts (
@@ -140,7 +181,16 @@ CREATE TABLE IF NOT EXISTS accounts (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Seed Official University Academic Structure
+-- System Settings
+CREATE TABLE IF NOT EXISTS settings (
+    setting_key VARCHAR PRIMARY KEY,
+    setting_value TEXT NOT NULL
+);
+
+-- Seed Data
+INSERT OR IGNORE INTO roles (role_name) VALUES 
+    ('student'), ('professor'), ('staff'), ('visitor');
+
 INSERT OR IGNORE INTO departments (department_id, department_code, department_name) VALUES
     (1, 'COE', 'College of Education'),
     (2, 'CE', 'College of Engineering'),
@@ -150,7 +200,6 @@ INSERT OR IGNORE INTO departments (department_id, department_code, department_na
     (6, 'CCS', 'College of Computer Studies'),
     (7, 'CIHM', 'College of International Hospitality Management');
 
--- Seed Official Programs
 INSERT OR IGNORE INTO programs (program_id, department_id, program_code, program_name) VALUES
     (1, 1, 'BEED', 'Bachelor of Elementary Education'),
     (2, 1, 'BSED-EN', 'Bachelor of Secondary Education Major in English'),
@@ -166,16 +215,9 @@ INSERT OR IGNORE INTO programs (program_id, department_id, program_code, program
     (12, 7, 'BSHM', 'Bachelor of Science in Hospitality Management'),
     (13, 7, 'BSTM', 'Bachelor of Science in Tourism Management');
 
--- Seed Default Scanners
 INSERT OR IGNORE INTO scanners (scanner_id, location_name, function) VALUES
     (1, 'Main Entrance', 'entrance'),
     (2, 'Main Exit', 'exit');
-
--- System Settings
-CREATE TABLE IF NOT EXISTS settings (
-    setting_key VARCHAR PRIMARY KEY,
-    setting_value TEXT NOT NULL
-);
 
 INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES
     ('system_name', 'Pamantasan ng Lungsod ng Pasig'),
@@ -185,4 +227,17 @@ INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES
     ('report_email', 'info@plpasig.edu.ph'),
     ('system_logo', ''),
     ('strict_email_domain', 'true'),
-    ('enable_face_recognition', 'false');
+    ('enable_face_recognition', 'true');
+
+INSERT OR IGNORE INTO accounts (username, password_hash, full_name, role, is_first_login) VALUES
+    ('admin', 'admin123', 'System Administrator', 'System Administrator', 0);
+
+-- Default Events
+INSERT OR IGNORE INTO events (event_id, event_name, description) VALUES
+    (1, 'Flag Ceremony', 'Official Monday morning assembly');
+
+INSERT OR IGNORE INTO event_weekly (event_id, day_of_week, start_time, end_time) VALUES
+    (1, 'Monday', '07:30:00', '08:30:00');
+
+INSERT OR IGNORE INTO event_required_roles (event_id, role_id)
+SELECT 1, role_id FROM roles;

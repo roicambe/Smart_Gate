@@ -81,7 +81,7 @@ export const SystemSettings = ({ setIsAdminLoggedIn, setView, adminSession, bran
                 )}
                 {activeTab === 'system_branding' && isSystemAdministrator && ( <SystemBrandingPanel branding={branding} fetchBranding={fetchBranding} adminSession={adminSession} showToast={notify} /> )} {activeTab === 'system_configuration' && isSystemAdministrator && ( <SystemConfigurationPanel branding={branding} fetchBranding={fetchBranding} adminSession={adminSession} showToast={notify} /> )}
                 {activeTab === 'admin_accounts' && isSystemAdministrator && (
-                    <AdminAccounts adminSession={adminSession} showToast={notify} />
+                    <AdminAccounts adminSession={adminSession} branding={branding} showToast={notify} />
                 )}
             </div>
         </div>

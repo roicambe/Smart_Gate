@@ -41,6 +41,13 @@ const rolesToRequiredRoleValue = (roles) => {
 const formatRequiredRoleLabel = (requiredRole) => {
     const roles = parseRequiredRoles(requiredRole);
     if (roles.includes('all')) return 'All Roles';
+    
+    // If all defined roles are selected, show "All Roles"
+    const validRoles = EVENT_ROLE_OPTIONS.filter(o => o.value !== 'all').map(o => o.value);
+    if (validRoles.length > 0 && validRoles.every(r => roles.includes(r))) {
+        return 'All Roles';
+    }
+
     return roles
         .map((role) => EVENT_ROLE_OPTIONS.find((option) => option.value === role)?.label || role)
         .join(', ');
@@ -86,8 +93,10 @@ const formatRequiredYearLevels = (yearLevelsStr) => {
 };
 
 export const EventManagement = ({ branding, adminSession }) => {
-    const [events, setEvents] = useState([]);
+    const [eventDetails, setEventDetails] = useState([]); // Raw EventDetails from backend
+    const [events, setEvents] = useState([]); // Flattened events for UI
     const [programs, setPrograms] = useState([]);
+    const [roles, setRoles] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [isLoading, setIsLoading] = useState(true);
 
@@ -120,11 +129,91 @@ export const EventManagement = ({ branding, adminSession }) => {
         is_enabled: true
     });
 
+    const flattenEvent = (item) => {
+        const { event, weekly_schedules, date_range_schedules, required_roles } = item;
+        const schedule_type = weekly_schedules && weekly_schedules.length > 0 ? 'weekly' : 'date_range';
+        
+        let event_date = '';
+        let start_date = '';
+        let end_date = '';
+        let start_time = '';
+        let end_time = '';
+
+        if (schedule_type === 'weekly' && weekly_schedules) {
+            event_date = weekly_schedules.map(s => s.day_of_week).join(', ');
+            start_time = weekly_schedules[0]?.start_time || '';
+            end_time = weekly_schedules[0]?.end_time || '';
+        } else if (date_range_schedules && date_range_schedules.length > 0) {
+            start_date = date_range_schedules[0].start_date || '';
+            end_date = date_range_schedules[0].end_date || '';
+            start_time = date_range_schedules[0].start_time || '';
+            end_time = date_range_schedules[0].end_time || '';
+        }
+
+        return {
+            ...event,
+            schedule_type,
+            event_date,
+            start_date,
+            end_date,
+            start_time,
+            end_time,
+            required_role: required_roles && required_roles.length > 0 ? required_roles.map(r => r.role_name).join(',') : 'all'
+        };
+    };
+
+    const unflattenEvent = (data) => {
+        const { event_name, description, is_enabled, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role } = data;
+        
+        const event = {
+            event_id: selectedEvent?.event_id || 0,
+            event_name,
+            description,
+            is_enabled
+        };
+
+        const weekly_schedules = [];
+        const date_range_schedules = [];
+
+        if (schedule_type === 'weekly') {
+            const days = event_date.split(',').map(d => d.trim()).filter(Boolean);
+            days.forEach(day => {
+                weekly_schedules.push({
+                    schedule_id: 0,
+                    event_id: event.event_id,
+                    day_of_week: day,
+                    start_time,
+                    end_time
+                });
+            });
+        } else {
+            date_range_schedules.push({
+                schedule_id: 0,
+                event_id: event.event_id,
+                start_date,
+                end_date,
+                start_time,
+                end_time
+            });
+        }
+
+        const required_role_names = required_role === 'all' ? [] : required_role.split(',').map(r => r.trim().toLowerCase()).filter(Boolean);
+        const required_roles = roles.filter(r => required_role_names.includes(r.role_name.toLowerCase()));
+
+        return {
+            event,
+            weekly_schedules,
+            date_range_schedules,
+            required_roles
+        };
+    };
+
     const fetchEvents = async () => {
         setIsLoading(true);
         try {
             const data = await invoke('get_events');
-            setEvents(data);
+            setEventDetails(data);
+            setEvents(data.map(flattenEvent));
         } catch (error) {
             console.error(error);
             showError('Failed to fetch events.');
@@ -143,9 +232,19 @@ export const EventManagement = ({ branding, adminSession }) => {
         }
     };
 
+    const fetchRoles = async () => {
+        try {
+            const data = await invoke('get_roles');
+            setRoles(data);
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
     useEffect(() => {
         fetchEvents();
         fetchPrograms();
+        fetchRoles();
     }, []);
 
     const handleRegisterSubmit = async (e) => {
@@ -154,14 +253,16 @@ export const EventManagement = ({ branding, adminSession }) => {
             const requiredRole = rolesToRequiredRoleValue(selectedRoles);
             const requiredPrograms = selectedPrograms.includes('all') ? null : selectedPrograms.join(',');
             const requiredYearLevels = selectedYearLevels.length === 4 ? null : selectedYearLevels.join(',');
+            
+            const payload = unflattenEvent({
+                ...formData,
+                required_role: requiredRole,
+                required_programs: requiredPrograms,
+                required_year_levels: requiredYearLevels
+            });
+
             await invoke('add_event', {
-                event: {
-                    event_id: 0,
-                    ...formData,
-                    required_role: requiredRole,
-                    required_programs: requiredPrograms,
-                    required_year_levels: requiredYearLevels
-                },
+                event: payload,
                 activeAdminId: adminSession?.account_id
             });
             showSuccess('Event Created: Event added successfully!');
@@ -203,15 +304,16 @@ export const EventManagement = ({ branding, adminSession }) => {
             const requiredPrograms = selectedPrograms.includes('all') ? null : selectedPrograms.join(',');
             const requiredYearLevels = selectedYearLevels.length === 4 ? null : selectedYearLevels.join(',');
 
+            const payload = unflattenEvent({
+                ...formData,
+                required_role: requiredRole,
+                required_programs: requiredPrograms,
+                required_year_levels: requiredYearLevels
+            });
+
             await invoke('update_event', {
                 eventId: selectedEvent.event_id,
-                event: {
-                    event_id: selectedEvent.event_id,
-                    ...formData,
-                    required_role: requiredRole,
-                    required_programs: requiredPrograms,
-                    required_year_levels: requiredYearLevels
-                },
+                event: payload,
                 activeAdminId: adminSession?.account_id
             });
             showSuccess('Settings Updated: Event updated successfully!');
@@ -247,6 +349,7 @@ export const EventManagement = ({ branding, adminSession }) => {
 
     const resetForm = () => {
         setFormData({ event_name: '', description: '', schedule_type: 'weekly', event_date: '', start_date: '', end_date: '', start_time: '', end_time: '', required_role: 'all', required_programs: null, required_year_levels: null, is_enabled: true });
+        setSelectedEvent(null);
         setSelectedRoles(['all']);
         setSelectedPrograms(['all']);
         setSelectedYearLevels([1, 2, 3, 4]);

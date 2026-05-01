@@ -24,7 +24,7 @@ const getSuggestedPassword = (fullName, role) => (
     role === 'Gate Supervisor' ? generateGateSupervisorPassword(fullName) : ''
 );
 
-export const AdminAccounts = ({ adminSession, showToast }) => {
+export const AdminAccounts = ({ adminSession, branding, showToast }) => {
     const [accounts, setAccounts] = useState([]);
 
     const [showAddModal, setShowAddModal] = useState(false);
@@ -62,10 +62,12 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
     }, []);
 
     useEffect(() => {
-        if (addForm.role === 'Gate Supervisor' && !hasCustomizedPassword) {
+        if (!hasCustomizedPassword) {
             setAddForm((current) => ({
                 ...current,
-                password: generateGateSupervisorPassword(current.full_name),
+                password: current.role === 'Gate Supervisor'
+                    ? generateGateSupervisorPassword(current.full_name)
+                    : '',
             }));
         }
     }, [addForm.role, addForm.full_name, hasCustomizedPassword]);
@@ -77,6 +79,11 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
 
         if (!validateEmail(addForm.email)) {
             showToast('Enter a valid contact/notification email address.', 'error');
+            return;
+        }
+
+        if (branding?.strict_email_domain && !addForm.email.trim().toLowerCase().endsWith('@plpasig.edu.ph')) {
+            showToast('Institutional Email Required: Administrator accounts must use a @plpasig.edu.ph address.', 'error');
             return;
         }
 
@@ -150,6 +157,11 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
             return;
         }
 
+        if (branding?.strict_email_domain && !editForm.email.trim().toLowerCase().endsWith('@plpasig.edu.ph')) {
+            showToast('Institutional Email Required: Administrator accounts must use a @plpasig.edu.ph address.', 'error');
+            return;
+        }
+
         try {
             await invoke('update_admin_info', {
                 accountId: selectedAccount.account_id,
@@ -217,7 +229,7 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                         {accounts.map((account) => (
-                            <tr key={account.account_id} className="hover:bg-slate-50">
+                            <tr key={account.account_id} className="group transition-colors hover:bg-slate-50">
                                 <td className="px-6 py-4 font-medium text-slate-900">{account.username}</td>
                                 <td className="px-6 py-4">
                                     {account.full_name}
@@ -248,6 +260,16 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                                         <button
                                             onClick={() => {
                                                 setSelectedAccount(account);
+                                                setShowResetModal(true);
+                                            }}
+                                            className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-600 opacity-0 transition-all hover:bg-rose-100 group-hover:opacity-100 focus:opacity-100"
+                                            title="Force Password Reset"
+                                        >
+                                            <KeyRound className="h-4 w-4" /> Force Reset
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setSelectedAccount(account);
                                                 setEditForm({
                                                     username: account.username,
                                                     full_name: account.full_name,
@@ -255,18 +277,10 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                                                 });
                                                 setShowEditModal(true);
                                             }}
-                                            className="flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-600 transition-colors hover:bg-amber-100"
+                                            className="rounded-lg border border-transparent p-2 text-amber-600 opacity-0 transition-all hover:border-amber-200 hover:bg-amber-100 group-hover:opacity-100 focus:opacity-100"
+                                            title="Edit Info"
                                         >
-                                            <Edit2 className="h-3.5 w-3.5" /> Edit Info
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                setSelectedAccount(account);
-                                                setShowResetModal(true);
-                                            }}
-                                            className="flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-600 transition-colors hover:bg-rose-100"
-                                        >
-                                            <KeyRound className="h-3.5 w-3.5" /> Force Reset
+                                            <Edit2 className="h-4 w-4" />
                                         </button>
                                         <button
                                             onClick={() => {
@@ -274,9 +288,10 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                                                 setShowDeleteModal(true);
                                             }}
                                             disabled={account.account_id === adminSession.account_id}
-                                            className="flex items-center gap-1 rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                            className="rounded-lg border border-transparent p-2 text-rose-600 opacity-0 transition-all hover:border-rose-200 hover:bg-rose-100 group-hover:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
+                                            title="Delete Account"
                                         >
-                                            <Trash2 className="h-3.5 w-3.5" /> Delete
+                                            <Trash2 className="h-4 w-4" />
                                         </button>
                                     </div>
                                 </td>
@@ -318,7 +333,6 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                                                             setAddForm((current) => ({
                                                                 ...current,
                                                                 role: nextRole,
-                                                                password: getSuggestedPassword(current.full_name, nextRole),
                                                             }));
                                                         }}
                                                         className="sr-only"
@@ -358,9 +372,6 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                                             setAddForm((current) => ({
                                                 ...current,
                                                 full_name: nextFullName,
-                                                password: current.role === 'Gate Supervisor' && !hasCustomizedPassword
-                                                    ? generateGateSupervisorPassword(nextFullName)
-                                                    : current.password,
                                             }));
                                         }}
                                         className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none placeholder-white/20"
@@ -390,7 +401,7 @@ export const AdminAccounts = ({ adminSession, showToast }) => {
                                         value={addForm.password}
                                         onChange={(event) => {
                                             setHasCustomizedPassword(true);
-                                            setAddForm({ ...addForm, password: event.target.value });
+                                            setAddForm((current) => ({ ...current, password: event.target.value }));
                                         }}
                                         className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white font-mono focus:ring-2 focus:ring-white/20 focus:outline-none placeholder-white/20"
                                         placeholder={addForm.role === 'Gate Supervisor' ? 'Suggested from the supervisor name' : 'Create a temporary password'}
