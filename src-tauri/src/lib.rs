@@ -108,6 +108,7 @@ pub fn run() {
             commands::restore_department,
             commands::restore_program,
             commands::permanent_delete_user,
+            commands::get_roles,
             commands::permanent_delete_event,
             commands::permanent_delete_department,
             commands::permanent_delete_program,

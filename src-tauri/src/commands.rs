@@ -16,28 +16,27 @@ pub fn get_persons(pool: State<'_, DbPool>) -> Result<Vec<Person>, String> {
 pub fn add_person(
     pool: State<'_, DbPool>,
     id_number: String,
-    role: String,
     first_name: String,
     middle_name: Option<String>,
     last_name: String,
-    email: Option<String>,
-    contact_number: Option<String>,
     face_template_path: Option<String>,
     is_active: bool,
 ) -> Result<i64, String> {
     let person = Person {
         person_id: 0, // Assigned by DB
         id_number,
-        role,
         first_name,
         middle_name,
         last_name,
-        email,
-        contact_number,
         face_template_path,
         is_active,
     };
     db::add_person(&pool, person)
+}
+
+#[tauri::command]
+pub fn get_roles(pool: State<'_, DbPool>) -> Result<Vec<Role>, String> {
+    db::get_roles(&pool)
 }
 
 #[tauri::command]
@@ -144,12 +143,14 @@ pub fn get_access_logs(
     search_term: Option<String>,
     start_date: Option<String>,
     end_date: Option<String>,
-) -> Result<Vec<AccessLogDetails>, String> {
+) -> Result<Vec<ActivityLogDetails>, String> {
     db::get_access_logs(
         &pool,
         role_filter,
         action_type,
         department_id,
+        None, // program_id
+        None, // year_level
         search_term,
         start_date,
         end_date,
@@ -164,20 +165,20 @@ pub fn get_event_attendance_logs(
     department_id: Option<i64>,
     program_id: Option<i64>,
     year_level: Option<i64>,
-) -> Result<Vec<EventAttendanceLog>, String> {
+) -> Result<Vec<ActivityLogDetails>, String> {
     db::get_event_attendance_logs(&pool, start_date, end_date, department_id, program_id, year_level)
 }
 
 #[tauri::command]
-pub fn get_events(pool: State<'_, DbPool>) -> Result<Vec<Event>, String> {
+pub fn get_events(pool: State<'_, DbPool>) -> Result<Vec<EventDetails>, String> {
     db::get_events(&pool)
 }
 #[tauri::command]
-pub fn add_event(pool: State<'_, DbPool>, event: Event, active_admin_id: i64) -> Result<i64, String> {
+pub fn add_event(pool: State<'_, DbPool>, event: EventDetails, active_admin_id: i64) -> Result<i64, String> {
     db::add_event(&pool, event, active_admin_id)
 }
 #[tauri::command]
-pub fn update_event(pool: State<'_, DbPool>, event_id: i64, event: Event, active_admin_id: i64) -> Result<(), String> {
+pub fn update_event(pool: State<'_, DbPool>, event_id: i64, event: EventDetails, active_admin_id: i64) -> Result<(), String> {
     db::update_event(&pool, event_id, event, active_admin_id)
 }
 #[tauri::command]
@@ -203,7 +204,9 @@ pub fn log_audit_action(
     old_values: Option<String>,
     new_values: Option<String>,
 ) -> Result<(), String> {
-    db::log_audit_action(&pool, admin_id, &action_type, &target_table, target_id, old_values, new_values)
+    let old_val = old_values.and_then(|s| serde_json::from_str(&s).ok());
+    let new_val = new_values.and_then(|s| serde_json::from_str(&s).ok());
+    db::log_audit_action(&pool, admin_id, &action_type, &target_table, target_id, "System Action", old_val, new_val)
 }
 
 #[tauri::command]
@@ -216,7 +219,9 @@ pub fn log_frontend_action(
     old_values: Option<String>,
     new_values: Option<String>,
 ) -> Result<(), String> {
-    db::log_audit_action(&pool, admin_id, &action_type, &target_table, target_id.unwrap_or(0), old_values, new_values)
+    let old_val = old_values.and_then(|s| serde_json::from_str(&s).ok());
+    let new_val = new_values.and_then(|s| serde_json::from_str(&s).ok());
+    db::log_audit_action(&pool, admin_id, &action_type, &target_table, target_id.unwrap_or(0), "System Action", old_val, new_val)
 }
 
 #[tauri::command]
@@ -224,7 +229,7 @@ pub fn get_audit_logs(
     pool: State<'_, DbPool>,
     start_date: Option<String>,
     end_date: Option<String>,
-) -> Result<Vec<AuditLogDetails>, String> {
+) -> Result<Vec<AuditEvent>, String> {
     db::get_audit_logs(&pool, start_date, end_date)
 }
 
@@ -478,17 +483,18 @@ pub fn register_user(
     position_title: Option<String>,
     purpose: Option<String>,
     person_to_visit: Option<String>,
+    is_active: bool,
     active_admin_id: Option<i64>,
 ) -> Result<i64, String> {
     db::register_user(
         &pool,
-        &role,
+        vec![role],
         &id_number,
         &first_name,
         middle_name,
         &last_name,
-        email,
-        contact_number,
+        email.into_iter().collect(),
+        contact_number.into_iter().collect(),
         program_id,
         year_level,
         is_irregular,
@@ -496,6 +502,7 @@ pub fn register_user(
         position_title,
         purpose,
         person_to_visit,
+        is_active,
         active_admin_id,
     )
 }
@@ -543,18 +550,19 @@ pub fn update_user(
     position_title: Option<String>,
     purpose: Option<String>,
     person_to_visit: Option<String>,
+    is_active: bool,
     active_admin_id: i64,
 ) -> Result<(), String> {
     db::update_user(
         &pool,
         person_id,
-        &role,
+        vec![role],
         &id_number,
         &first_name,
         middle_name,
         &last_name,
-        email,
-        contact_number,
+        email.into_iter().collect(),
+        contact_number.into_iter().collect(),
         program_id,
         year_level,
         is_irregular,
@@ -562,6 +570,7 @@ pub fn update_user(
         position_title,
         purpose,
         person_to_visit,
+        is_active,
         active_admin_id,
     )
 }
@@ -591,8 +600,9 @@ pub fn log_event_attendance(
     pool: State<'_, DbPool>,
     event_id: i64,
     id_number: String,
+    scanner_id: i64,
 ) -> Result<ScanResult, String> {
-    db::log_event_attendance(&pool, event_id, &id_number)
+    db::log_event_attendance(&pool, event_id, &id_number, scanner_id)
 }
 
 #[tauri::command]

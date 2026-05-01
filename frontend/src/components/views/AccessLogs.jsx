@@ -155,11 +155,12 @@ export const AccessLogs = ({ branding, adminSession }) => {
 
     // Gate logs are already filtered on backend. Event logs still rely on simple frontend filters for now.
     const filteredLogs = activeTab === 'gateLogs' ? currentData : currentData.filter(log => {
+        const roleStr = log.roles?.join(', ') || '';
         const matchesSearch = log.person_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             log.id_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
             log.event_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            log.role.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchesRole = roleFilter === 'All' || log.role.toLowerCase() === roleFilter.toLowerCase();
+            roleStr.toLowerCase().includes(searchTerm.toLowerCase());
+        const matchesRole = roleFilter === 'All' || log.roles?.some(r => r.toLowerCase() === roleFilter.toLowerCase());
         const matchesEvent = eventFilter === 'All' || log.event_name === eventFilter;
         return matchesSearch && matchesRole && matchesEvent;
     });
@@ -215,11 +216,12 @@ export const AccessLogs = ({ branding, adminSession }) => {
         };
 
         logsToProcess.forEach(log => {
-            const role = (log.role || '').toLowerCase();
-            if (role === 'student') stats.roleStudent++;
-            else if (role === 'professor') stats.roleProfessor++;
-            else if (role === 'staff') stats.roleStaff++;
-            else if (role === 'visitor') stats.roleVisitor++;
+            const roles = log.roles?.join(', ') || '';
+            const role = roles.toLowerCase();
+            if (role.includes('student')) stats.roleStudent++;
+            else if (role.includes('professor')) stats.roleProfessor++;
+            else if (role.includes('staff')) stats.roleStaff++;
+            else if (role.includes('visitor')) stats.roleVisitor++;
 
             const dateObj = new Date(log.scanned_at);
             const hour = dateObj.getHours();
@@ -367,7 +369,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                         formatDate(log.scanned_at),
                         log.person_name,
                         log.id_number,
-                        log.role,
+                        log.roles?.join(', ') || 'N/A',
                         log.department_name,
                         log.scanner_function.toUpperCase()
                     ]);
@@ -376,7 +378,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                         formatDate(log.scanned_at),
                         log.person_name,
                         log.id_number,
-                        log.role,
+                        log.roles?.join(', ') || 'N/A',
                         log.event_name,
                         log.status || 'On Time'
                     ]);
@@ -420,8 +422,9 @@ export const AccessLogs = ({ branding, adminSession }) => {
             await invoke('log_frontend_action', {
                 adminId: adminSession?.account_id,
                 actionType: 'EXPORT',
-                targetTable: activeTab === 'gateLogs' ? 'entry_logs' : 'event_attendance',
-                targetId: null,
+                entityType: activeTab === 'gateLogs' ? 'Entry Logs' : 'Event Attendance',
+                entityId: null,
+                entityLabel: `Excel Export (${filteredLogs.length} records)`,
                 oldValues: null,
                 newValues: JSON.stringify({ format: 'Excel', filename, record_count: filteredLogs.length })
             }).catch(e => console.error("Audit log failed for export", e));
@@ -486,7 +489,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                         formatDate(log.scanned_at),
                         log.person_name,
                         log.id_number,
-                        log.role,
+                        log.roles?.join(', ') || 'N/A',
                         log.department_name,
                         log.scanner_function.toUpperCase()
                     ]);
@@ -495,7 +498,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                         formatDate(log.scanned_at),
                         log.person_name,
                         log.id_number,
-                        log.role,
+                        log.roles?.join(', ') || 'N/A',
                         log.event_name,
                         log.status || 'On Time'
                     ]);
@@ -620,8 +623,9 @@ export const AccessLogs = ({ branding, adminSession }) => {
             await invoke('log_frontend_action', {
                 adminId: adminSession?.account_id,
                 actionType: 'EXPORT',
-                targetTable: activeTab === 'gateLogs' ? 'entry_logs' : 'event_attendance',
-                targetId: null,
+                entityType: activeTab === 'gateLogs' ? 'Entry Logs' : 'Event Attendance',
+                entityId: null,
+                entityLabel: `PDF Export (${filteredLogs.length} records)`,
                 oldValues: null,
                 newValues: JSON.stringify({ format: 'PDF', filename, record_count: filteredLogs.length })
             }).catch(e => console.error("Audit log failed for PDF export", e));
@@ -871,7 +875,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                             <tr className="text-slate-700">
                                 <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Timestamp</th>
                                 <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">User Info</th>
-                                <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Role</th>
+                                <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Roles</th>
                                 {activeTab === 'gateLogs' ? (
                                     <>
                                         <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Department</th>
@@ -904,18 +908,22 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                             </div>
                                         </td>
                                         <td className="px-3 py-1.5">
-                                            <span className={`px-2 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wider border ${log.role === 'student' ? 'bg-blue-100 text-blue-700 border-blue-200' :
-                                                log.role === 'professor' ? 'bg-purple-100 text-purple-700 border-purple-200' :
-                                                    log.role === 'visitor' ? 'bg-orange-100 text-orange-700 border-orange-200' :
-                                                        'bg-slate-100 text-slate-700 border-slate-200'
-                                                }`}>
-                                                {log.role}
-                                            </span>
+                                            <div className="flex flex-wrap gap-1">
+                                                {log.roles?.map(role => (
+                                                    <span key={role} className={`px-2 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wider border ${role.toLowerCase() === 'student' ? 'bg-blue-100 text-blue-700 border-blue-200' :
+                                                        role.toLowerCase() === 'professor' ? 'bg-purple-100 text-purple-700 border-purple-200' :
+                                                            role.toLowerCase() === 'visitor' ? 'bg-orange-100 text-orange-700 border-orange-200' :
+                                                                'bg-slate-100 text-slate-700 border-slate-200'
+                                                        }`}>
+                                                        {role}
+                                                    </span>
+                                                ))}
+                                            </div>
                                         </td>
                                         {activeTab === 'gateLogs' ? (
                                             <>
                                                 <td className="px-3 py-1.5 text-slate-600 text-xs font-semibold">
-                                                    {log.department_name || (log.role === 'visitor' ? "N/A" : "-")}
+                                                    {log.department_name || (log.roles?.some(r => r.toLowerCase() === 'visitor') ? "N/A" : "-")}
                                                 </td>
                                                 <td className="px-3 py-1.5 text-center">
                                                     <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded shadow-sm text-xs font-bold ${log.scanner_function === 'entrance'
@@ -936,10 +944,10 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                 <td className="px-3 py-1.5">
                                                     <div className="flex flex-col">
                                                         <span className="text-slate-900 font-medium text-xs">
-                                                            {log.department_name || (log.role === 'visitor' ? "N/A" : "-")}
+                                                            {log.department_name || (log.roles?.some(r => r.toLowerCase() === 'visitor') ? "N/A" : "-")}
                                                         </span>
                                                         <span className="text-[10px] text-slate-500 uppercase tracking-tight">
-                                                            {log.program_name ? `${log.program_name} ${log.year_level ? `- Year ${log.year_level}` : ""}` : (log.role === 'visitor' ? "Visitor" : (log.role !== 'student' ? (log.department_name ? "Faculty/Staff" : "-") : "-"))}
+                                                            {log.program_name ? `${log.program_name} ${log.year_level ? `- Year ${log.year_level}` : ""}` : (log.roles?.some(r => r.toLowerCase() === 'visitor') ? "Visitor" : (log.roles?.every(r => r.toLowerCase() !== 'student') ? (log.department_name ? "Faculty/Staff" : "-") : "-"))}
                                                         </span>
                                                     </div>
                                                 </td>
