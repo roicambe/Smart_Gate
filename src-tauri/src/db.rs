@@ -7,6 +7,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, OptionalExtension};
 use std::collections::HashMap;
 use std::fs;
+use regex::Regex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
@@ -1391,30 +1392,33 @@ pub fn bulk_import_users_from_excel(
         None
     };
 
-    let idx_id_number = require_col(&["id_number", "id number"])?;
-    let idx_first_name = require_col(&["first_name", "first name"])?;
-    let idx_last_name = require_col(&["last_name", "last name"])?;
-    let idx_middle_name = optional_col(&["middle_name", "middle name"]);
-    let idx_email = optional_col(&["email"]);
-    let idx_contact = optional_col(&["contact_number", "contact number"]);
+    let idx_id_number = require_col(&["id_number", "id number", "id", "student id", "employee id", "identification", "id_no"])?;
+    let idx_first_name = require_col(&["first_name", "first name", "given name", "fname", "name"])?;
+    let idx_last_name = require_col(&["last_name", "last name", "surname", "lname", "family name"])?;
+    let idx_middle_name = optional_col(&["middle_name", "middle name", "mname", "middle"]);
+    let idx_email = optional_col(&["email", "e-mail", "gmail", "yahoo", "outlook", "contact email"]);
+    let idx_contact = optional_col(&["contact_number", "contact number", "phone", "cellphone", "mobile", "mobile number", "contact"]);
 
-    let idx_program_name = optional_col(&["program_name", "program name"]);
-    let idx_program_code = optional_col(&["program_code", "program code"]);
-    let idx_year_level = optional_col(&["year_level", "year level"]);
+    let idx_program_name = optional_col(&["program_name", "program name", "course", "program", "course name"]);
+    let idx_program_code = optional_col(&["program_code", "program code", "course code"]);
+    let idx_year_level = optional_col(&["year_level", "year level", "year", "level", "yr level", "yr"]);
 
-    let idx_department_name = optional_col(&["department_name", "department name"]);
-    let idx_department_code = optional_col(&["department_code", "department code"]);
-    let idx_position_title = optional_col(&["position_title", "position title"]);
+    let idx_department_name = optional_col(&["department_name", "department name", "dept name", "department", "dept"]);
+    let idx_department_code = optional_col(&["department_code", "department code", "dept code"]);
+    let idx_position_title = optional_col(&["position_title", "position title", "position", "title", "job title", "rank"]);
 
     if role == "student" && idx_program_name.is_none() && idx_program_code.is_none() {
-        return Err("Student import requires either program_name or program_code column.".to_string());
+        return Err("Student import requires a Program Name or Program Code column.".to_string());
     }
     if (role == "professor" || role == "staff")
         && idx_department_name.is_none()
         && idx_department_code.is_none()
     {
-        return Err("Employee import requires either department_name or department_code column.".to_string());
+        return Err("Employee import requires a Department Name or Department Code column.".to_string());
     }
+
+    let student_id_regex = Regex::new(r"^\d{2}-\d{5}$").unwrap();
+    let employee_id_regex = Regex::new(r"^\d{9}$").unwrap();
 
     let mut conn = pool.get().map_err(|e| e.to_string())?;
 
@@ -1491,8 +1495,39 @@ pub fn bulk_import_users_from_excel(
 
         if id_number.is_empty() || first_name.is_empty() || last_name.is_empty() {
             failed_count += 1;
-            error_logs.push(format!("Row {line_number}: Missing required fields (id_number, first_name, or last_name)."));
+            error_logs.push(format!("Row {line_number}: Missing required fields (ID, First Name, or Last Name)."));
             continue;
+        }
+
+        // --- ID Number Validation ---
+        if role == "student" {
+            if !student_id_regex.is_match(&id_number) {
+                failed_count += 1;
+                error_logs.push(format!("Row {line_number}: Invalid Student ID '{}'. Must follow '00-00000' format.", id_number));
+                continue;
+            }
+        } else {
+            if !employee_id_regex.is_match(&id_number) {
+                failed_count += 1;
+                error_logs.push(format!("Row {line_number}: Invalid Employee ID '{}'. Must be exactly 9 digits.", id_number));
+                continue;
+            }
+        }
+
+        // --- Email & Contact Validation ---
+        if !email.is_empty() && !is_valid_email(&email) {
+            failed_count += 1;
+            error_logs.push(format!("Row {line_number}: [{first_name} {last_name}] Invalid email format '{}'.", email));
+            continue;
+        }
+
+        if !contact_number.is_empty() {
+            let digits: String = contact_number.chars().filter(|c| c.is_ascii_digit()).collect();
+            if digits.len() < 10 {
+                failed_count += 1;
+                error_logs.push(format!("Row {line_number}: [{first_name} {last_name}] Contact number '{}' is too short.", contact_number));
+                continue;
+            }
         }
 
         if strict_email {
@@ -1564,11 +1599,12 @@ pub fn bulk_import_users_from_excel(
                 let year_level_value = get_col(idx_year_level);
                 let program_id = [&program_name_value, &program_code_value]
                     .iter()
+                    .filter(|v| !v.is_empty())
                     .map(|v| normalize_lookup_key(v))
                     .find_map(|k| program_lookup.get(&k).copied())
                     .ok_or_else(|| {
                         format!(
-                            "Row {line_number}: Unable to resolve program from '{}' / '{}'.",
+                            "Row {line_number}: Program '{}' (Code: '{}') not found in system.",
                             program_name_value, program_code_value
                         )
                     })?;
@@ -1598,11 +1634,12 @@ pub fn bulk_import_users_from_excel(
 
                 let department_id = [&department_name_value, &department_code_value]
                     .iter()
+                    .filter(|v| !v.is_empty())
                     .map(|v| normalize_lookup_key(v))
                     .find_map(|k| department_lookup.get(&k).copied())
                     .ok_or_else(|| {
                         format!(
-                            "Row {line_number}: Unable to resolve department from '{}' / '{}'.",
+                            "Row {line_number}: Department '{}' (Code: '{}') not found in system.",
                             department_name_value, department_code_value
                         )
                     })?;
@@ -2104,9 +2141,10 @@ pub fn get_access_logs(
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let base_query = "
-        SELECT l.log_id, l.scanned_at, p.first_name, p.last_name, p.id_number, 
+        SELECT DISTINCT l.log_id, l.scanned_at, p.first_name, p.last_name, p.id_number, 
                COALESCE(d_s.department_name, d_e.department_name, 'N/A') as department_name, 
-               s.location_name, l.activity_type, e.event_name, l.status, p.person_id
+               s.location_name, l.activity_type, e.event_name, l.status, p.person_id,
+               prog.program_name, stu.year_level, emp.position_title
         FROM activity_logs l
         JOIN persons p ON l.person_id = p.person_id
         JOIN scanners s ON l.scanner_id = s.scanner_id
@@ -2155,6 +2193,9 @@ pub fn get_access_logs(
                     row.get::<_, Option<String>>(8)?,
                     row.get::<_, Option<String>>(9)?,
                     row.get::<_, i64>(10)?,
+                    row.get::<_, Option<String>>(11)?,
+                    row.get::<_, Option<i64>>(12)?,
+                    row.get::<_, Option<String>>(13)?,
                 ))
             },
         )
@@ -2162,7 +2203,7 @@ pub fn get_access_logs(
 
     let mut list = Vec::new();
     for row in rows {
-        let (log_id, scanned_at, first_name, last_name, id_number, dept_name, scanner_loc, activity_type, event_name, status, person_id) = row.map_err(|e| e.to_string())?;
+        let (log_id, scanned_at, first_name, last_name, id_number, dept_name, scanner_loc, activity_type, event_name, status, person_id, prog_name, year, pos_title) = row.map_err(|e| e.to_string())?;
         
         let roles = get_person_roles(&conn, person_id)?;
 
@@ -2173,8 +2214,11 @@ pub fn get_access_logs(
             id_number,
             roles,
             department_name: Some(dept_name),
+            program_name: prog_name,
+            year_level: year,
+            position_title: pos_title,
             scanner_location: scanner_loc,
-            activity_type,
+            scanner_function: activity_type,
             event_name,
             status,
         });
@@ -2565,6 +2609,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
                 success: false,
                 message: "Access Denied: ID is inactive.".to_string(),
                 person_name: Some(format!("{} {}", first_name, last_name)),
+                role: roles.first().map(|r| r.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &r[1..])),
                 roles: Some(roles),
             });
         }
@@ -2593,6 +2638,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
                     success: false,
                     message: "No entry record found for this ID".to_string(),
                     person_name: Some(format!("{} {}", first_name, last_name)),
+                    role: roles.first().map(|r| r.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &r[1..])),
                     roles: Some(roles),
                 });
             }
@@ -2604,6 +2650,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
                     success: false,
                     message: "Access Denied: This Visitor Pass expired at 11:59 PM yesterday. Please re-register.".to_string(),
                     person_name: Some(format!("{} {}", first_name, last_name)),
+                    role: roles.first().map(|r| r.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &r[1..])),
                     roles: Some(roles),
                 });
             }
@@ -2613,6 +2660,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
                     success: false,
                     message: "User is already on campus".to_string(),
                     person_name: Some(format!("{} {}", first_name, last_name)),
+                    role: roles.first().map(|r| r.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &r[1..])),
                     roles: Some(roles),
                 });
             }
@@ -2634,6 +2682,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
             success: true,
             message: format!("{} Successful.", if scanner.function == "entrance" { "Entry" } else { "Exit" }),
             person_name: Some(format!("{} {}", first_name, last_name)),
+            role: roles.first().map(|r| r.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &r[1..])),
             roles: Some(roles),
         })
     } else {
@@ -2641,6 +2690,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
             success: false,
             message: "Access Denied: ID not found.".to_string(),
             person_name: None,
+            role: None,
             roles: None,
         })
     }
@@ -2679,11 +2729,14 @@ pub fn manual_id_entry(
     if let Some((person_id, first_name, last_name, is_active, is_created_today)) = person_data {
         let roles = get_person_roles(&conn, person_id)?;
 
+        let role_label = roles.first().map(|r| r.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &r[1..]));
+
         if !is_active {
             return Ok(ScanResult {
                 success: false,
                 message: "Access Denied: ID is inactive.".to_string(),
                 person_name: Some(format!("{} {}", first_name, last_name)),
+                role: role_label,
                 roles: Some(roles),
             });
         }
@@ -2712,6 +2765,7 @@ pub fn manual_id_entry(
                     success: false,
                     message: "No entry record found for this ID".to_string(),
                     person_name: Some(format!("{} {}", first_name, last_name)),
+                    role: role_label,
                     roles: Some(roles),
                 });
             }
@@ -2723,6 +2777,7 @@ pub fn manual_id_entry(
                     success: false,
                     message: "Access Denied: This Visitor Pass expired at 11:59 PM yesterday. Please re-register.".to_string(),
                     person_name: Some(format!("{} {}", first_name, last_name)),
+                    role: role_label,
                     roles: Some(roles),
                 });
             }
@@ -2732,6 +2787,7 @@ pub fn manual_id_entry(
                     success: false,
                     message: "User is already on campus".to_string(),
                     person_name: Some(format!("{} {}", first_name, last_name)),
+                    role: role_label,
                     roles: Some(roles),
                 });
             }
@@ -2752,6 +2808,7 @@ pub fn manual_id_entry(
             success: true,
             message: format!("Manual {} Successful.", if scanner.function == "entrance" { "Entry" } else { "Exit" }),
             person_name: Some(format!("{} {}", first_name, last_name)),
+            role: role_label,
             roles: Some(roles),
         })
     } else {
@@ -2759,6 +2816,7 @@ pub fn manual_id_entry(
             success: false,
             message: "Access Denied: Record not found in database.".to_string(),
             person_name: None,
+            role: None,
             roles: None,
         })
     }
@@ -2788,29 +2846,48 @@ pub fn get_scan_person_details(
         let mut dept_name = None;
         let mut prog_name = None;
         let mut y_lvl = None;
+        let mut pos_title = None;
 
         if roles.iter().any(|r| r == "student") {
-            let stu_info: Option<(String, Option<i64>)> = conn.query_row(
-                "SELECT p.program_name, s.year_level FROM students s JOIN programs p ON s.program_id = p.program_id WHERE s.person_id = ?1",
+            let stu_info: Option<(String, String, Option<i64>)> = conn.query_row(
+                "SELECT p.program_name, d.department_name, s.year_level 
+                 FROM students s 
+                 JOIN programs p ON s.program_id = p.program_id 
+                 JOIN departments d ON p.department_id = d.department_id
+                 WHERE s.person_id = ?1",
                 params![person_id],
-                |row| Ok((row.get(0)?, row.get(1)?))
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
             ).optional().map_err(|e| e.to_string())?;
-            if let Some((p, y)) = stu_info {
+            
+            if let Some((p, d, y)) = stu_info {
                 prog_name = Some(p);
+                dept_name = Some(d);
                 y_lvl = y;
             }
         }
 
         if roles.iter().any(|r| r == "professor" || r == "staff") {
-            dept_name = conn.query_row(
-                "SELECT d.department_name FROM employees e JOIN departments d ON e.department_id = d.department_id WHERE e.person_id = ?1",
+            let emp_info: Option<(String, String)> = conn.query_row(
+                "SELECT d.department_name, e.position_title 
+                 FROM employees e 
+                 JOIN departments d ON e.department_id = d.department_id 
+                 WHERE e.person_id = ?1",
                 params![person_id],
-                |row| row.get(0)
+                |row| Ok((row.get(0)?, row.get(1)?))
             ).optional().map_err(|e| e.to_string())?;
+
+            if let Some((d, p)) = emp_info {
+                dept_name = Some(d);
+                pos_title = Some(p);
+            }
         }
+
+        let primary_role = roles.first().cloned().unwrap_or_else(|| "N/A".to_string());
+        let capitalized_role = primary_role.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &primary_role[1..]);
 
         Ok(Some(ScanPersonDetails {
             person_id,
+            role: capitalized_role,
             roles,
             id_number: id_num,
             first_name: first,
@@ -2819,6 +2896,8 @@ pub fn get_scan_person_details(
             department_name: dept_name,
             program_name: prog_name,
             year_level: y_lvl,
+            position_title: pos_title,
+            face_image: None,
         }))
     } else {
         Ok(None)
@@ -3089,7 +3168,7 @@ pub fn update_admin_credentials(
     let mut rows = stmt.query(params![account_id]).map_err(|e| e.to_string())?;
 
     if let Some(row) = rows.next().map_err(|e| e.to_string())? {
-        let username: String = row.get(0).map_err(|e| e.to_string())?;
+        let _username: String = row.get(0).map_err(|e| e.to_string())?;
         let stored_hash: String = row.get(1).map_err(|e| e.to_string())?;
         if stored_hash == current_password {
             conn.execute(
@@ -3110,11 +3189,10 @@ pub fn update_admin_credentials(
                 "Security",
                 account_id,
                 "Administrator Password",
-                Some(json!({ "password_hash": "(old)" })),
+                Some(json!({})),
                 Some(
                     json!({
-                        "summary": "Password Updated",
-                        "password_hash": "(updated)"
+                        "summary": "Password Updated"
                     })
                 ),
             );
@@ -3283,11 +3361,10 @@ pub fn reset_admin_password(
         "Account", 
         account_id, 
         &account_name,
-        Some(json!({"password_hash": "(old)"})), 
+        Some(json!({})), 
         Some(
             json!({
-                "summary": format!("Password reset for account: {}.", account_name),
-                "password_hash": "(new)"
+                "summary": format!("Password reset for account: {}.", account_name)
             })
         )
     );
@@ -3410,11 +3487,11 @@ pub fn delete_admin_account(
         }
     }
 
-    let (deleted_username, deleted_full_name): (String, String) = conn.query_row(
-        "SELECT username, full_name FROM accounts WHERE account_id = ?1", 
+    let (deleted_username, deleted_full_name, deleted_email, deleted_role): (String, String, Option<String>, String) = conn.query_row(
+        "SELECT username, full_name, email, role FROM accounts WHERE account_id = ?1", 
         params![account_id], 
-        |row| Ok((row.get(0)?, row.get(1)?))
-    ).unwrap_or_else(|_| ("Unknown".to_string(), "Unknown".to_string()));
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+    ).unwrap_or_else(|_| ("Unknown".to_string(), "Unknown".to_string(), None, "Unknown".to_string()));
 
     // Reassign audit_events that reference the to-be-deleted account to the
     // active admin, so the FK constraint is satisfied without losing history.
@@ -3439,7 +3516,9 @@ pub fn delete_admin_account(
         &deleted_full_name,
         Some(json!({
             "username": deleted_username,
-            "full_name": deleted_full_name
+            "full_name": deleted_full_name,
+            "email": deleted_email,
+            "role": deleted_role
         })), 
         None
     );
@@ -3656,12 +3735,12 @@ pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
         .unwrap_or(0);
 
     let entries_today: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM activity_logs l JOIN scanners s ON l.scanner_id = s.scanner_id WHERE s.function = 'entrance' AND DATE(l.scanned_at) = DATE('now', 'localtime')",
+        "SELECT COUNT(*) FROM activity_logs l WHERE l.activity_type = 'entrance' AND DATE(l.scanned_at) = DATE('now', 'localtime')",
         [], |row| row.get(0)
     ).unwrap_or(0);
 
     let exits_today: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM activity_logs l JOIN scanners s ON l.scanner_id = s.scanner_id WHERE s.function = 'exit' AND DATE(l.scanned_at) = DATE('now', 'localtime')",
+        "SELECT COUNT(*) FROM activity_logs l WHERE l.activity_type = 'exit' AND DATE(l.scanned_at) = DATE('now', 'localtime')",
         [], |row| row.get(0)
     ).unwrap_or(0);
 
@@ -3671,8 +3750,7 @@ pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
          FROM activity_logs l
          JOIN person_roles pr ON pr.person_id = l.person_id
          JOIN roles r ON r.role_id = pr.role_id
-         JOIN scanners s ON s.scanner_id = l.scanner_id
-         WHERE s.function = 'entrance'
+         WHERE l.activity_type = 'entrance'
            AND DATE(l.scanned_at) BETWEEN ?1 AND ?2
          GROUP BY DATE(l.scanned_at), r.role_name
          ORDER BY DATE(l.scanned_at) ASC",
@@ -3753,6 +3831,7 @@ pub fn log_event_attendance(
             success: false,
             message: "Attendance Closed: Event is not enabled.".to_string(),
             person_name: None,
+            role: None,
             roles: None,
         });
     }
@@ -3792,6 +3871,7 @@ pub fn log_event_attendance(
             success: false,
             message: "Event is not scheduled for today or is currently outside active hours.".to_string(),
             person_name: None,
+            role: None,
             roles: None,
         });
     }
@@ -3811,12 +3891,14 @@ pub fn log_event_attendance(
 
     if let Some((person_id, first_name, last_name, is_active, is_created_today)) = person_data {
         let roles = get_person_roles(&conn, person_id)?;
+        let role_label = roles.first().map(|r| r.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &r[1..]));
 
         if !is_active {
             return Ok(ScanResult {
                 success: false,
                 message: "Access Denied: ID is inactive.".to_string(),
                 person_name: Some(format!("{} {}", first_name, last_name)),
+                role: role_label.clone(),
                 roles: Some(roles),
             });
         }
@@ -3828,6 +3910,7 @@ pub fn log_event_attendance(
                 success: false,
                 message: "Access Denied: This Visitor Pass expired at 11:59 PM yesterday. Please re-register.".to_string(),
                 person_name: Some(format!("{} {}", first_name, last_name)),
+                role: role_label.clone(),
                 roles: Some(roles),
             });
         }
@@ -3842,6 +3925,7 @@ pub fn log_event_attendance(
                 success: false,
                 message: "Access Denied: You do not have the required role for this event.".to_string(),
                 person_name: Some(format!("{} {}", first_name, last_name)),
+                role: role_label.clone(),
                 roles: Some(roles),
             });
         }
@@ -3858,6 +3942,7 @@ pub fn log_event_attendance(
                 success: false,
                 message: "Attendance already recorded for this event today.".to_string(),
                 person_name: Some(format!("{} {}", first_name, last_name)),
+                role: role_label.clone(),
                 roles: Some(roles),
             });
         }
@@ -3875,6 +3960,7 @@ pub fn log_event_attendance(
             success: true,
             message: format!("Attendance logged for {}.", event_details.event.event_name),
             person_name: Some(format!("{} {}", first_name, last_name)),
+            role: role_label,
             roles: Some(roles),
         })
     } else {
@@ -3882,6 +3968,7 @@ pub fn log_event_attendance(
             success: false,
             message: "Access Denied: ID not found.".to_string(),
             person_name: None,
+            role: None,
             roles: None,
         })
     }
@@ -4265,11 +4352,10 @@ pub fn reset_password_with_otp(
         "Account",
         account_id,
         &account_username,
-        Some(json!({ "password_hash": "(old)" })),
+        Some(json!({})),
         Some(
             json!({
-                "summary": format!("Password reset via Forgot Password for account: {}.", account_username),
-                "password_hash": "(new)"
+                "summary": format!("Password reset via Forgot Password for account: {}.", account_username)
             })
         ),
     );

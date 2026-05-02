@@ -12,6 +12,11 @@ import { AdminModal } from '../common/AdminModal';
 export const DataManagement = ({ adminSession }) => {
     const [activeTab, setActiveTab] = useState('archive_center');
     const [activeSubTab, setActiveSubTab] = useState('users');
+    
+    useEffect(() => {
+        setCurrentPage(1);
+        setSearchQuery('');
+    }, [activeTab, activeSubTab]);
     const { showToast } = useToast();
 
     // Data states
@@ -26,6 +31,11 @@ export const DataManagement = ({ adminSession }) => {
     const [confirmAction, setConfirmAction] = useState(null); // { type: 'restore'|'delete'|'restore_db', target: ..., function: ... }
     const [confirmInput, setConfirmInput] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
+    
+    // Search and Pagination
+    const [searchQuery, setSearchQuery] = useState('');
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 15;
 
     const activeAdminId = adminSession?.account_id;
 
@@ -238,6 +248,47 @@ export const DataManagement = ({ adminSession }) => {
     const getEventDescription = (event = {}) =>
         pickFirstText(event.description, event.event_description, event.eventDescription) || 'No description';
 
+    // Filtering and Pagination Logic
+    const getFilteredData = () => {
+        const query = searchQuery.toLowerCase();
+        if (activeSubTab === 'users') {
+            return archivedUsers.filter(u => 
+                `${u.first_name} ${u.last_name}`.toLowerCase().includes(query) ||
+                u.id_number.toLowerCase().includes(query) ||
+                (u.email || '').toLowerCase().includes(query) ||
+                (u.department_name || '').toLowerCase().includes(query) ||
+                (u.program_name || '').toLowerCase().includes(query)
+            );
+        } else if (activeSubTab === 'academic') {
+            return [
+                ...archivedAcademic.departments.map(d => ({ ...d, type: 'Department' })),
+                ...archivedAcademic.programs.map(p => ({ ...p, type: 'Program' }))
+            ].filter(item => 
+                getAcademicName(item).toLowerCase().includes(query) ||
+                getAcademicCode(item).toLowerCase().includes(query)
+            );
+        } else if (activeSubTab === 'events') {
+            return archivedEvents.filter(e => 
+                e.event_name.toLowerCase().includes(query) ||
+                getEventDescription(e).toLowerCase().includes(query) ||
+                getEventRequiredRole(e).toLowerCase().includes(query)
+            );
+        }
+        return [];
+    };
+
+    const filteredRecords = getFilteredData();
+    const totalPages = Math.ceil(filteredRecords.length / ITEMS_PER_PAGE);
+    const paginatedRecords = filteredRecords.slice(
+        (currentPage - 1) * ITEMS_PER_PAGE,
+        currentPage * ITEMS_PER_PAGE
+    );
+
+    const clearFilters = () => {
+        setSearchQuery('');
+        setCurrentPage(1);
+    };
+
     // Rendering Sub-tabs for Archive Center
     const renderArchiveTable = () => {
         if (activeSubTab === 'users') {
@@ -254,9 +305,29 @@ export const DataManagement = ({ adminSession }) => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {archivedUsers.length === 0 ? (
-                                <tr><td colSpan="5" className="px-6 py-8 text-center text-slate-400">No archived users found.</td></tr>
-                            ) : archivedUsers.map(u => {
+                            {paginatedRecords.length === 0 ? (
+                                <tr>
+                                    <td colSpan="5" className="p-12 text-center">
+                                        <div className="flex flex-col items-center justify-center space-y-4">
+                                            <div className="p-4 bg-slate-50 rounded-full border border-slate-100">
+                                                <Archive className="w-10 h-10 text-slate-300" />
+                                            </div>
+                                            <div>
+                                                <p className="text-slate-900 font-bold text-lg">No Archived Users</p>
+                                                <p className="text-slate-500 text-sm max-w-xs mx-auto">
+                                                    We couldn't find any archived user profiles matching your search.
+                                                </p>
+                                            </div>
+                                            <button
+                                                onClick={() => setSearchQuery('')}
+                                                className="text-blue-600 font-semibold text-sm hover:underline"
+                                            >
+                                                Clear search
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ) : paginatedRecords.map(u => {
                                 const isStudent = (u.role || '').toLowerCase() === 'student';
                                 const departmentLine = u.department_name || 'N/A';
                                 const detailLine = isStudent
@@ -304,11 +375,31 @@ export const DataManagement = ({ adminSession }) => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {archivedAcademic.departments.length === 0 && archivedAcademic.programs.length === 0 ? (
-                                    <tr><td colSpan="5" className="px-6 py-8 text-center text-slate-400">No archived academic structures found.</td></tr>
+                                {paginatedRecords.length === 0 ? (
+                                    <tr>
+                                        <td colSpan="5" className="p-12 text-center">
+                                            <div className="flex flex-col items-center justify-center space-y-4">
+                                                <div className="p-4 bg-slate-50 rounded-full border border-slate-100">
+                                                    <Archive className="w-10 h-10 text-slate-300" />
+                                                </div>
+                                                <div>
+                                                    <p className="text-slate-900 font-bold text-lg">No Archived Structures</p>
+                                                    <p className="text-slate-500 text-sm max-w-xs mx-auto">
+                                                        We couldn't find any archived academic structures matching your search.
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    onClick={() => setSearchQuery('')}
+                                                    className="text-blue-600 font-semibold text-sm hover:underline"
+                                                >
+                                                    Clear search
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
                                 ) : (
                                     <>
-                                        {archivedAcademic.departments.map(d => (
+                                        {paginatedRecords.filter(item => item.type === 'Department').map(d => (
                                             <tr key={`dept-${d.id}`} className="hover:bg-slate-50 transition-colors group">
                                                 <td className="px-5 py-3 font-medium text-slate-900">{getAcademicCode(d)}</td>
                                                 <td className="px-5 py-3 font-medium text-slate-900">{getAcademicName(d)}</td>
@@ -324,7 +415,7 @@ export const DataManagement = ({ adminSession }) => {
                                                 </td>
                                             </tr>
                                         ))}
-                                        {archivedAcademic.programs.map(p => (
+                                        {paginatedRecords.filter(item => item.type === 'Program').map(p => (
                                             <tr key={`prog-${p.id}`} className="hover:bg-slate-50 transition-colors group">
                                                 <td className="px-5 py-3 font-medium text-slate-900">{getAcademicCode(p)}</td>
                                                 <td className="px-5 py-3">
@@ -367,9 +458,29 @@ export const DataManagement = ({ adminSession }) => {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {archivedEvents.length === 0 ? (
-                                <tr><td colSpan="6" className="px-6 py-8 text-center text-slate-400">No archived events found.</td></tr>
-                            ) : archivedEvents.map(e => (
+                            {paginatedRecords.length === 0 ? (
+                                <tr>
+                                    <td colSpan="6" className="p-12 text-center">
+                                        <div className="flex flex-col items-center justify-center space-y-4">
+                                            <div className="p-4 bg-slate-50 rounded-full border border-slate-100">
+                                                <Archive className="w-10 h-10 text-slate-300" />
+                                            </div>
+                                            <div>
+                                                <p className="text-slate-900 font-bold text-lg">No Archived Events</p>
+                                                <p className="text-slate-500 text-sm max-w-xs mx-auto">
+                                                    We couldn't find any archived events matching your search criteria.
+                                                </p>
+                                            </div>
+                                            <button
+                                                onClick={() => setSearchQuery('')}
+                                                className="text-blue-600 font-semibold text-sm hover:underline"
+                                            >
+                                                Clear search
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ) : paginatedRecords.map(e => (
                                 <tr key={e.event_id} className="hover:bg-slate-50 transition-colors group">
                                     <td className="px-5 py-3 font-medium text-slate-900">{e.event_name}</td>
                                     <td className="px-5 py-3 text-slate-500 max-w-xs truncate" title={getEventDescription(e)}>{getEventDescription(e)}</td>
@@ -459,7 +570,71 @@ export const DataManagement = ({ adminSession }) => {
                                 </button>
                             ))}
                         </div>
+
+                        {/* Search and Filter Bar */}
+                        <div className="flex flex-col sm:flex-row items-center gap-3 pt-4">
+                            <div className="relative flex-1">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                <input
+                                    type="text"
+                                    placeholder={`Search archived ${activeSubTab}...`}
+                                    value={searchQuery}
+                                    onChange={(e) => {
+                                        setSearchQuery(e.target.value);
+                                        setCurrentPage(1);
+                                    }}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                                />
+                            </div>
+                            <button
+                                onClick={clearFilters}
+                                className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:text-slate-900 transition-colors"
+                            >
+                                Clear Filters
+                            </button>
+                        </div>
+
                         {renderArchiveTable()}
+
+                        {/* Pagination */}
+                        {totalPages > 1 && (
+                            <div className="flex items-center justify-between mt-4 px-2">
+                                <p className="text-xs text-slate-500 font-medium">
+                                    Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, filteredRecords.length)} of {filteredRecords.length} records
+                                </p>
+                                <div className="flex items-center gap-1">
+                                    <button
+                                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                        disabled={currentPage === 1}
+                                        className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        Prev
+                                    </button>
+                                    <div className="flex items-center gap-1 mx-2">
+                                        {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                                            <button
+                                                key={page}
+                                                onClick={() => setCurrentPage(page)}
+                                                className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${
+                                                    currentPage === page
+                                                        ? 'bg-slate-900 text-white shadow-md'
+                                                        : 'text-slate-600 hover:bg-slate-100'
+                                                }`}
+                                            >
+                                                {page}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <button
+                                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                        disabled={currentPage === totalPages}
+                                        className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                    >
+                                        Next
+                                    </button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 )}
 

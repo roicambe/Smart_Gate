@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { CheckCircle2, Edit2, KeyRound, ShieldCheck, Trash2, UserPlus } from 'lucide-react';
+import { CheckCircle2, ChevronLeft, ChevronRight, Edit2, KeyRound, Search, ShieldCheck, Trash2, UserPlus, ShieldAlert } from 'lucide-react';
 import { AdminModal } from '../common/AdminModal';
 import { SettingsSectionHeader } from '../common/SettingsSectionHeader';
 
@@ -26,6 +26,9 @@ const getSuggestedPassword = (fullName, role) => (
 
 export const AdminAccounts = ({ adminSession, branding, showToast }) => {
     const [accounts, setAccounts] = useState([]);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 15;
 
     const [showAddModal, setShowAddModal] = useState(false);
     const [showResetModal, setShowResetModal] = useState(false);
@@ -198,6 +201,22 @@ export const AdminAccounts = ({ adminSession, branding, showToast }) => {
         }
     };
 
+    const filteredAccounts = accounts.filter(account => {
+        const query = searchQuery.toLowerCase();
+        return (
+            account.username.toLowerCase().includes(query) ||
+            account.full_name.toLowerCase().includes(query) ||
+            (account.email || '').toLowerCase().includes(query) ||
+            account.role.toLowerCase().includes(query)
+        );
+    });
+
+    const totalPages = Math.ceil(filteredAccounts.length / ITEMS_PER_PAGE);
+    const paginatedAccounts = filteredAccounts.slice(
+        (currentPage - 1) * ITEMS_PER_PAGE,
+        currentPage * ITEMS_PER_PAGE
+    );
+
     return (
         <div className="relative flex min-h-0 w-full flex-col space-y-6 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
             <SettingsSectionHeader
@@ -206,12 +225,27 @@ export const AdminAccounts = ({ adminSession, branding, showToast }) => {
                 description="Oversee platform supervisors and configure role assignments."
                 iconWrapperClassName="border-emerald-200 bg-emerald-50 text-emerald-600"
                 action={(
-                    <button
-                        onClick={() => setShowAddModal(true)}
-                        className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-indigo-700 focus:outline-none"
-                    >
-                        <UserPlus className="h-5 w-5" /> New Account
-                    </button>
+                    <div className="flex items-center gap-4">
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                            <input
+                                type="text"
+                                placeholder="Search administrators..."
+                                value={searchQuery}
+                                onChange={(e) => {
+                                    setSearchQuery(e.target.value);
+                                    setCurrentPage(1);
+                                }}
+                                className="bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all w-64"
+                            />
+                        </div>
+                        <button
+                            onClick={() => setShowAddModal(true)}
+                            className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-indigo-700 focus:outline-none"
+                        >
+                            <UserPlus className="h-5 w-5" /> New Account
+                        </button>
+                    </div>
                 )}
             />
 
@@ -228,78 +262,137 @@ export const AdminAccounts = ({ adminSession, branding, showToast }) => {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {accounts.map((account) => (
-                            <tr key={account.account_id} className="group transition-colors hover:bg-slate-50">
-                                <td className="px-6 py-4 font-medium text-slate-900">{account.username}</td>
-                                <td className="px-6 py-4">
-                                    {account.full_name}
-                                    {account.account_id === adminSession.account_id && (
-                                        <span className="ml-2 rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-bold text-indigo-700">You</span>
-                                    )}
-                                </td>
-                                <td className="px-6 py-4 text-slate-700">{account.email || 'Not set'}</td>
-                                <td className="px-6 py-4">
-                                    <select
-                                        value={account.role}
-                                        onChange={(event) => handleUpdateRole(account.account_id, event.target.value)}
-                                        disabled={account.account_id === adminSession.account_id}
-                                        className="min-w-[150px] cursor-pointer rounded-lg bg-slate-100 px-2 py-1 text-sm font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/50 disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        {ROLE_OPTIONS.map((role) => (
-                                            <option key={role} value={role}>{role}</option>
-                                        ))}
-                                    </select>
-                                </td>
-                                <td className="px-6 py-4">
-                                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${account.is_first_login ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-700'}`}>
-                                        {account.is_first_login ? 'Pending Activation' : 'Active'}
-                                    </span>
-                                </td>
-                                <td className="px-6 py-4 text-right">
-                                    <div className="flex items-center justify-end gap-2">
-                                        <button
-                                            onClick={() => {
-                                                setSelectedAccount(account);
-                                                setShowResetModal(true);
-                                            }}
-                                            className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-600 opacity-0 transition-all hover:bg-rose-100 group-hover:opacity-100 focus:opacity-100"
-                                            title="Force Password Reset"
-                                        >
-                                            <KeyRound className="h-4 w-4" /> Force Reset
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                setSelectedAccount(account);
-                                                setEditForm({
-                                                    username: account.username,
-                                                    full_name: account.full_name,
-                                                    email: account.email || '',
-                                                });
-                                                setShowEditModal(true);
-                                            }}
-                                            className="rounded-lg border border-transparent p-2 text-amber-600 opacity-0 transition-all hover:border-amber-200 hover:bg-amber-100 group-hover:opacity-100 focus:opacity-100"
-                                            title="Edit Info"
-                                        >
-                                            <Edit2 className="h-4 w-4" />
-                                        </button>
-                                        <button
-                                            onClick={() => {
-                                                setSelectedAccount(account);
-                                                setShowDeleteModal(true);
-                                            }}
+                        {paginatedAccounts.length > 0 ? (
+                            paginatedAccounts.map((account) => (
+                                <tr key={account.account_id} className="group transition-colors hover:bg-slate-50">
+                                    <td className="px-6 py-4 font-medium text-slate-900">{account.username}</td>
+                                    <td className="px-6 py-4">
+                                        {account.full_name}
+                                        {account.account_id === adminSession.account_id && (
+                                            <span className="ml-2 rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-bold text-indigo-700">You</span>
+                                        )}
+                                    </td>
+                                    <td className="px-6 py-4 text-slate-700">{account.email || 'Not set'}</td>
+                                    <td className="px-6 py-4">
+                                        <select
+                                            value={account.role}
+                                            onChange={(event) => handleUpdateRole(account.account_id, event.target.value)}
                                             disabled={account.account_id === adminSession.account_id}
-                                            className="rounded-lg border border-transparent p-2 text-rose-600 opacity-0 transition-all hover:border-rose-200 hover:bg-rose-100 group-hover:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
-                                            title="Delete Account"
+                                            className="min-w-[150px] cursor-pointer rounded-lg bg-slate-100 px-2 py-1 text-sm font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/50 disabled:cursor-not-allowed disabled:opacity-50"
                                         >
-                                            <Trash2 className="h-4 w-4" />
+                                            {ROLE_OPTIONS.map((role) => (
+                                                <option key={role} value={role}>{role}</option>
+                                            ))}
+                                        </select>
+                                    </td>
+                                    <td className="px-6 py-4">
+                                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${account.is_first_login ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-700'}`}>
+                                            {account.is_first_login ? 'Pending Activation' : 'Active'}
+                                        </span>
+                                    </td>
+                                    <td className="px-6 py-4 text-right">
+                                        <div className="flex items-center justify-end gap-2">
+                                            <button
+                                                onClick={() => {
+                                                    setSelectedAccount(account);
+                                                    setShowResetModal(true);
+                                                }}
+                                                className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-600 opacity-0 transition-all hover:bg-rose-100 group-hover:opacity-100 focus:opacity-100"
+                                                title="Force Password Reset"
+                                            >
+                                                <KeyRound className="h-4 w-4" /> Force Reset
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    setSelectedAccount(account);
+                                                    setEditForm({
+                                                        username: account.username,
+                                                        full_name: account.full_name,
+                                                        email: account.email || '',
+                                                    });
+                                                    setShowEditModal(true);
+                                                }}
+                                                className="rounded-lg border border-transparent p-2 text-amber-600 opacity-0 transition-all hover:border-amber-200 hover:bg-amber-100 group-hover:opacity-100 focus:opacity-100"
+                                                title="Edit Info"
+                                            >
+                                                <Edit2 className="h-4 w-4" />
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    setSelectedAccount(account);
+                                                    setShowDeleteModal(true);
+                                                }}
+                                                disabled={account.account_id === adminSession.account_id}
+                                                className="rounded-lg border border-transparent p-2 text-rose-600 opacity-0 transition-all hover:border-rose-200 hover:bg-rose-100 group-hover:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
+                                                title="Delete Account"
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))
+                        ) : (
+                            <tr>
+                                <td colSpan="6" className="p-12 text-center">
+                                    <div className="flex flex-col items-center justify-center space-y-4">
+                                        <div className="p-4 bg-slate-50 rounded-full border border-slate-100">
+                                            <ShieldAlert className="w-10 h-10 text-slate-300" />
+                                        </div>
+                                        <div>
+                                            <p className="text-slate-900 font-bold text-lg">No Admins Found</p>
+                                            <p className="text-slate-500 text-sm max-w-xs mx-auto">
+                                                We couldn't find any administrative accounts matching your search query.
+                                            </p>
+                                        </div>
+                                        <button
+                                            onClick={() => setSearchQuery('')}
+                                            className="text-blue-600 font-semibold text-sm hover:underline"
+                                        >
+                                            Clear search
                                         </button>
                                     </div>
                                 </td>
                             </tr>
-                        ))}
+                        )}
                     </tbody>
                 </table>
             </div>
+
+            {totalPages > 1 && (
+                <div className="flex items-center justify-between border-t border-slate-100 pt-6">
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+                        Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredAccounts.length)} of {filteredAccounts.length} accounts
+                    </p>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                            disabled={currentPage === 1}
+                            className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                        >
+                            <ChevronLeft className="h-4 w-4" /> Previous
+                        </button>
+                        <div className="flex items-center gap-1">
+                            {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                                <button
+                                    key={p}
+                                    onClick={() => setCurrentPage(p)}
+                                    className={`flex h-8 w-8 items-center justify-center rounded-lg text-xs font-bold transition ${currentPage === p ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+                                >
+                                    {p}
+                                </button>
+                            ))}
+                        </div>
+                        <button
+                            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                            disabled={currentPage === totalPages}
+                            className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                        >
+                            Next <ChevronRight className="h-4 w-4" />
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {showAddModal && (
                 <AdminModal

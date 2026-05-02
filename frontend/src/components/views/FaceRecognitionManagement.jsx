@@ -60,6 +60,13 @@ export const FaceRecognitionManagement = ({ adminSession, branding }) => {
         }
     };
 
+    const clearFilters = () => {
+        setSearchQuery('');
+        setFilterRole('all');
+        setFilterStatus('all');
+        setCurrentPage(1);
+    };
+
     // Filter logic
     const filteredUsers = useMemo(() => {
         return users.filter(user => {
@@ -179,9 +186,15 @@ export const FaceRecognitionManagement = ({ adminSession, branding }) => {
                         placeholder="Search by ID or Name..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-2.5 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all font-medium"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-2.5 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-all font-medium"
                     />
                 </div>
+                <button
+                    onClick={clearFilters}
+                    className="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors shrink-0"
+                >
+                    Clear All
+                </button>
             </div>
 
             {/* Data Table */}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Plus, Search, Edit2, Trash2, Check, AlertTriangle, Eye, Filter } from 'lucide-react';
+import { Calendar, Plus, Search, Edit2, Trash2, Check, AlertTriangle, Eye, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from '../toast/ToastProvider';
 import { AdminModal } from '../common/AdminModal';
@@ -99,6 +99,8 @@ export const EventManagement = ({ branding, adminSession }) => {
     const [roles, setRoles] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [isLoading, setIsLoading] = useState(true);
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 15;
 
     // Filter states
     const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'enabled', 'disabled'
@@ -383,6 +385,19 @@ export const EventManagement = ({ branding, adminSession }) => {
         return matchSearch && matchStatus && matchType;
     });
 
+    const totalPages = Math.ceil(filteredEvents.length / ITEMS_PER_PAGE);
+    const paginatedEvents = filteredEvents.slice(
+        (currentPage - 1) * ITEMS_PER_PAGE,
+        currentPage * ITEMS_PER_PAGE
+    );
+
+    const clearFilters = () => {
+        setSearchQuery('');
+        setFilterStatus('all');
+        setFilterScheduleType('all');
+        setCurrentPage(1);
+    };
+
     const toggleProgram = (val) => {
         if (val === 'all') {
             setSelectedPrograms(['all']);
@@ -459,10 +474,19 @@ export const EventManagement = ({ branding, adminSession }) => {
                             type="text"
                             placeholder="Search Events..."
                             value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onChange={(e) => {
+                                setSearchQuery(e.target.value);
+                                setCurrentPage(1);
+                            }}
                             className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-2.5 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all font-medium"
                         />
                     </div>
+                    <button
+                        onClick={clearFilters}
+                        className="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors shrink-0"
+                    >
+                        Clear All
+                    </button>
                 </div>
             </div>
 
@@ -484,7 +508,7 @@ export const EventManagement = ({ branding, adminSession }) => {
                                 <tr>
                                     <td colSpan={6} className="text-center py-20 text-slate-500">Loading data...</td>
                                 </tr>
-                            ) : filteredEvents.length === 0 ? (
+                            ) : paginatedEvents.length === 0 ? (
                                 <tr>
                                     <td colSpan={6} className="text-center py-20">
                                         <div className="flex flex-col items-center justify-center space-y-3">
@@ -494,7 +518,7 @@ export const EventManagement = ({ branding, adminSession }) => {
                                     </td>
                                 </tr>
                             ) : (
-                                filteredEvents.map((event) => (
+                                paginatedEvents.map((event) => (
                                     <tr key={event.event_id} className="hover:bg-slate-50 even:bg-slate-50/50 transition-colors group">
                                         <td className="px-6 py-4 font-medium text-slate-900">{event.event_name}</td>
                                         <td className="px-6 py-4 text-slate-500 max-w-xs truncate" title={event.description || 'No description'}>
@@ -527,6 +551,41 @@ export const EventManagement = ({ branding, adminSession }) => {
                         </tbody>
                     </table>
                 </div>
+
+                {totalPages > 1 && (
+                    <div className="px-5 py-3 border-t border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 flex items-center justify-between shrink-0 rounded-b-xl">
+                        <div>
+                            Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredEvents.length)} of {filteredEvents.length}
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                disabled={currentPage === 1}
+                                className="p-1 rounded-md hover:bg-slate-200 disabled:opacity-30 transition-colors"
+                            >
+                                <ChevronLeft className="w-4 h-4" />
+                            </button>
+                            <div className="flex items-center gap-1 px-2">
+                                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                                    <button
+                                        key={page}
+                                        onClick={() => setCurrentPage(page)}
+                                        className={`w-6 h-6 rounded-md transition-all ${currentPage === page ? 'bg-slate-800 text-white' : 'hover:bg-slate-200'}`}
+                                    >
+                                        {page}
+                                    </button>
+                                ))}
+                            </div>
+                            <button
+                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                disabled={currentPage === totalPages}
+                                className="p-1 rounded-md hover:bg-slate-200 disabled:opacity-30 transition-colors"
+                            >
+                                <ChevronRight className="w-4 h-4" />
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {(showRegisterModal || showEditModal) && (

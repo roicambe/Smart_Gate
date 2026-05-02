@@ -11,56 +11,32 @@ import { useToast } from "./toast/ToastProvider";
 const ID_CARD_DURATION_MS = 1000;
 const DETAILED_TOAST_ROLES = new Set(["student", "professor", "staff"]);
 
-const formatRoleLabel = (role) => (
-    role
-        ? role.charAt(0).toUpperCase() + role.slice(1)
-        : "N/A"
-);
-
-const getYearLevelLabel = (yearLevel) => {
-    if (yearLevel === null || yearLevel === undefined) {
-        return null;
+const formatRoleLabel = (role) => {
+    if (Array.isArray(role)) {
+        return role.map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(', ');
     }
-
-    const suffixes = ["th", "st", "nd", "rd"];
-    const mod100 = yearLevel % 100;
-    const suffix = (mod100 >= 11 && mod100 <= 13)
-        ? "th"
-        : (suffixes[yearLevel % 10] || "th");
-
-    return `${yearLevel}${suffix} Year`;
+    return role ? role.charAt(0).toUpperCase() + role.slice(1) : "---";
 };
 
-const getProgramYearLabel = (programName, yearLevel) => {
-    const yearLabel = getYearLevelLabel(yearLevel);
-
-    if (programName && yearLabel) {
-        return `${programName} - ${yearLabel}`;
-    }
-
-    return programName || yearLabel || null;
+const getFullNameLabel = (person) => {
+    if (!person) return "---";
+    const middle = person.middle_name ? ` ${person.middle_name} ` : " ";
+    return `${person.first_name}${middle}${person.last_name}`;
 };
 
-const getFullNameLabel = ({ first_name, middle_name, last_name }) => (
-    [first_name, middle_name, last_name]
-        .filter(Boolean)
-        .join(" ")
-);
+const getProgramYearLabel = (person) => {
+    if (!person) return null;
+    const program = person.program_name || person.program || "";
+    const year = person.year_level ? ` Yr ${person.year_level}` : "";
+    return program || year ? `${program}${year}` : null;
+};
 
 const getDetailedToastMessage = (scanDetails) => {
-    const messageLines = [
-        `Role: ${formatRoleLabel(scanDetails.role)}`,
-        `Name: ${getFullNameLabel(scanDetails)}`,
-        `ID: ${scanDetails.id_number}`,
-        `Department: ${scanDetails.department_name || "N/A"}`
-    ];
-
-    const programYear = getProgramYearLabel(scanDetails.program_name, scanDetails.year_level);
-    if (programYear) {
-        messageLines.push(`Program & Year: ${programYear}`);
-    }
-
-    return messageLines.join("\n");
+    if (!scanDetails) return "Scan processed.";
+    const name = scanDetails.first_name ? `${scanDetails.first_name} ${scanDetails.last_name}` : "Unknown Person";
+    const role = formatRoleLabel(scanDetails.role || scanDetails.roles);
+    const context = scanDetails.department_name || scanDetails.program_name || "";
+    return `${name} (${role})${context ? ` - ${context}` : ""}`;
 };
 
 export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, branding }) => {
@@ -116,7 +92,8 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
         fallbackMessage,
         modalActive
     }) => {
-        const successMessage = fallbackMessage || `${result.message} - ${result.person_name} (${result.role})`;
+        const roleLabel = result.role || (result.roles && result.roles.length > 0 ? result.roles[0] : "User");
+        const successMessage = fallbackMessage || `${result.message} - ${result.person_name} (${roleLabel})`;
         const normalizedRole = (result.role || "").toString().trim().toLowerCase();
         const shouldShowDetailedToast = modalActive && DETAILED_TOAST_ROLES.has(normalizedRole);
 
@@ -504,7 +481,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
             )}
 
             {activeScanCard && (
-                <div className="pointer-events-none fixed inset-0 z-[90] flex items-center justify-center px-4">
+                <div className="pointer-events-none fixed inset-0 z-[200] flex items-center justify-center px-4">
                     <div className="pointer-events-auto relative w-full max-w-2xl rounded-3xl border border-white/20 bg-black/80 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
                         <button
                             type="button"
@@ -525,7 +502,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                         <div className="grid grid-cols-1 gap-4 text-base text-slate-100 sm:grid-cols-2">
                             <div>
                                 <p className="text-xs uppercase tracking-widest text-slate-300/80">Role</p>
-                                <p className="mt-1 text-xl font-semibold">{formatRoleLabel(activeScanCard.role)}</p>
+                                <p className="mt-1 text-xl font-semibold">{formatRoleLabel(activeScanCard.role || activeScanCard.roles?.[0])}</p>
                             </div>
                             <div>
                                 <p className="text-xs uppercase tracking-widest text-slate-300/80">ID Number</p>
@@ -533,13 +510,21 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                             </div>
                             <div>
                                 <p className="text-xs uppercase tracking-widest text-slate-300/80">Department</p>
-                                <p className="mt-1 font-semibold">{activeScanCard.department_name || "N/A"}</p>
+                                <p className="mt-1 font-semibold">{activeScanCard.department_name || "---"}</p>
                             </div>
-                            {getProgramYearLabel(activeScanCard.program_name, activeScanCard.year_level) && (
+                            {getProgramYearLabel(activeScanCard) && (
                                 <div>
                                     <p className="text-xs uppercase tracking-widest text-slate-300/80">Program & Year</p>
-                                    <p className="mt-1 font-semibold">
-                                        {getProgramYearLabel(activeScanCard.program_name, activeScanCard.year_level)}
+                                    <p className="mt-1 font-semibold text-cyan-200">
+                                        {getProgramYearLabel(activeScanCard)}
+                                    </p>
+                                </div>
+                            )}
+                            {activeScanCard.position_title && (
+                                <div>
+                                    <p className="text-xs uppercase tracking-widest text-slate-300/80">Position Title</p>
+                                    <p className="mt-1 font-semibold text-cyan-200">
+                                        {activeScanCard.position_title}
                                     </p>
                                 </div>
                             )}
