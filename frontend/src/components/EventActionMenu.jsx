@@ -535,24 +535,42 @@ export const EventActionMenu = ({ setView, branding }) => {
                                 <p className="mt-1 text-xl font-semibold">{activeScanCard.id_number}</p>
                             </div>
                             <div>
-                                <p className="text-xs uppercase tracking-widest text-slate-300/80">Department</p>
-                                <p className="mt-1 font-semibold">{activeScanCard.department_name || "---"}</p>
+                                <p className="text-xs uppercase tracking-widest text-slate-300/80">
+                                    {activeScanCard.role?.toLowerCase() === 'visitor' ? "Person to Visit" : "Department"}
+                                </p>
+                                <p className="mt-1 font-semibold">
+                                    {activeScanCard.role?.toLowerCase() === 'visitor' 
+                                        ? (activeScanCard.person_to_visit || "---")
+                                        : (activeScanCard.department_name || "---")
+                                    }
+                                </p>
                             </div>
-                            {getProgramYearLabel(activeScanCard) && (
+                            {activeScanCard.role?.toLowerCase() === 'visitor' ? (
                                 <div>
-                                    <p className="text-xs uppercase tracking-widest text-slate-300/80">Program & Year</p>
+                                    <p className="text-xs uppercase tracking-widest text-slate-300/80">Purpose of Visit</p>
                                     <p className="mt-1 font-semibold text-cyan-200">
-                                        {getProgramYearLabel(activeScanCard)}
+                                        {activeScanCard.purpose_of_visit || "---"}
                                     </p>
                                 </div>
-                            )}
-                            {activeScanCard.position_title && (
-                                <div>
-                                    <p className="text-xs uppercase tracking-widest text-slate-300/80">Position Title</p>
-                                    <p className="mt-1 font-semibold text-cyan-200">
-                                        {activeScanCard.position_title}
-                                    </p>
-                                </div>
+                            ) : (
+                                <>
+                                    {getProgramYearLabel(activeScanCard) && (
+                                        <div>
+                                            <p className="text-xs uppercase tracking-widest text-slate-300/80">Program & Year</p>
+                                            <p className="mt-1 font-semibold text-cyan-200">
+                                                {getProgramYearLabel(activeScanCard)}
+                                            </p>
+                                        </div>
+                                    )}
+                                    {activeScanCard.position_title && (
+                                        <div>
+                                            <p className="text-xs uppercase tracking-widest text-slate-300/80">Position Title</p>
+                                            <p className="mt-1 font-semibold text-cyan-200">
+                                                {activeScanCard.position_title}
+                                            </p>
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     </div>

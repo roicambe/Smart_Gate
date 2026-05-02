@@ -236,6 +236,8 @@ pub struct ScanPersonDetails {
     pub program_name: Option<String>,
     pub year_level: Option<i64>,
     pub position_title: Option<String>,
+    pub purpose_of_visit: Option<String>,
+    pub person_to_visit: Option<String>,
     pub face_image: Option<String>,
 }
 
