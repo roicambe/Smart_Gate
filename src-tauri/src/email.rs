@@ -107,8 +107,11 @@ pub async fn send_visitor_qr(
         .get()
         .map_err(|e| format!("DB connection error: {}", e))?;
 
-    let info_result: Result<(String, String, Option<String>, String, String), _> = conn.query_row(
-        "SELECT p.first_name, p.last_name, p.email, v.purpose_of_visit, v.person_to_visit 
+    let info_result: Result<(String, String, String, String, Option<String>), _> = conn.query_row(
+        "SELECT p.first_name, p.last_name, v.purpose_of_visit, v.person_to_visit,
+                (SELECT contact_value FROM person_contacts 
+                 WHERE person_id = p.person_id AND contact_type = 'email' 
+                 ORDER BY is_primary DESC LIMIT 1) as email
          FROM persons p 
          JOIN visitors v ON p.person_id = v.person_id 
          WHERE p.id_number = ?1",
@@ -124,7 +127,7 @@ pub async fn send_visitor_qr(
         },
     );
 
-    let (first_name, last_name, email_opt, purpose, person_to_visit) = match info_result {
+    let (first_name, last_name, purpose, person_to_visit, email_opt) = match info_result {
         Ok(res) => res,
         Err(_) => return Err(format!("Visitor with ID {} not found", id_number)),
     };
@@ -134,6 +137,7 @@ pub async fn send_visitor_qr(
         Some(e) if !e.trim().is_empty() => e.trim().to_string(),
         _ => return Ok("No email provided. Skipped sending.".to_string()),
     };
+
 
     let visitor_name = format!("{} {}", first_name, last_name);
 
