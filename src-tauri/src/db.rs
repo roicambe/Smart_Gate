@@ -2847,6 +2847,8 @@ pub fn get_scan_person_details(
         let mut prog_name = None;
         let mut y_lvl = None;
         let mut pos_title = None;
+        let mut purpose = None;
+        let mut target_person = None;
 
         if roles.iter().any(|r| r == "student") {
             let stu_info: Option<(String, String, Option<i64>)> = conn.query_row(
@@ -2882,6 +2884,19 @@ pub fn get_scan_person_details(
             }
         }
 
+        if roles.iter().any(|r| r == "visitor") {
+            let visitor_info: Option<(String, String)> = conn.query_row(
+                "SELECT purpose_of_visit, person_to_visit FROM visitors WHERE person_id = ?1",
+                params![person_id],
+                |row| Ok((row.get(0)?, row.get(1)?))
+            ).optional().map_err(|e| e.to_string())?;
+
+            if let Some((p, t)) = visitor_info {
+                purpose = Some(p);
+                target_person = Some(t);
+            }
+        }
+
         let primary_role = roles.first().cloned().unwrap_or_else(|| "N/A".to_string());
         let capitalized_role = primary_role.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &primary_role[1..]);
 
@@ -2897,6 +2912,8 @@ pub fn get_scan_person_details(
             program_name: prog_name,
             year_level: y_lvl,
             position_title: pos_title,
+            purpose_of_visit: purpose,
+            person_to_visit: target_person,
             face_image: None,
         }))
     } else {
