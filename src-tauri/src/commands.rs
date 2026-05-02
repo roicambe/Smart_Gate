@@ -30,6 +30,7 @@ pub fn add_person(
         last_name,
         face_template_path,
         is_active,
+        is_archived: false,
     };
     db::add_person(&pool, person)
 }

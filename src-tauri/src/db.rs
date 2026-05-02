@@ -1020,7 +1020,7 @@ pub fn add_person(pool: &DbPool, person: Person) -> Result<i64, String> {
 pub fn get_persons(pool: &DbPool) -> Result<Vec<Person>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT person_id, id_number, first_name, middle_name, last_name, face_template_path, is_active FROM persons WHERE is_archived = 0")
+    let mut stmt = conn.prepare("SELECT person_id, id_number, first_name, middle_name, last_name, face_template_path, is_active, is_archived FROM persons WHERE is_archived = 0")
         .map_err(|e| e.to_string())?;
 
     let person_iter = stmt
@@ -1033,6 +1033,7 @@ pub fn get_persons(pool: &DbPool) -> Result<Vec<Person>, String> {
                 last_name: row.get(4)?,
                 face_template_path: row.get(5)?,
                 is_active: row.get::<_, i32>(6)? == 1,
+                is_archived: row.get::<_, i32>(7)? == 1,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -1096,7 +1097,7 @@ pub fn add_student(pool: &DbPool, student: Student) -> Result<(), String> {
 pub fn get_students(pool: &DbPool) -> Result<Vec<StudentDetails>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.is_active,
+        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.is_active, p.is_archived,
                 s.program_id, pr.program_name, s.year_level, s.is_irregular, d.department_name
          FROM persons p
          JOIN students s ON p.person_id = s.person_id
@@ -1114,18 +1115,19 @@ pub fn get_students(pool: &DbPool) -> Result<Vec<StudentDetails>, String> {
                 row.get::<_, Option<String>>(3)?,
                 row.get::<_, String>(4)?,
                 row.get::<_, i32>(5)? == 1,
-                row.get::<_, i64>(6)?,
-                row.get::<_, String>(7)?,
-                row.get::<_, Option<i64>>(8)?,
-                row.get::<_, Option<bool>>(9)?,
-                row.get::<_, String>(10)?,
+                row.get::<_, i32>(6)? == 1,
+                row.get::<_, i64>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, Option<i64>>(9)?,
+                row.get::<_, Option<bool>>(10)?,
+                row.get::<_, String>(11)?,
             ))
         })
         .map_err(|e| e.to_string())?;
 
     let mut list = Vec::new();
     for row in rows {
-        let (person_id, id_number, first_name, middle_name, last_name, is_active, program_id, program_name, year_level, is_irregular, department_name) = row.map_err(|e| e.to_string())?;
+        let (person_id, id_number, first_name, middle_name, last_name, is_active, is_archived, program_id, program_name, year_level, is_irregular, department_name) = row.map_err(|e| e.to_string())?;
         
         let roles = get_person_roles(&conn, person_id)?;
         let contacts = get_person_contacts(&conn, person_id)?;
@@ -1139,6 +1141,7 @@ pub fn get_students(pool: &DbPool) -> Result<Vec<StudentDetails>, String> {
             roles,
             contacts,
             is_active,
+            is_archived,
             program_id,
             program_name,
             year_level,
@@ -1179,7 +1182,7 @@ pub fn promote_all_students(pool: &DbPool, active_admin_id: i64) -> Result<(), S
 
     for pid in &graduating_ids {
         tx.execute(
-            "UPDATE persons SET is_archived = 1, archived_at = ?1 WHERE person_id = ?2",
+            "UPDATE persons SET is_archived = 1, archived_at = ?1, is_active = 0 WHERE person_id = ?2",
             params![now, pid],
         )
         .map_err(|e| e.to_string())?;
@@ -1987,7 +1990,7 @@ pub fn delete_user(pool: &DbPool, person_id: i64, _role: &str, active_admin_id: 
 
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     conn.execute(
-        "UPDATE persons SET is_archived = 1, archived_at = ?1 WHERE person_id = ?2",
+        "UPDATE persons SET is_archived = 1, archived_at = ?1, is_active = 0 WHERE person_id = ?2",
         params![now, person_id],
     )
     .map_err(|e| e.to_string())?;
@@ -2009,7 +2012,7 @@ pub fn delete_user(pool: &DbPool, person_id: i64, _role: &str, active_admin_id: 
 pub fn get_employees(pool: &DbPool) -> Result<Vec<EmployeeDetails>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.is_active,
+        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.is_active, p.is_archived,
                 e.department_id, e.position_title, d.department_name
          FROM persons p
          JOIN employees e ON p.person_id = e.person_id
@@ -2026,16 +2029,17 @@ pub fn get_employees(pool: &DbPool) -> Result<Vec<EmployeeDetails>, String> {
                 row.get::<_, Option<String>>(3)?,
                 row.get::<_, String>(4)?,
                 row.get::<_, i32>(5)? == 1,
-                row.get::<_, i64>(6)?,
-                row.get::<_, String>(7)?,
+                row.get::<_, i32>(6)? == 1,
+                row.get::<_, i64>(7)?,
                 row.get::<_, String>(8)?,
+                row.get::<_, String>(9)?,
             ))
         })
         .map_err(|e| e.to_string())?;
 
     let mut list = Vec::new();
     for row in rows {
-        let (person_id, id_number, first_name, middle_name, last_name, is_active, department_id, position_title, department_name) = row.map_err(|e| e.to_string())?;
+        let (person_id, id_number, first_name, middle_name, last_name, is_active, is_archived, department_id, position_title, department_name) = row.map_err(|e| e.to_string())?;
         
         let roles = get_person_roles(&conn, person_id)?;
         let contacts = get_person_contacts(&conn, person_id)?;
@@ -2049,6 +2053,7 @@ pub fn get_employees(pool: &DbPool) -> Result<Vec<EmployeeDetails>, String> {
             roles,
             contacts,
             is_active,
+            is_archived,
             department_id,
             position_title,
             department_name,
@@ -2638,7 +2643,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     // 1. Check if person exists and is active
-    let mut stmt = conn.prepare("SELECT first_name, last_name, is_active, DATE(created_at) == DATE('now', 'localtime') as is_created_today FROM persons WHERE person_id = ?1")
+    let mut stmt = conn.prepare("SELECT first_name, last_name, is_active, is_archived, DATE(created_at) == DATE('now', 'localtime') as is_created_today FROM persons WHERE person_id = ?1")
         .map_err(|e| e.to_string())?;
 
     let person_data = stmt.query_row(params![person_id], |row| {
@@ -2647,12 +2652,23 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
             row.get::<_, String>(1)?,
             row.get::<_, bool>(2)?,
             row.get::<_, bool>(3)?,
+            row.get::<_, bool>(4)?,
         ))
     }).optional().map_err(|e| e.to_string())?;
 
-    if let Some((first_name, last_name, is_active, is_created_today)) = person_data {
+    if let Some((first_name, last_name, is_active, is_archived, is_created_today)) = person_data {
         let roles = get_person_roles(&conn, person_id)?;
         
+        if is_archived {
+            return Ok(ScanResult {
+                success: false,
+                message: "Access Denied: User is archived.".to_string(),
+                person_name: Some(format!("{} {}", first_name, last_name)),
+                role: roles.first().map(|r| r.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &r[1..])),
+                roles: Some(roles),
+            });
+        }
+
         if !is_active {
             return Ok(ScanResult {
                 success: false,
@@ -2762,7 +2778,7 @@ pub fn manual_id_entry(
 ) -> Result<ScanResult, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT person_id, first_name, last_name, is_active, DATE(created_at) == DATE('now', 'localtime') as is_created_today FROM persons WHERE id_number = ?1")
+    let mut stmt = conn.prepare("SELECT person_id, first_name, last_name, is_active, is_archived, DATE(created_at) == DATE('now', 'localtime') as is_created_today FROM persons WHERE id_number = ?1")
         .map_err(|e| e.to_string())?;
 
     let person_data = stmt.query_row(params![id_number], |row| {
@@ -2772,13 +2788,24 @@ pub fn manual_id_entry(
             row.get::<_, String>(2)?,
             row.get::<_, bool>(3)?,
             row.get::<_, bool>(4)?,
+            row.get::<_, bool>(5)?,
         ))
     }).optional().map_err(|e| e.to_string())?;
 
-    if let Some((person_id, first_name, last_name, is_active, is_created_today)) = person_data {
+    if let Some((person_id, first_name, last_name, is_active, is_archived, is_created_today)) = person_data {
         let roles = get_person_roles(&conn, person_id)?;
 
         let role_label = roles.first().map(|r| r.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &r[1..]));
+
+        if is_archived {
+            return Ok(ScanResult {
+                success: false,
+                message: "Access Denied: User is archived.".to_string(),
+                person_name: Some(format!("{} {}", first_name, last_name)),
+                role: role_label,
+                roles: Some(roles),
+            });
+        }
 
         if !is_active {
             return Ok(ScanResult {
@@ -2878,7 +2905,7 @@ pub fn get_scan_person_details(
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let person_basic = conn.query_row(
-        "SELECT person_id, id_number, first_name, middle_name, last_name FROM persons WHERE id_number = ?1",
+        "SELECT person_id, id_number, first_name, middle_name, last_name, is_active, is_archived FROM persons WHERE id_number = ?1",
         params![id_number],
         |row| Ok((
             row.get::<_, i64>(0)?,
@@ -2886,10 +2913,12 @@ pub fn get_scan_person_details(
             row.get::<_, String>(2)?,
             row.get::<_, Option<String>>(3)?,
             row.get::<_, String>(4)?,
+            row.get::<_, bool>(5)?,
+            row.get::<_, bool>(6)?,
         ))
     ).optional().map_err(|e| e.to_string())?;
 
-    if let Some((person_id, id_num, first, middle, last)) = person_basic {
+    if let Some((person_id, id_num, first, middle, last, is_active, is_archived)) = person_basic {
         let roles = get_person_roles(&conn, person_id)?;
         
         let mut dept_name = None;
@@ -2964,6 +2993,8 @@ pub fn get_scan_person_details(
             purpose_of_visit: purpose,
             person_to_visit: target_person,
             face_image: None,
+            is_active,
+            is_archived,
         }))
     } else {
         Ok(None)
@@ -3944,7 +3975,7 @@ pub fn log_event_attendance(
 
     // 3. Fetch Person
     let person_data = conn.query_row(
-        "SELECT person_id, first_name, last_name, is_active, DATE(created_at) == DATE('now', 'localtime') as is_created_today FROM persons WHERE id_number = ?1",
+        "SELECT person_id, first_name, last_name, is_active, is_archived, DATE(created_at) == DATE('now', 'localtime') as is_created_today FROM persons WHERE id_number = ?1",
         params![id_number],
         |row| Ok((
             row.get::<_, i64>(0)?,
@@ -3952,12 +3983,23 @@ pub fn log_event_attendance(
             row.get::<_, String>(2)?,
             row.get::<_, bool>(3)?,
             row.get::<_, bool>(4)?,
+            row.get::<_, bool>(5)?,
         ))
     ).optional().map_err(|e| e.to_string())?;
 
-    if let Some((person_id, first_name, last_name, is_active, is_created_today)) = person_data {
+    if let Some((person_id, first_name, last_name, is_active, is_archived, is_created_today)) = person_data {
         let roles = get_person_roles(&conn, person_id)?;
         let role_label = roles.first().map(|r| r.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &r[1..]));
+
+        if is_archived {
+            return Ok(ScanResult {
+                success: false,
+                message: "Access Denied: User is archived.".to_string(),
+                person_name: Some(format!("{} {}", first_name, last_name)),
+                role: role_label.clone(),
+                roles: Some(roles),
+            });
+        }
 
         if !is_active {
             return Ok(ScanResult {
@@ -4771,7 +4813,7 @@ pub fn restore_user(pool: &DbPool, person_id: i64, active_admin_id: i64) -> Resu
     ).unwrap_or_else(|_| "Unknown".to_string());
 
     conn.execute(
-        "UPDATE persons SET is_archived = 0, archived_at = NULL WHERE person_id = ?1",
+        "UPDATE persons SET is_archived = 0, archived_at = NULL, is_active = 1 WHERE person_id = ?1",
         params![person_id],
     ).map_err(|e| e.to_string())?;
 
