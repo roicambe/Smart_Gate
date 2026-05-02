@@ -1049,7 +1049,7 @@ pub fn update_person_status(pool: &DbPool, person_id: i64, is_active: bool, acti
         return Ok(());
     }
 
-    let mut conn = pool.get().map_err(|e| e.to_string())?;
+    let conn = pool.get().map_err(|e| e.to_string())?;
 
     // Only log if the status actually changed
     let current_status: bool = conn.query_row(
@@ -1161,11 +1161,11 @@ pub fn promote_all_students(pool: &DbPool, active_admin_id: i64) -> Result<(), S
         pool,
         active_admin_id,
         "UPDATE",
-        "System",
+        "Student",
         0,
-        "Bulk Student Promotion",
+        "Bulk Year Level Promotion",
         None,
-        Some(json!({ "action": "All students year levels incremented by 1" })),
+        Some(json!({ "summary": "All student year levels promoted" })),
     );
 
     Ok(())
@@ -1305,6 +1305,25 @@ pub fn register_user(
             conn.query_row("SELECT department_code FROM departments WHERE department_id = ?1", params![id], |row| row.get(0)).ok()
         );
 
+        let mut new_data = json!({
+            "id_number": id_number,
+            "first_name": first_name,
+            "middle_name": middle_name,
+            "last_name": last_name,
+            "roles": final_roles,
+            "emails": final_emails,
+            "phones": final_phones,
+            "is_active": is_active
+        });
+
+        if let Some(code) = program_code { new_data["program"] = json!(code); }
+        if let Some(code) = dept_code { new_data["department"] = json!(code); }
+        if let Some(yl) = year_level { new_data["year_level"] = json!(yl); }
+        if let Some(irreg) = is_irregular { new_data["is_irregular"] = json!(irreg); }
+        if let Some(pos) = position_title { new_data["position_title"] = json!(pos); }
+        if let Some(p) = purpose { new_data["purpose_of_visit"] = json!(p); }
+        if let Some(pv) = person_to_visit { new_data["person_to_visit"] = json!(pv); }
+
         let _ = log_audit_action(
             pool,
             admin_id,
@@ -1313,18 +1332,7 @@ pub fn register_user(
             person_id,
             &format!("{} {}", first_name, last_name),
             None,
-            Some(json!({
-                "id_number": id_number,
-                "first_name": first_name,
-                "middle_name": middle_name,
-                "last_name": last_name,
-                "roles": final_roles,
-                "emails": final_emails,
-                "phones": final_phones,
-                "program": program_code,
-                "department": dept_code,
-                "is_active": is_active
-            })),
+            Some(new_data),
         );
     }
 
@@ -1641,9 +1649,8 @@ pub fn bulk_import_users_from_excel(
             Some(
                 json!({
                     "summary": summary,
-                    "role": role,
-                    "count": success_count,
-                    "id_numbers": imported_ids
+                    "role": role_label,
+                    "count": success_count
                 })
             ),
         );
@@ -1845,22 +1852,52 @@ pub fn update_user(
 pub fn delete_user(pool: &DbPool, person_id: i64, _role: &str, active_admin_id: i64) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let old_roles = get_person_roles(&conn, person_id)?;
-    let old_contacts = get_person_contacts(&conn, person_id)?;
-    let old_person_data: (String, String, Option<String>, String) = conn.query_row(
-        "SELECT id_number, first_name, middle_name, last_name FROM persons WHERE person_id = ?1",
+    let roles = get_person_roles(&conn, person_id)?;
+    let contacts = get_person_contacts(&conn, person_id)?;
+    let emails: Vec<String> = contacts.iter().filter(|c| c.contact_type == "email").map(|c| c.contact_value.clone()).collect();
+    let phones: Vec<String> = contacts.iter().filter(|c| c.contact_type == "phone").map(|c| c.contact_value.clone()).collect();
+
+    let person_data: (String, String, Option<String>, String, bool) = conn.query_row(
+        "SELECT id_number, first_name, middle_name, last_name, is_active FROM persons WHERE person_id = ?1",
         params![person_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get::<_, i32>(4)? == 1))
     ).map_err(|e| e.to_string())?;
 
-    let old_data = json!({
-        "id_number": old_person_data.0,
-        "first_name": old_person_data.1,
-        "middle_name": old_person_data.2,
-        "last_name": old_person_data.3,
-        "roles": old_roles,
-        "contacts": old_contacts
+    let mut old_data = json!({
+        "id_number": person_data.0,
+        "first_name": person_data.1,
+        "middle_name": person_data.2,
+        "last_name": person_data.3,
+        "roles": roles,
+        "emails": emails,
+        "phones": phones,
+        "is_active": person_data.4
     });
+
+    if roles.iter().any(|r| r == "student") {
+        let stu_info: Option<(String, Option<i64>, bool)> = conn.query_row(
+            "SELECT p.program_code, s.year_level, s.is_irregular FROM students s JOIN programs p ON s.program_id = p.program_id WHERE s.person_id = ?1",
+            params![person_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i32>(2)? == 1))
+        ).optional().map_err(|e| e.to_string())?;
+        if let Some((prog, y_lvl, irreg)) = stu_info {
+            old_data["program"] = json!(prog);
+            old_data["year_level"] = json!(y_lvl);
+            old_data["is_irregular"] = json!(irreg);
+        }
+    }
+
+    if roles.iter().any(|r| r == "professor" || r == "staff") {
+        let emp_info: Option<(String, String)> = conn.query_row(
+            "SELECT d.department_code, e.position_title FROM employees e JOIN departments d ON e.department_id = d.department_id WHERE e.person_id = ?1",
+            params![person_id],
+            |row| Ok((row.get(0)?, row.get(1)?))
+        ).optional().map_err(|e| e.to_string())?;
+        if let Some((dept, pos)) = emp_info {
+            old_data["department"] = json!(dept);
+            old_data["position_title"] = json!(pos);
+        }
+    }
 
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     conn.execute(
@@ -1875,7 +1912,7 @@ pub fn delete_user(pool: &DbPool, person_id: i64, _role: &str, active_admin_id: 
         "ARCHIVE",
         "Person",
         person_id,
-        &format!("{} {}", old_person_data.1, old_person_data.3),
+        &format!("{} {}", person_data.1, person_data.3),
         Some(old_data),
         None,
     );
@@ -2157,6 +2194,57 @@ pub fn get_event_attendance_logs(
     get_access_logs(pool, None, Some("event".to_string()), department_id, program_id, year_level, None, start_date, end_date)
 }
 
+fn get_event_details_helper(conn: &rusqlite::Connection, event_id: i64) -> Result<EventDetails, String> {
+    let event = conn.query_row(
+        "SELECT event_id, event_name, description, is_enabled FROM events WHERE event_id = ?1",
+        params![event_id],
+        |row| Ok(Event {
+            event_id: row.get(0)?,
+            event_name: row.get(1)?,
+            description: row.get(2)?,
+            is_enabled: row.get::<_, i32>(3)? == 1,
+        })
+    ).map_err(|e| e.to_string())?;
+
+    let mut stmt_w = conn.prepare("SELECT schedule_id, event_id, day_of_week, start_time, end_time FROM event_weekly WHERE event_id = ?1").map_err(|e| e.to_string())?;
+    let weekly = stmt_w.query_map([event_id], |row| {
+        Ok(EventWeeklySchedule {
+            schedule_id: row.get(0)?,
+            event_id: row.get(1)?,
+            day_of_week: row.get(2)?,
+            start_time: row.get(3)?,
+            end_time: row.get(4)?,
+        })
+    }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+
+    let mut stmt_d = conn.prepare("SELECT schedule_id, event_id, start_date, end_date, start_time, end_time FROM event_date_range WHERE event_id = ?1").map_err(|e| e.to_string())?;
+    let date_range = stmt_d.query_map([event_id], |row| {
+        Ok(EventDateRangeSchedule {
+            schedule_id: row.get(0)?,
+            event_id: row.get(1)?,
+            start_date: row.get(2)?,
+            end_date: row.get(3)?,
+            start_time: row.get(4)?,
+            end_time: row.get(5)?,
+        })
+    }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+
+    let mut stmt_r = conn.prepare("SELECT r.role_id, r.role_name FROM roles r JOIN event_required_roles err ON r.role_id = err.role_id WHERE err.event_id = ?1").map_err(|e| e.to_string())?;
+    let roles = stmt_r.query_map([event_id], |row| {
+        Ok(Role {
+            role_id: row.get(0)?,
+            role_name: row.get(1)?,
+        })
+    }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+
+    Ok(EventDetails {
+        event,
+        weekly_schedules: weekly,
+        date_range_schedules: date_range,
+        required_roles: roles,
+    })
+}
+
 pub fn add_event(
     pool: &DbPool, 
     event_details: EventDetails, // Changed to handle complex structure
@@ -2202,6 +2290,23 @@ pub fn add_event(
 
     tx.commit().map_err(|e| e.to_string())?;
 
+    let mut new_val = json!({
+        "event_name": event_details.event.event_name,
+        "description": event_details.event.description,
+        "is_enabled": event_details.event.is_enabled,
+    });
+
+    if !event_details.weekly_schedules.is_empty() {
+        new_val["day_of_week"] = json!(event_details.weekly_schedules.iter().map(|s| s.day_of_week.clone()).collect::<Vec<_>>().join(", "));
+        new_val["start_time"] = json!(event_details.weekly_schedules[0].start_time);
+        new_val["end_time"] = json!(event_details.weekly_schedules[0].end_time);
+    } else if !event_details.date_range_schedules.is_empty() {
+        new_val["start_date"] = json!(event_details.date_range_schedules[0].start_date);
+        new_val["end_date"] = json!(event_details.date_range_schedules[0].end_date);
+        new_val["start_time"] = json!(event_details.date_range_schedules[0].start_time);
+        new_val["end_time"] = json!(event_details.date_range_schedules[0].end_time);
+    }
+
     let _ = log_audit_action(
         pool,
         active_admin_id,
@@ -2210,13 +2315,7 @@ pub fn add_event(
         event_id,
         &event_details.event.event_name,
         None,
-        Some(json!({
-            "event_name": event_details.event.event_name,
-            "description": event_details.event.description,
-            "is_enabled": event_details.event.is_enabled,
-            "weekly_schedules": event_details.weekly_schedules.len(),
-            "date_range_schedules": event_details.date_range_schedules.len()
-        })),
+        Some(new_val),
     );
 
     Ok(event_id)
@@ -2297,8 +2396,11 @@ pub fn update_event(
 ) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
     
-    // Audit data collection (Simplified for brevity, usually you'd want the whole struct)
-    let old_name: String = conn.query_row("SELECT event_name FROM events WHERE event_id = ?1", params![event_id], |row| row.get(0)).map_err(|e| e.to_string())?;
+    // Fetch old data for audit log before updating
+    let old_event_details = match get_event_details_helper(&conn, event_id) {
+        Ok(details) => Some(details),
+        Err(_) => None,
+    };
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
@@ -2340,6 +2442,42 @@ pub fn update_event(
 
     tx.commit().map_err(|e| e.to_string())?;
 
+    let mut old_val_json = json!({});
+    let mut new_val_json = json!({
+        "event_name": event_details.event.event_name,
+        "description": event_details.event.description,
+        "is_enabled": event_details.event.is_enabled,
+    });
+
+    if let Some(old) = old_event_details {
+        old_val_json = json!({
+            "event_name": old.event.event_name,
+            "description": old.event.description,
+            "is_enabled": old.event.is_enabled,
+        });
+        if !old.weekly_schedules.is_empty() {
+            old_val_json["day_of_week"] = json!(old.weekly_schedules.iter().map(|s| s.day_of_week.clone()).collect::<Vec<_>>().join(", "));
+            old_val_json["start_time"] = json!(old.weekly_schedules[0].start_time);
+            old_val_json["end_time"] = json!(old.weekly_schedules[0].end_time);
+        } else if !old.date_range_schedules.is_empty() {
+            old_val_json["start_date"] = json!(old.date_range_schedules[0].start_date);
+            old_val_json["end_date"] = json!(old.date_range_schedules[0].end_date);
+            old_val_json["start_time"] = json!(old.date_range_schedules[0].start_time);
+            old_val_json["end_time"] = json!(old.date_range_schedules[0].end_time);
+        }
+    }
+
+    if !event_details.weekly_schedules.is_empty() {
+        new_val_json["day_of_week"] = json!(event_details.weekly_schedules.iter().map(|s| s.day_of_week.clone()).collect::<Vec<_>>().join(", "));
+        new_val_json["start_time"] = json!(event_details.weekly_schedules[0].start_time);
+        new_val_json["end_time"] = json!(event_details.weekly_schedules[0].end_time);
+    } else if !event_details.date_range_schedules.is_empty() {
+        new_val_json["start_date"] = json!(event_details.date_range_schedules[0].start_date);
+        new_val_json["end_date"] = json!(event_details.date_range_schedules[0].end_date);
+        new_val_json["start_time"] = json!(event_details.date_range_schedules[0].start_time);
+        new_val_json["end_time"] = json!(event_details.date_range_schedules[0].end_time);
+    }
+
     let _ = log_audit_action(
         pool,
         active_admin_id,
@@ -2347,12 +2485,8 @@ pub fn update_event(
         "Event",
         event_id,
         &event_details.event.event_name,
-        Some(json!({ "event_name": old_name })),
-        Some(json!({
-            "event_name": event_details.event.event_name,
-            "description": event_details.event.description,
-            "is_enabled": event_details.event.is_enabled
-        })),
+        Some(old_val_json),
+        Some(new_val_json),
     );
 
     Ok(())
@@ -2361,26 +2495,28 @@ pub fn update_event(
 pub fn delete_event(pool: &DbPool, event_id: i64, active_admin_id: i64) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let old_data: Option<serde_json::Value> = conn.query_row(
-        "SELECT event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, required_programs, required_year_levels, is_enabled FROM events WHERE event_id = ?1",
-        params![event_id],
-        |row| {
-           Ok(json!({
-               "event_name": row.get::<_, String>(0)?,
-               "description": row.get::<_, Option<String>>(1)?,
-               "schedule_type": row.get::<_, String>(2)?,
-               "event_date": row.get::<_, Option<String>>(3)?,
-               "start_date": row.get::<_, Option<String>>(4)?,
-               "end_date": row.get::<_, Option<String>>(5)?,
-               "start_time": row.get::<_, String>(6)?,
-               "end_time": row.get::<_, String>(7)?,
-               "required_role": row.get::<_, String>(8)?,
-               "required_programs": row.get::<_, Option<String>>(9)?,
-               "required_year_levels": row.get::<_, Option<String>>(10)?,
-               "is_enabled": row.get::<_, i32>(11)? == 1
-           }))
+    let old_event_details = get_event_details_helper(&conn, event_id).ok();
+    let mut old_data_json = json!({});
+    
+    if let Some(old) = &old_event_details {
+        old_data_json = json!({
+            "event_name": old.event.event_name,
+            "description": old.event.description,
+            "is_enabled": old.event.is_enabled,
+        });
+        if !old.weekly_schedules.is_empty() {
+            old_data_json["day_of_week"] = json!(old.weekly_schedules.iter().map(|s| s.day_of_week.clone()).collect::<Vec<_>>().join(", "));
+            old_data_json["start_time"] = json!(old.weekly_schedules[0].start_time);
+            old_data_json["end_time"] = json!(old.weekly_schedules[0].end_time);
+        } else if !old.date_range_schedules.is_empty() {
+            old_data_json["start_date"] = json!(old.date_range_schedules[0].start_date);
+            old_data_json["end_date"] = json!(old.date_range_schedules[0].end_date);
+            old_data_json["start_time"] = json!(old.date_range_schedules[0].start_time);
+            old_data_json["end_time"] = json!(old.date_range_schedules[0].end_time);
         }
-    ).ok();
+    }
+    
+    let old_data = if old_event_details.is_some() { Some(old_data_json) } else { None };
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     conn.execute(
         "UPDATE events SET is_archived = 1, archived_at = ?1 WHERE event_id = ?2",
@@ -2719,7 +2855,7 @@ pub fn log_audit_action(
     let event_id = tx.last_insert_rowid();
 
     match action {
-        "CREATE" => {
+        "CREATE" | "BULK_ACTION" => {
             if let Some(new_val) = new_values {
                 if let Some(obj) = new_val.as_object() {
                     for (field, val) in obj {
@@ -2741,8 +2877,11 @@ pub fn log_audit_action(
         },
         "UPDATE" | "RESTORE" => {
             let mut changes_made = false;
-            if let (Some(old_val), Some(new_val)) = (old_values, new_values) {
-                if let (Some(old_obj), Some(new_obj)) = (old_val.as_object(), new_val.as_object()) {
+            if let Some(new_val) = new_values.as_ref() {
+                if let Some(new_obj) = new_val.as_object() {
+                    let empty_obj = serde_json::Map::new();
+                    let old_obj = old_values.as_ref().and_then(|v| v.as_object()).unwrap_or(&empty_obj);
+                    
                     for (field, new_v) in new_obj {
                         let old_v = old_obj.get(field).unwrap_or(&serde_json::Value::Null);
                         if old_v != new_v {
@@ -2968,13 +3107,13 @@ pub fn update_admin_credentials(
                 pool,
                 account_id,
                 "UPDATE",
-                "Account",
+                "Security",
                 account_id,
-                &username,
+                "Administrator Password",
                 Some(json!({ "password_hash": "(old)" })),
                 Some(
                     json!({
-                        "summary": format!("Password changed for account: {}.", username),
+                        "summary": "Password Updated",
                         "password_hash": "(updated)"
                     })
                 ),
@@ -3766,8 +3905,8 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
     let mut primary_logo_enabled: bool = true;
     let mut secondary_logo_1_enabled: bool = true;
     let mut secondary_logo_2_enabled: bool = true;
-    let mut strict_email_domain: bool = false;
-    let mut enable_face_recognition: bool = false;
+    let mut strict_email_domain: bool = true;
+    let mut enable_face_recognition: bool = true;
 
     let mut stmt = conn
         .prepare("SELECT setting_key, setting_value FROM settings")
@@ -3849,203 +3988,162 @@ pub fn update_system_branding(
     primary_logo_enabled: bool,
     secondary_logo_1_enabled: bool,
     secondary_logo_2_enabled: bool,
-    strict_email_domain: bool,
-    enable_face_recognition: bool,
 ) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
 
-    let old_system_name: Option<String> = conn.query_row("SELECT setting_value FROM settings WHERE setting_key = 'system_name'", [], |row| row.get(0)).unwrap_or(None);
-    let old_primary: Option<String> = conn.query_row("SELECT setting_value FROM settings WHERE setting_key = 'primary_logo'", [], |row| row.get(0)).unwrap_or(None);
-    let old_sec1: Option<String> = conn.query_row("SELECT setting_value FROM settings WHERE setting_key = 'secondary_logo_1'", [], |row| row.get(0)).unwrap_or(None);
-    let old_sec2: Option<String> = conn.query_row("SELECT setting_value FROM settings WHERE setting_key = 'secondary_logo_2'", [], |row| row.get(0)).unwrap_or(None);
-
-    let mut branding_changes = Vec::new();
-
-    let old_primary_len = old_primary.unwrap_or_default().len();
-    let new_primary_len = primary_logo.as_deref().unwrap_or_default().len();
-    if old_primary_len == 0 && new_primary_len > 0 { branding_changes.push("Added Primary Logo"); }
-    else if old_primary_len > 0 && new_primary_len == 0 { branding_changes.push("Removed Primary Logo"); }
-    else if old_primary_len > 0 && new_primary_len > 0 && old_primary_len != new_primary_len { branding_changes.push("Updated Primary Logo"); }
-
-    let old_sec1_len = old_sec1.unwrap_or_default().len();
-    let new_sec1_len = secondary_logo_1.as_deref().unwrap_or_default().len();
-    if old_sec1_len == 0 && new_sec1_len > 0 { branding_changes.push("Added Secondary Logo 1"); }
-    else if old_sec1_len > 0 && new_sec1_len == 0 { branding_changes.push("Removed Secondary Logo 1"); }
-    else if old_sec1_len > 0 && new_sec1_len > 0 && old_sec1_len != new_sec1_len { branding_changes.push("Updated Secondary Logo 1"); }
-
-    let old_sec2_len = old_sec2.unwrap_or_default().len();
-    let new_sec2_len = secondary_logo_2.as_deref().unwrap_or_default().len();
-    if old_sec2_len == 0 && new_sec2_len > 0 { branding_changes.push("Added Secondary Logo 2"); }
-    else if old_sec2_len > 0 && new_sec2_len == 0 { branding_changes.push("Removed Secondary Logo 2"); }
-    else if old_sec2_len > 0 && new_sec2_len > 0 && old_sec2_len != new_sec2_len { branding_changes.push("Updated Secondary Logo 2"); }
-
-    let name_changed = old_system_name.as_deref().unwrap_or_default() != name;
-
-    let summary_message = if branding_changes.is_empty() {
-        if name_changed {
-            format!("Updated System Branding. Name set to '{}'", name)
-        } else {
-            "Updated System Settings Appearance".to_string()
-        }
-    } else {
-        if name_changed {
-            format!("Updated System Branding. Name set to '{}' | Setup Logs: {}", name, branding_changes.join(", "))
-        } else {
-            branding_changes.join(", ")
-        }
-    };
+    // 1. Fetch Old Branding for Audit
+    let old = get_system_branding(pool).unwrap_or_default();
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    // We'll skip extensive audit logging for the 3 new logos to prevent massive bloat unless necessary, 
-    // but we'll do the standard inserts.
+    // 2. Update Settings
+    let settings_to_update = [
+        ("system_name", name.to_string()),
+        ("system_logo", logo_base64.to_string()),
+        ("system_title", system_title.to_string()),
+        ("report_address", report_address.to_string()),
+        ("report_phone", report_phone.to_string()),
+        ("report_email", report_email.to_string()),
+        ("primary_logo", primary_logo.clone().unwrap_or_default()),
+        ("secondary_logo_1", secondary_logo_1.clone().unwrap_or_default()),
+        ("secondary_logo_2", secondary_logo_2.clone().unwrap_or_default()),
+        ("primary_circle", if primary_circle { "1" } else { "0" }.to_string()),
+        ("secondary1_circle", if secondary1_circle { "1" } else { "0" }.to_string()),
+        ("secondary2_circle", if secondary2_circle { "1" } else { "0" }.to_string()),
+        ("primary_logo_enabled", if primary_logo_enabled { "1" } else { "0" }.to_string()),
+        ("secondary_logo_1_enabled", if secondary_logo_1_enabled { "1" } else { "0" }.to_string()),
+        ("secondary_logo_2_enabled", if secondary_logo_2_enabled { "1" } else { "0" }.to_string()),
+    ];
 
-    // Insert or update system_name
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('system_name', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![name],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Insert or update system_logo
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('system_logo', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![logo_base64],
-    )
-    .map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('system_title', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![system_title],
-    )
-    .map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('report_address', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![report_address],
-    )
-    .map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('report_phone', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![report_phone],
-    )
-    .map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('report_email', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![report_email],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Insert or update primary_logo
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('primary_logo', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![primary_logo.unwrap_or_default()],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Insert or update secondary_logo_1
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary_logo_1', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![secondary_logo_1.unwrap_or_default()],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Insert or update secondary_logo_2
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary_logo_2', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![secondary_logo_2.unwrap_or_default()],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Insert or update individual circle formats
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('primary_circle', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![if primary_circle { "1" } else { "0" }],
-    ).map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary1_circle', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![if secondary1_circle { "1" } else { "0" }],
-    ).map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary2_circle', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![if secondary2_circle { "1" } else { "0" }],
-    ).map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('primary_logo_enabled', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![if primary_logo_enabled { "1" } else { "0" }],
-    ).map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary_logo_1_enabled', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![if secondary_logo_1_enabled { "1" } else { "0" }],
-    ).map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary_logo_2_enabled', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![if secondary_logo_2_enabled { "1" } else { "0" }],
-    ).map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('strict_email_domain', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![if strict_email_domain { "1" } else { "0" }],
-    ).map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('enable_face_recognition', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![if enable_face_recognition { "1" } else { "0" }],
-    ).map_err(|e| e.to_string())?;
+    for (key, value) in settings_to_update {
+        tx.execute(
+            "INSERT INTO settings (setting_key, setting_value) VALUES (?1, ?2)
+             ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+            params![key, value],
+        ).map_err(|e| e.to_string())?;
+    }
 
     tx.commit().map_err(|e| e.to_string())?;
 
-    // Log the branding update
+    // 3. Log Audit Action
+    let mask_img = |img: Option<String>| img.filter(|s| !s.is_empty()).map(|_| "(image update)".to_string()).unwrap_or_else(|| "(empty)".to_string());
+    
+    let branding_changed = name != old.system_name || 
+        mask_img(primary_logo.clone()) != mask_img(old.primary_logo.clone()) ||
+        mask_img(secondary_logo_1.clone()) != mask_img(old.secondary_logo_1.clone()) ||
+        mask_img(secondary_logo_2.clone()) != mask_img(old.secondary_logo_2.clone()) ||
+        primary_circle != old.primary_circle ||
+        secondary1_circle != old.secondary1_circle ||
+        secondary2_circle != old.secondary2_circle ||
+        primary_logo_enabled != old.primary_logo_enabled ||
+        secondary_logo_1_enabled != old.secondary_logo_1_enabled ||
+        secondary_logo_2_enabled != old.secondary_logo_2_enabled;
+
+    let pdf_changed = system_title != old.system_title ||
+        report_address != old.report_address ||
+        report_phone != old.report_phone ||
+        report_email != old.report_email;
+
+    let entity_label = if pdf_changed && !branding_changed {
+        "PDF Settings"
+    } else if branding_changed && !pdf_changed {
+        "System Branding"
+    } else {
+        "System Branding & PDF Settings"
+    };
+
+    let old_values = json!({
+        "system_name": old.system_name,
+        "system_title": old.system_title,
+        "report_address": old.report_address,
+        "report_phone": old.report_phone,
+        "report_email": old.report_email,
+        "primary_logo": mask_img(old.primary_logo),
+        "secondary_logo_1": mask_img(old.secondary_logo_1),
+        "secondary_logo_2": mask_img(old.secondary_logo_2),
+        "primary_circle": old.primary_circle,
+        "secondary1_circle": old.secondary1_circle,
+        "secondary2_circle": old.secondary2_circle,
+        "primary_logo_enabled": old.primary_logo_enabled,
+        "secondary_logo_1_enabled": old.secondary_logo_1_enabled,
+        "secondary_logo_2_enabled": old.secondary_logo_2_enabled,
+    });
+
+    let new_values = json!({
+        "system_name": name,
+        "system_title": system_title,
+        "report_address": report_address,
+        "report_phone": report_phone,
+        "report_email": report_email,
+        "primary_logo": mask_img(primary_logo),
+        "secondary_logo_1": mask_img(secondary_logo_1),
+        "secondary_logo_2": mask_img(secondary_logo_2),
+        "primary_circle": primary_circle,
+        "secondary1_circle": secondary1_circle,
+        "secondary2_circle": secondary2_circle,
+        "primary_logo_enabled": primary_logo_enabled,
+        "secondary_logo_1_enabled": secondary_logo_1_enabled,
+        "secondary_logo_2_enabled": secondary_logo_2_enabled,
+    });
+
     let _ = log_audit_action(
         pool,
         admin_id,
         "UPDATE",
         "System",
         0,
-        "System Branding Update",
-        None,
-        Some(
-            serde_json::json!({
-                "summary": summary_message,
-                "system_name": name,
-                "system_title": system_title,
-                "report_address": report_address,
-                "report_phone": report_phone,
-                "report_email": report_email,
-                "primary_circle": primary_circle,
-                "secondary1_circle": secondary1_circle,
-                "secondary2_circle": secondary2_circle,
-                "primary_logo_enabled": primary_logo_enabled,
-                "secondary_logo_1_enabled": secondary_logo_1_enabled,
-                "secondary_logo_2_enabled": secondary_logo_2_enabled,
-                "strict_email_domain": strict_email_domain,
-                "enable_face_recognition": enable_face_recognition
-            })
-        ),
+        entity_label,
+        Some(old_values),
+        Some(new_values),
+    );
+
+    Ok(())
+}
+
+pub fn update_system_configuration(
+    pool: &DbPool,
+    admin_id: i64,
+    strict_email_domain: bool,
+    enable_face_recognition: bool,
+) -> Result<(), String> {
+    let mut conn = pool.get().map_err(|e| e.to_string())?;
+    let old = get_system_branding(pool).unwrap_or_default();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let settings_to_update = [
+        ("strict_email_domain", if strict_email_domain { "1" } else { "0" }.to_string()),
+        ("enable_face_recognition", if enable_face_recognition { "1" } else { "0" }.to_string()),
+    ];
+
+    for (key, value) in settings_to_update {
+        tx.execute(
+            "INSERT INTO settings (setting_key, setting_value) VALUES (?1, ?2)
+             ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+            params![key, value],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+
+    let old_values = json!({
+        "strict_email_domain": old.strict_email_domain,
+        "enable_face_recognition": old.enable_face_recognition,
+    });
+
+    let new_values = json!({
+        "strict_email_domain": strict_email_domain,
+        "enable_face_recognition": enable_face_recognition,
+    });
+
+    let _ = log_audit_action(
+        pool,
+        admin_id,
+        "UPDATE",
+        "System",
+        0,
+        "System Configuration",
+        Some(old_values),
+        Some(new_values),
     );
 
     Ok(())
@@ -4292,8 +4390,18 @@ pub fn get_archived_users(pool: &DbPool) -> Result<Vec<serde_json::Value>, Strin
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let mut stmt = conn.prepare(
-        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.archived_at
+        "SELECT 
+            p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.archived_at,
+            COALESCE(emp_dept.department_name, stu_dept.department_name) AS department_name,
+            prog.program_name,
+            stu.year_level,
+            emp.position_title
          FROM persons p
+         LEFT JOIN students stu ON p.person_id = stu.person_id
+         LEFT JOIN programs prog ON stu.program_id = prog.program_id
+         LEFT JOIN departments stu_dept ON prog.department_id = stu_dept.department_id
+         LEFT JOIN employees emp ON p.person_id = emp.person_id
+         LEFT JOIN departments emp_dept ON emp.department_id = emp_dept.department_id
          WHERE p.is_archived = 1
          ORDER BY p.archived_at DESC"
     ).map_err(|e| e.to_string())?;
@@ -4302,6 +4410,9 @@ pub fn get_archived_users(pool: &DbPool) -> Result<Vec<serde_json::Value>, Strin
         let person_id: i64 = row.get(0)?;
         let roles = get_person_roles(&conn, person_id).unwrap_or_default();
         let contacts = get_person_contacts(&conn, person_id).unwrap_or_default();
+        
+        // Pick primary role for display
+        let role = roles.first().cloned().unwrap_or_else(|| "User".to_string());
 
         Ok(json!({
             "person_id": person_id,
@@ -4309,9 +4420,14 @@ pub fn get_archived_users(pool: &DbPool) -> Result<Vec<serde_json::Value>, Strin
             "first_name": row.get::<_, String>(2)?,
             "middle_name": row.get::<_, Option<String>>(3)?,
             "last_name": row.get::<_, String>(4)?,
+            "archived_at": row.get::<_, Option<String>>(5)?,
+            "department_name": row.get::<_, Option<String>>(6)?,
+            "program_name": row.get::<_, Option<String>>(7)?,
+            "year_level": row.get::<_, Option<i64>>(8)?,
+            "position_title": row.get::<_, Option<String>>(9)?,
             "roles": roles,
-            "contacts": contacts,
-            "archived_at": row.get::<_, Option<String>>(5)?
+            "role": role,
+            "contacts": contacts
         }))
     }).map_err(|e| e.to_string())?;
 
@@ -4323,29 +4439,77 @@ pub fn get_archived_users(pool: &DbPool) -> Result<Vec<serde_json::Value>, Strin
 }
 
 pub fn get_archived_events(pool: &DbPool) -> Result<Vec<serde_json::Value>, String> {
-    // We can reuse get_events but filtered for is_archived = 1
     let conn = pool.get().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT event_id, event_name, description, is_enabled, archived_at FROM events WHERE is_archived = 1")
+    
+    // 1. Get basic event info
+    let mut stmt = conn.prepare("SELECT event_id, event_name, description, is_enabled, archived_at FROM events WHERE is_archived = 1 ORDER BY archived_at DESC")
         .map_err(|e| e.to_string())?;
 
-    let rows = stmt.query_map([], |row| {
-        let event_id: i64 = row.get(0)?;
-        
-        // Basic event info
-        let event_json = json!({
-            "event_id": event_id,
-            "event_name": row.get::<_, String>(1)?,
-            "description": row.get::<_, Option<String>>(2)?,
-            "is_enabled": row.get::<_, i32>(3)? == 1,
-            "archived_at": row.get::<_, Option<String>>(4)?
-        });
-
-        Ok(event_json)
+    let event_rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, i32>(3)? == 1,
+            row.get::<_, Option<String>>(4)?
+        ))
     }).map_err(|e| e.to_string())?;
 
     let mut list = Vec::new();
-    for row in rows {
-        list.push(row.map_err(|e| e.to_string())?);
+    for event_row in event_rows {
+        let (event_id, event_name, description, is_enabled, archived_at) = event_row.map_err(|e| e.to_string())?;
+        
+        // 2. Get schedules and roles for flattening
+        let mut stmt_w = conn.prepare("SELECT day_of_week, start_time, end_time FROM event_weekly WHERE event_id = ?1").map_err(|e| e.to_string())?;
+        let weekly = stmt_w.query_map([event_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+
+        let mut stmt_d = conn.prepare("SELECT start_date, end_date, start_time, end_time FROM event_date_range WHERE event_id = ?1").map_err(|e| e.to_string())?;
+        let date_range = stmt_d.query_map([event_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+        }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+
+        let mut stmt_r = conn.prepare("SELECT r.role_name FROM roles r JOIN event_required_roles err ON r.role_id = err.role_id WHERE err.event_id = ?1").map_err(|e| e.to_string())?;
+        let required_roles = stmt_r.query_map([event_id], |row| {
+            row.get::<_, String>(0)
+        }).map_err(|e| e.to_string())?.collect::<Result<Vec<String>, _>>().map_err(|e| e.to_string())?;
+
+        // 3. Construct flattened JSON
+        let schedule_type = if !weekly.is_empty() { "weekly" } else { "date_range" };
+        let mut event_date = String::new();
+        let mut start_date = String::new();
+        let mut end_date = String::new();
+        let mut start_time = String::new();
+        let mut end_time = String::new();
+
+        if schedule_type == "weekly" && !weekly.is_empty() {
+            event_date = weekly.iter().map(|(d, _, _)| d.as_str()).collect::<Vec<_>>().join(", ");
+            start_time = weekly[0].1.clone();
+            end_time = weekly[0].2.clone();
+        } else if !date_range.is_empty() {
+            start_date = date_range[0].0.clone();
+            end_date = date_range[0].1.clone();
+            start_time = date_range[0].2.clone();
+            end_time = date_range[0].3.clone();
+        }
+
+        let required_role = if required_roles.is_empty() { "all".to_string() } else { required_roles.join(",") };
+
+        list.push(json!({
+            "event_id": event_id,
+            "event_name": event_name,
+            "description": description,
+            "is_enabled": is_enabled,
+            "archived_at": archived_at,
+            "schedule_type": schedule_type,
+            "event_date": event_date,
+            "start_date": start_date,
+            "end_date": end_date,
+            "start_time": start_time,
+            "end_time": end_time,
+            "required_role": required_role
+        }));
     }
     Ok(list)
 }
@@ -4547,33 +4711,64 @@ pub fn permanent_delete_user(pool: &DbPool, person_id: i64, active_admin_id: i64
         return Err("Only archived records can be permanently deleted. Archive the record first.".to_string());
     }
 
-    let old_data: Option<serde_json::Value> = conn.query_row(
-        "SELECT id_number, first_name, last_name FROM persons WHERE person_id = ?1",
+    // Capture complete state for audit log before deletion
+    let roles = get_person_roles(&conn, person_id).unwrap_or_default();
+    let contacts = get_person_contacts(&conn, person_id).unwrap_or_default();
+    let emails: Vec<String> = contacts.iter().filter(|c| c.contact_type == "email").map(|c| c.contact_value.clone()).collect();
+    let phones: Vec<String> = contacts.iter().filter(|c| c.contact_type == "phone").map(|c| c.contact_value.clone()).collect();
+
+    let person_data: (String, String, Option<String>, String, bool) = conn.query_row(
+        "SELECT id_number, first_name, middle_name, last_name, is_active FROM persons WHERE person_id = ?1",
         params![person_id],
-        |row| {
-            let roles = get_person_roles(&conn, person_id).unwrap_or_default();
-            Ok(json!({
-                "id_number": row.get::<_, String>(0)?,
-                "first_name": row.get::<_, String>(1)?,
-                "last_name": row.get::<_, String>(2)?,
-                "roles": roles
-            }))
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get::<_, i32>(4)? == 1))
+    ).map_err(|e| e.to_string())?;
+
+    let mut old_data = json!({
+        "id_number": person_data.0,
+        "first_name": person_data.1,
+        "middle_name": person_data.2,
+        "last_name": person_data.3,
+        "roles": roles,
+        "emails": emails,
+        "phones": phones,
+        "is_active": person_data.4
+    });
+
+    if roles.iter().any(|r| r == "student") {
+        let stu_info: Option<(String, Option<i64>, bool)> = conn.query_row(
+            "SELECT p.program_code, s.year_level, s.is_irregular FROM students s JOIN programs p ON s.program_id = p.program_id WHERE s.person_id = ?1",
+            params![person_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i32>(2)? == 1))
+        ).optional().map_err(|e| e.to_string())?;
+        if let Some((prog, y_lvl, irreg)) = stu_info {
+            old_data["program"] = json!(prog);
+            old_data["year_level"] = json!(y_lvl);
+            old_data["is_irregular"] = json!(irreg);
         }
-    ).optional().map_err(|e| e.to_string())?;
+    }
+
+    if roles.iter().any(|r| r == "professor" || r == "staff") {
+        let emp_info: Option<(String, String)> = conn.query_row(
+            "SELECT d.department_code, e.position_title FROM employees e JOIN departments d ON e.department_id = d.department_id WHERE e.person_id = ?1",
+            params![person_id],
+            |row| Ok((row.get(0)?, row.get(1)?))
+        ).optional().map_err(|e| e.to_string())?;
+        if let Some((dept, pos)) = emp_info {
+            old_data["department"] = json!(dept);
+            old_data["position_title"] = json!(pos);
+        }
+    }
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    // Most role-specific tables have ON DELETE CASCADE in the new schema.
-    // However, activity_logs might not (depending on schema design, but good to be explicit here).
+    // Deleting from persons will cascade to subtype tables, person_roles, person_contacts, etc.
     tx.execute("DELETE FROM activity_logs WHERE person_id = ?1", params![person_id]).ok();
-    
-    // Deleting from persons will cascade to students, employees, visitors, person_roles, person_contacts, and face_embeddings.
     tx.execute("DELETE FROM persons WHERE person_id = ?1", params![person_id])
         .map_err(|e| e.to_string())?;
 
     tx.commit().map_err(|e| e.to_string())?;
 
-    let label = old_data.as_ref().and_then(|v| v.get("first_name")).and_then(|v| v.as_str()).unwrap_or("Unknown").to_string();
+    let label = format!("{} {}", person_data.1, person_data.3);
     let _ = log_audit_action(
         pool,
         active_admin_id,
@@ -4581,7 +4776,7 @@ pub fn permanent_delete_user(pool: &DbPool, person_id: i64, active_admin_id: i64
         "Person",
         person_id,
         &label,
-        old_data,
+        Some(old_data),
         None,
     );
 

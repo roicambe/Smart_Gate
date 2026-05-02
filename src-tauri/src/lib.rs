@@ -97,6 +97,7 @@ pub fn run() {
             commands::reset_password_with_otp,
             commands::get_system_branding,
             commands::update_system_branding,
+            commands::update_system_configuration,
             commands::get_available_printers,
             commands::print_receipt_image_silent,
             commands::promote_all_students,
