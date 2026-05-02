@@ -1149,15 +1149,56 @@ pub fn get_students(pool: &DbPool) -> Result<Vec<StudentDetails>, String> {
     Ok(list)
 }
 
+const MAX_YEAR_LEVEL: i64 = 4;
+
 pub fn promote_all_students(pool: &DbPool, active_admin_id: i64) -> Result<(), String> {
-    let conn = pool.get().map_err(|e| e.to_string())?;
+    let mut conn = pool.get().map_err(|e| e.to_string())?;
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
-    conn.execute(
-        "UPDATE students SET year_level = year_level + 1 WHERE year_level IS NOT NULL",
-        params![],
-    )
-    .map_err(|e| e.to_string())?;
+    // Step 1: Collect graduating students (at max year level) before archiving
+    let graduating_ids: Vec<i64> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT p.person_id FROM persons p \
+                 JOIN students s ON p.person_id = s.person_id \
+                 WHERE s.year_level = ?1 AND p.is_archived = 0",
+            )
+            .map_err(|e| e.to_string())?;
+        let ids = stmt
+            .query_map(params![MAX_YEAR_LEVEL], |row| row.get(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<i64>, _>>()
+            .map_err(|e| e.to_string())?;
+        ids
+    };
 
+    let graduating_count = graduating_ids.len();
+
+    // Step 2: Archive graduating students in a transaction, then promote the rest
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    for pid in &graduating_ids {
+        tx.execute(
+            "UPDATE persons SET is_archived = 1, archived_at = ?1 WHERE person_id = ?2",
+            params![now, pid],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // Promote students below the max year level who are not archived
+    let promoted_count = tx
+        .execute(
+            "UPDATE students SET year_level = year_level + 1 \
+             WHERE year_level < ?1 \
+             AND year_level IS NOT NULL \
+             AND person_id IN (SELECT person_id FROM persons WHERE is_archived = 0)",
+            params![MAX_YEAR_LEVEL],
+        )
+        .map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+
+    // Step 3: Audit log
     let _ = log_audit_action(
         pool,
         active_admin_id,
@@ -1166,7 +1207,15 @@ pub fn promote_all_students(pool: &DbPool, active_admin_id: i64) -> Result<(), S
         0,
         "Bulk Year Level Promotion",
         None,
-        Some(json!({ "summary": "All student year levels promoted" })),
+        Some(json!({
+            "summary": format!(
+                "{} student(s) promoted. {} graduating student(s) archived.",
+                promoted_count, graduating_count
+            ),
+            "promoted_count": promoted_count,
+            "archived_graduating_count": graduating_count,
+            "max_year_level": MAX_YEAR_LEVEL
+        })),
     );
 
     Ok(())
@@ -2156,7 +2205,7 @@ pub fn get_access_logs(
         LEFT JOIN departments d_e ON emp.department_id = d_e.department_id
         WHERE 1=1
         AND (?1 IS NULL OR EXISTS (SELECT 1 FROM person_roles pr JOIN roles r ON pr.role_id = r.role_id WHERE pr.person_id = p.person_id AND r.role_name = ?1))
-        AND (?2 IS NULL OR l.activity_type = ?2)
+        AND ((?2 IS NULL AND l.activity_type != 'event') OR l.activity_type = ?2)
         AND (?3 IS NULL OR COALESCE(prog.department_id, emp.department_id) = ?3)
         AND (?4 IS NULL OR prog.program_id = ?4)
         AND (?5 IS NULL OR stu.year_level = ?5)
@@ -3964,14 +4013,38 @@ pub fn log_event_attendance(
             });
         }
 
-        // 4. Log Attendance
-        let status = "Present"; 
+
+        // 4. Auto-create an entrance log if the person has no gate entrance today.
+        //    This handles real-world cases where someone goes directly to an event
+        //    without formally logging at the main entrance.
+        let has_entrance_today: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM activity_logs \
+                 WHERE person_id = ?1 AND activity_type = 'entrance' AND DATE(scanned_at) = DATE(?2)",
+                params![person_id, current_date],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+
+        if !has_entrance_today {
+            conn.execute(
+                "INSERT INTO activity_logs (person_id, scanner_id, activity_type, scanned_at) \
+                 VALUES (?1, ?2, 'entrance', ?3)",
+                params![person_id, scanner_id, current_date.clone() + " " + &current_time],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+
+        // 5. Log Event Attendance
+        let status = "Present";
 
         conn.execute(
             "INSERT INTO activity_logs (person_id, scanner_id, activity_type, event_id, status, scanned_at) 
              VALUES (?1, ?2, 'event', ?3, ?4, ?5)",
             params![person_id, scanner_id, event_id, status, current_date.clone() + " " + &current_time],
         ).map_err(|e| e.to_string())?;
+
 
         Ok(ScanResult {
             success: true,
