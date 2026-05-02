@@ -61,7 +61,7 @@ export const QRScannerOverlay = ({ onScan, onClose, scannerFunction }) => {
             fps: 25,
             qrbox: { width: 340, height: 340 }, // Increased from 280 to 340
             aspectRatio: 1.0,
-            useBarCodeDetectorIfSupported: false,
+            useBarCodeDetectorIfSupported: true,
         };
 
         try {

@@ -148,7 +148,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
 
     useEffect(() => {
         fetchLogs();
-    }, [activeTab]);
+    }, [activeTab, searchTerm, roleFilter, actionFilter, startDate, endDate, departmentFilter]);
 
     // Filter logic based on active tab
     const currentData = activeTab === 'gateLogs' ? logs : eventLogs;
@@ -156,9 +156,12 @@ export const AccessLogs = ({ branding, adminSession }) => {
     // Gate logs are already filtered on backend. Event logs still rely on simple frontend filters for now.
     const filteredLogs = activeTab === 'gateLogs' ? currentData : currentData.filter(log => {
         const roleStr = log.roles?.join(', ') || '';
-        const matchesSearch = log.person_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        const matchesSearch = 
+            log.person_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             log.id_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
             log.event_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (log.department_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (log.program_name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
             roleStr.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesRole = roleFilter === 'All' || log.roles?.some(r => r.toLowerCase() === roleFilter.toLowerCase());
         const matchesEvent = eventFilter === 'All' || log.event_name === eventFilter;
@@ -922,8 +925,22 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                         </td>
                                         {activeTab === 'gateLogs' ? (
                                             <>
-                                                <td className="px-3 py-1.5 text-slate-600 text-xs font-semibold">
-                                                    {log.department_name || (log.roles?.some(r => r.toLowerCase() === 'visitor') ? "N/A" : "-")}
+                                                <td className="px-3 py-1.5">
+                                                    <div className="flex flex-col">
+                                                        <span className="text-slate-900 font-medium text-xs">
+                                                            {log.department_name || (log.roles?.some(r => r.toLowerCase() === 'visitor') ? "N/A" : "-")}
+                                                        </span>
+                                                        <span className="text-[10px] text-slate-500 tracking-tight">
+                                                            {log.roles?.some(r => r.toLowerCase() === 'student')
+                                                                ? (log.program_name ? `${log.program_name} ${log.year_level ? `- Yr ${log.year_level}` : ""}` : "-")
+                                                                : log.roles?.some(r => r.toLowerCase() === 'professor' || r.toLowerCase() === 'staff')
+                                                                    ? (log.position_title || "Faculty/Staff")
+                                                                    : log.roles?.some(r => r.toLowerCase() === 'visitor')
+                                                                        ? "Visitor"
+                                                                        : "-"
+                                                            }
+                                                        </span>
+                                                    </div>
                                                 </td>
                                                 <td className="px-3 py-1.5 text-center">
                                                     <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded shadow-sm text-xs font-bold ${log.scanner_function === 'entrance'
@@ -947,7 +964,14 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                             {log.department_name || (log.roles?.some(r => r.toLowerCase() === 'visitor') ? "N/A" : "-")}
                                                         </span>
                                                         <span className="text-[10px] text-slate-500 uppercase tracking-tight">
-                                                            {log.program_name ? `${log.program_name} ${log.year_level ? `- Year ${log.year_level}` : ""}` : (log.roles?.some(r => r.toLowerCase() === 'visitor') ? "Visitor" : (log.roles?.every(r => r.toLowerCase() !== 'student') ? (log.department_name ? "Faculty/Staff" : "-") : "-"))}
+                                                            {log.roles?.some(r => r.toLowerCase() === 'student')
+                                                                ? (log.program_name ? `${log.program_name} ${log.year_level ? `- Year ${log.year_level}` : ""}` : "-")
+                                                                : log.roles?.some(r => r.toLowerCase() === 'professor' || r.toLowerCase() === 'staff')
+                                                                    ? (log.position_title || "Faculty/Staff")
+                                                                    : log.roles?.some(r => r.toLowerCase() === 'visitor')
+                                                                        ? "Visitor"
+                                                                        : "-"
+                                                            }
                                                         </span>
                                                     </div>
                                                 </td>
@@ -968,8 +992,30 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                 ))
                             ) : (
                                 <tr>
-                                    <td colSpan="5" className="p-8 text-center text-slate-500">
-                                        {loading ? "Loading logs..." : "No access logs found matching your criteria."}
+                                    <td colSpan={activeTab === 'gateLogs' ? 5 : 6} className="p-12 text-center">
+                                        <div className="flex flex-col items-center justify-center space-y-4">
+                                            <div className="p-4 bg-slate-50 rounded-full border border-slate-100">
+                                                <History className="w-10 h-10 text-slate-300" />
+                                            </div>
+                                            <div>
+                                                <p className="text-slate-900 font-bold text-lg">
+                                                    {loading ? "Searching Logs..." : "No Logs Found"}
+                                                </p>
+                                                <p className="text-slate-500 text-sm max-w-xs mx-auto">
+                                                    {loading 
+                                                        ? "We are retrieving the access records from the database." 
+                                                        : "We couldn't find any records matching your current filter criteria."}
+                                                </p>
+                                            </div>
+                                            {!loading && (
+                                                <button
+                                                    onClick={clearFilters}
+                                                    className="text-blue-600 font-semibold text-sm hover:underline"
+                                                >
+                                                    Clear all filters
+                                                </button>
+                                            )}
+                                        </div>
                                     </td>
                                 </tr>
                             )}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Building, Plus, Search, Edit2, Trash2, Check, AlertTriangle, BookOpen, Filter } from 'lucide-react';
+import { Building, Plus, Search, Edit2, Trash2, Check, AlertTriangle, BookOpen, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from '../toast/ToastProvider';
 import { AdminModal } from '../common/AdminModal';
@@ -11,6 +11,8 @@ export const AcademicStructure = ({ branding, adminSession }) => {
     const [dataList, setDataList] = useState([]);
     const [departments, setDepartments] = useState([]); // Needed for Program form dropdown
     const [isLoading, setIsLoading] = useState(true);
+    const [currentPage, setCurrentPage] = useState(1);
+    const ITEMS_PER_PAGE = 15;
 
     // Modal States
     const [showRegisterModal, setShowRegisterModal] = useState(false);
@@ -177,7 +179,16 @@ export const AcademicStructure = ({ branding, adminSession }) => {
     };
 
     // Reset department filter when switching away from Programs
-    useEffect(() => { if (activeTab === 'department') setDepartmentFilter(''); }, [activeTab]);
+    useEffect(() => { 
+        if (activeTab === 'department') setDepartmentFilter(''); 
+        setCurrentPage(1);
+    }, [activeTab]);
+
+    const clearFilters = () => {
+        setSearchQuery('');
+        setDepartmentFilter('');
+        setCurrentPage(1);
+    };
 
     // Filter logic - Programs tab: filter by department first, then search
     const filteredData = dataList.filter(item => {
@@ -189,6 +200,12 @@ export const AcademicStructure = ({ branding, adminSession }) => {
             : `${item.program_name} ${item.program_code}`.toLowerCase();
         return searchStr.includes(searchQuery.toLowerCase());
     });
+
+    const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
+    const paginatedData = filteredData.slice(
+        (currentPage - 1) * ITEMS_PER_PAGE,
+        currentPage * ITEMS_PER_PAGE
+    );
 
     return (
         <div className="w-full h-full min-h-0 space-y-6 animate-in slide-in-from-bottom-4 duration-500 relative flex flex-col">
@@ -250,9 +267,15 @@ export const AcademicStructure = ({ branding, adminSession }) => {
                             placeholder={`Search ${activeTab}s...`}
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-2.5 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all font-medium"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-2.5 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-all font-medium"
                         />
                     </div>
+                    <button
+                        onClick={clearFilters}
+                        className="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors shrink-0"
+                    >
+                        Clear All
+                    </button>
                 </div>
             </div>
 
@@ -273,7 +296,7 @@ export const AcademicStructure = ({ branding, adminSession }) => {
                                 <tr>
                                     <td colSpan={activeTab === 'program' ? 4 : 3} className="text-center py-20 text-slate-500">Loading data...</td>
                                 </tr>
-                            ) : filteredData.length === 0 ? (
+                            ) : paginatedData.length === 0 ? (
                                 <tr>
                                     <td colSpan={activeTab === 'program' ? 4 : 3} className="text-center py-20">
                                         <div className="flex flex-col items-center justify-center space-y-3">
@@ -315,6 +338,41 @@ export const AcademicStructure = ({ branding, adminSession }) => {
                         </tbody>
                     </table>
                 </div>
+
+                {totalPages > 1 && (
+                    <div className="px-5 py-3 border-t border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 flex items-center justify-between shrink-0 rounded-b-xl">
+                        <div>
+                            Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredData.length)} of {filteredData.length}
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                disabled={currentPage === 1}
+                                className="p-1 rounded-md hover:bg-slate-200 disabled:opacity-30 transition-colors"
+                            >
+                                <ChevronLeft className="w-4 h-4" />
+                            </button>
+                            <div className="flex items-center gap-1 px-2">
+                                {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                                    <button
+                                        key={page}
+                                        onClick={() => setCurrentPage(page)}
+                                        className={`w-6 h-6 rounded-md transition-all ${currentPage === page ? 'bg-slate-800 text-white' : 'hover:bg-slate-200'}`}
+                                    >
+                                        {page}
+                                    </button>
+                                ))}
+                            </div>
+                            <button
+                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                disabled={currentPage === totalPages}
+                                className="p-1 rounded-md hover:bg-slate-200 disabled:opacity-30 transition-colors"
+                            >
+                                <ChevronRight className="w-4 h-4" />
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Registration/Edit Form Component */}

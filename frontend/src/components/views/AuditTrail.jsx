@@ -61,19 +61,21 @@ const FRIENDLY_FIELD_NAMES = {
 const getFriendlyFieldName = (key) => FRIENDLY_FIELD_NAMES[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
 const formatFieldValue = (key, value) => {
-    if (value === null || value === undefined || value === '') return '(empty)';
+    if (value === null || value === undefined || value === '' || value === 'null' || value === 'N/A') return '---';
     if (key === 'password_hash') return '••••••••';
     if (key === 'is_active' || key === 'is_first_login' || key === 'is_enabled' || key === 'is_archived') {
         if (value === '1' || value === 1 || value === true || value === 'true') return 'Yes';
         if (value === '0' || value === 0 || value === false || value === 'false') return 'No';
     }
-    if (key === 'system_logo' || key === 'primary_logo' || key === 'secondary_logo_1' || key === 'secondary_logo_2') return value ? '(image data)' : '(empty)';
+    if (key === 'system_logo' || key === 'primary_logo' || key === 'secondary_logo_1' || key === 'secondary_logo_2') return value ? '(image data)' : '---';
     return String(value);
 };
 
 const FIELD_ORDER_WEIGHTS = {
     'Role': 1,
     'Roles': 1,
+    'Username': 1.1,
+    'Full Name': 1.2,
     'ID Number': 2,
     'Last Name': 3,
     'First Name': 4,
@@ -138,6 +140,17 @@ export const AuditTrail = ({ branding, adminSession }) => {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
+    const clearFilters = () => {
+        setSearchTerm('');
+        setActionFilter('All');
+        setStartDate('');
+        setEndDate('');
+        setCurrentPage(1);
+        invoke('get_audit_logs', { startDate: null, endDate: null })
+            .then(data => setLogs(data))
+            .catch(err => console.error(err));
+    };
+
     const fetchLogs = async () => {
         // Validation
         if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
@@ -166,7 +179,7 @@ export const AuditTrail = ({ branding, adminSession }) => {
     }, []);
 
     const filteredLogs = logs.filter(log => {
-        const matchesSearch = 
+        const matchesSearch =
             log.admin_username.toLowerCase().includes(searchTerm.toLowerCase()) ||
             log.admin_full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             log.entity_type.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -511,9 +524,15 @@ export const AuditTrail = ({ branding, adminSession }) => {
                     />
                     <button
                         onClick={fetchLogs}
-                        className="px-4 py-2 bg-indigo-50 text-indigo-600 font-medium rounded-lg border border-indigo-100 hover:bg-indigo-100 transition-colors text-sm whitespace-nowrap"
+                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-semibold text-sm shadow-sm"
                     >
                         Apply Date
+                    </button>
+                    <button
+                        onClick={clearFilters}
+                        className="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors"
+                    >
+                        Clear All
                     </button>
                 </div>
             </div>
@@ -546,14 +565,13 @@ export const AuditTrail = ({ branding, adminSession }) => {
                                             </div>
                                         </td>
                                         <td className="px-5 py-3">
-                                            <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${
-                                                log.action_type === 'CREATE' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
+                                            <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${log.action_type === 'CREATE' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
                                                 log.action_type === 'UPDATE' ? 'bg-amber-100 text-amber-700 border-amber-200' :
-                                                log.action_type === 'ARCHIVE' ? 'bg-orange-100 text-orange-700 border-orange-200' :
-                                                log.action_type === 'RESTORE' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' :
-                                                log.action_type === 'DELETE' ? 'bg-rose-100 text-rose-700 border-rose-200' :
-                                                'bg-slate-100 text-slate-700 border-slate-200'
-                                            }`}>
+                                                    log.action_type === 'ARCHIVE' ? 'bg-orange-100 text-orange-700 border-orange-200' :
+                                                        log.action_type === 'RESTORE' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' :
+                                                            log.action_type === 'DELETE' ? 'bg-rose-100 text-rose-700 border-rose-200' :
+                                                                'bg-slate-100 text-slate-700 border-slate-200'
+                                                }`}>
                                                 {log.action_type}
                                             </span>
                                         </td>
@@ -638,84 +656,84 @@ export const AuditTrail = ({ branding, adminSession }) => {
                     bodyClassName="space-y-6"
                 >
                     <div className="space-y-6">
-                            <div className="grid grid-cols-2 gap-y-4 gap-x-6 text-sm">
-                                <div>
-                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Event ID</p>
-                                    <p className="font-semibold text-white font-mono">{selectedLog.event_id}</p>
-                                </div>
-                                <div>
-                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Performed By</p>
-                                    <p className="font-semibold text-white">{selectedLog.admin_full_name}</p>
-                                    <p className="text-white/30 text-xs font-mono">@{selectedLog.admin_username} · ID #{selectedLog.performed_by}</p>
-                                </div>
-                                <div>
-                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Action</p>
-                                    <span className={`inline-flex px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${
-                                        selectedLog.action_type === 'CREATE' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30' :
-                                        selectedLog.action_type === 'UPDATE' ? 'bg-amber-500/20 text-amber-300 border-amber-400/30' :
+                        <div className="grid grid-cols-2 gap-y-4 gap-x-6 text-sm">
+                            <div>
+                                <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Event ID</p>
+                                <p className="font-semibold text-white font-mono">{selectedLog.event_id}</p>
+                            </div>
+                            <div>
+                                <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Performed By</p>
+                                <p className="font-semibold text-white">{selectedLog.admin_full_name}</p>
+                                <p className="text-white/30 text-xs font-mono">@{selectedLog.admin_username} · ID #{selectedLog.performed_by}</p>
+                            </div>
+                            <div>
+                                <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Action</p>
+                                <span className={`inline-flex px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${selectedLog.action_type === 'CREATE' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30' :
+                                    selectedLog.action_type === 'UPDATE' ? 'bg-amber-500/20 text-amber-300 border-amber-400/30' :
                                         selectedLog.action_type === 'ARCHIVE' ? 'bg-orange-500/20 text-orange-300 border-orange-400/30' :
-                                        selectedLog.action_type === 'RESTORE' ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/30' :
-                                        selectedLog.action_type === 'DELETE' ? 'bg-rose-500/20 text-rose-300 border-rose-400/30' :
-                                        'bg-white/5 text-white/50 border-white/10'
+                                            selectedLog.action_type === 'RESTORE' ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/30' :
+                                                selectedLog.action_type === 'DELETE' ? 'bg-rose-500/20 text-rose-300 border-rose-400/30' :
+                                                    'bg-white/5 text-white/50 border-white/10'
                                     }`}>
-                                        {selectedLog.action_type}
-                                    </span>
-                                </div>
-                                <div>
-                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Timestamp</p>
-                                    <p className="font-semibold text-white font-mono text-xs">{formatDate(selectedLog.created_at)}</p>
-                                </div>
-                                <div>
-                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Entity Type</p>
-                                    <p className="font-semibold text-white">{selectedLog.entity_type}</p>
-                                </div>
-                                <div>
-                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Entity Label</p>
-                                    <p className="font-semibold text-white">{selectedLog.entity_label} <span className="text-white/30 font-mono text-xs">({selectedLog.entity_id})</span></p>
-                                </div>
+                                    {selectedLog.action_type}
+                                </span>
                             </div>
+                            <div>
+                                <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Timestamp</p>
+                                <p className="font-semibold text-white font-mono text-xs">{formatDate(selectedLog.created_at)}</p>
+                            </div>
+                            <div>
+                                <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Entity Type</p>
+                                <p className="font-semibold text-white">{selectedLog.entity_type}</p>
+                            </div>
+                            <div>
+                                <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Entity Label</p>
+                                <p className="font-semibold text-white">{selectedLog.entity_label} <span className="text-white/30 font-mono text-xs">({selectedLog.entity_id})</span></p>
+                            </div>
+                        </div>
 
+                        <div className="border-t border-white/10 pt-5">
+                            <p className="text-white/40 mb-2 text-xs uppercase tracking-wider font-semibold">Summary</p>
+                            <div className="bg-white/5 border border-white/10 rounded-xl p-4">
+                                <p className="text-sm text-white/90 leading-relaxed font-medium italic">
+                                    {getShortSummary(selectedLog)}.
+                                </p>
+                            </div>
+                        </div>
+
+                        {selectedLog.changes && selectedLog.changes.length > 0 && (
                             <div className="border-t border-white/10 pt-5">
-                                <p className="text-white/40 mb-2 text-xs uppercase tracking-wider font-semibold">Summary</p>
-                                <div className="bg-white/5 border border-white/10 rounded-xl p-4">
-                                    <p className="text-sm text-white/90 leading-relaxed font-medium italic">
-                                        {getShortSummary(selectedLog)}.
-                                    </p>
-                                </div>
-                            </div>
-
-                            {selectedLog.changes && selectedLog.changes.length > 0 && (
-                                <div className="border-t border-white/10 pt-5">
-                                    <p className="text-white/40 mb-3 text-xs uppercase tracking-wider font-semibold">
-                                        {selectedLog.action_type === 'UPDATE' ? 'Field Changes' : selectedLog.action_type === 'CREATE' ? 'New Values' : 'Removed Values'}
-                                    </p>
-                                    <div className="rounded-xl border border-white/10 overflow-x-auto bg-black/20">
-                                        <table className="w-full text-sm text-left">
-                                            <thead className="bg-white/5 border-b border-white/10">
-                                                <tr className="text-xs uppercase text-white/40">
-                                                    <th className="px-4 py-2.5 font-semibold tracking-wider">Field</th>
-                                                    {selectedLog.action_type === 'UPDATE' ? (
-                                                        <>
-                                                            <th className="px-4 py-2.5 font-semibold tracking-wider">Old Value</th>
-                                                            <th className="px-4 py-2.5 font-semibold tracking-wider">New Value</th>
-                                                        </>
-                                                    ) : (
-                                                        <th className="px-4 py-2.5 font-semibold tracking-wider">Value</th>
-                                                    )}
-                                                </tr>
-                                            </thead>
-                                            <tbody className="divide-y divide-white/5">
-                                                 {[...selectedLog.changes]
-                                                    .filter(change => {
-                                                        const val = change.new_value || change.old_value;
-                                                        // Requirement 4: Hide "0" schedule counts, "null", "N/A" and non-applicable fields
-                                                        if (change.field_name.includes('schedules') && (val === '0' || val === 0)) return false;
-                                                        if (val === null || val === undefined || val === '' || val === 'null' || val === 'N/A') return false;
-                                                        if (change.field_name === 'is_irregular' && (val === '0' || val === 0 || val === false || val === 'false')) return false;
-                                                        return true;
-                                                    })
-                                                    .sort((a, b) => (FIELD_ORDER_WEIGHTS[getFriendlyFieldName(a.field_name)] || 999) - (FIELD_ORDER_WEIGHTS[getFriendlyFieldName(b.field_name)] || 999))
-                                                    .map((change, idx) => (
+                                <p className="text-white/40 mb-3 text-xs uppercase tracking-wider font-semibold">
+                                    {selectedLog.action_type === 'UPDATE' ? 'Field Changes' : selectedLog.action_type === 'CREATE' ? 'New Values' : 'Removed Values'}
+                                </p>
+                                <div className="rounded-xl border border-white/10 overflow-x-auto bg-black/20">
+                                    <table className="w-full text-sm text-left">
+                                        <thead className="bg-white/5 border-b border-white/10">
+                                            <tr className="text-xs uppercase text-white/40">
+                                                <th className="px-4 py-2.5 font-semibold tracking-wider">Field</th>
+                                                {selectedLog.action_type === 'UPDATE' ? (
+                                                    <>
+                                                        <th className="px-4 py-2.5 font-semibold tracking-wider">Old Value</th>
+                                                        <th className="px-4 py-2.5 font-semibold tracking-wider">New Value</th>
+                                                    </>
+                                                ) : (
+                                                    <th className="px-4 py-2.5 font-semibold tracking-wider">Value</th>
+                                                )}
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-white/5">
+                                            {[...selectedLog.changes]
+                                                .filter(change => {
+                                                    const val = change.new_value || change.old_value;
+                                                    // Requirement 4: Hide "0" schedule counts, "null", "N/A" and non-applicable fields
+                                                    if (change.field_name.includes('schedules') && (val === '0' || val === 0)) return false;
+                                                    if (val === null || val === undefined || val === '' || val === 'null' || val === 'N/A' || val === '---') return false;
+                                                    if (change.field_name === 'is_irregular' && (val === '0' || val === 0 || val === false || val === 'false')) return false;
+                                                    if (change.field_name === 'password_hash' || change.field_name === 'password') return false;
+                                                    return true;
+                                                })
+                                                .sort((a, b) => (FIELD_ORDER_WEIGHTS[getFriendlyFieldName(a.field_name)] || 999) - (FIELD_ORDER_WEIGHTS[getFriendlyFieldName(b.field_name)] || 999))
+                                                .map((change, idx) => (
 
                                                     <tr key={idx}>
                                                         <td className="px-4 py-2 font-medium text-white/80 whitespace-nowrap">
@@ -743,11 +761,11 @@ export const AuditTrail = ({ branding, adminSession }) => {
                                                         )}
                                                     </tr>
                                                 ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
+                                        </tbody>
+                                    </table>
                                 </div>
-                            )}
+                            </div>
+                        )}
                     </div>
                 </AdminModal>
             )}

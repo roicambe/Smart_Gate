@@ -5,60 +5,37 @@ import { QRScannerOverlay } from "./QRScannerOverlay";
 import { extractScanId } from "../utils/patternHunter";
 import { useToast } from "./toast/ToastProvider";
 import { FaceScannerModal } from "./FaceScannerModal";
+import { useGhostScannerListener } from "../hooks/useGhostScannerListener";
 
 const ID_CARD_DURATION_MS = 1000;
 const DETAILED_TOAST_ROLES = new Set(["student", "professor", "staff"]);
 
-const formatRoleLabel = (role) => (
-    role
-        ? role.charAt(0).toUpperCase() + role.slice(1)
-        : "N/A"
-);
-
-const getYearLevelLabel = (yearLevel) => {
-    if (yearLevel === null || yearLevel === undefined) {
-        return null;
+const formatRoleLabel = (role) => {
+    if (Array.isArray(role)) {
+        return role.map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(', ');
     }
-
-    const suffixes = ["th", "st", "nd", "rd"];
-    const mod100 = yearLevel % 100;
-    const suffix = (mod100 >= 11 && mod100 <= 13)
-        ? "th"
-        : (suffixes[yearLevel % 10] || "th");
-
-    return `${yearLevel}${suffix} Year`;
+    return role ? role.charAt(0).toUpperCase() + role.slice(1) : "---";
 };
 
-const getProgramYearLabel = (programName, yearLevel) => {
-    const yearLabel = getYearLevelLabel(yearLevel);
-
-    if (programName && yearLabel) {
-        return `${programName} - ${yearLabel}`;
-    }
-
-    return programName || yearLabel || null;
+const getFullNameLabel = (person) => {
+    if (!person) return "---";
+    const middle = person.middle_name ? ` ${person.middle_name} ` : " ";
+    return `${person.first_name}${middle}${person.last_name}`;
 };
 
-const getFullNameLabel = ({ first_name, middle_name, last_name }) => (
-    [first_name, middle_name, last_name]
-        .filter(Boolean)
-        .join(" ")
-);
+const getProgramYearLabel = (person) => {
+    if (!person) return null;
+    const program = person.program_name || person.program || "";
+    const year = person.year_level ? ` Yr ${person.year_level}` : "";
+    return program || year ? `${program}${year}` : null;
+};
 
 const getDetailedToastMessage = (scanDetails) => {
-    const messageLines = [
-        `Role: ${formatRoleLabel(scanDetails.role)}`,
-        `Name: ${getFullNameLabel(scanDetails)}`,
-        `ID: ${scanDetails.id_number}`,
-        `Department: ${scanDetails.department_name || "N/A"}`
-    ];
-
-    const programYear = getProgramYearLabel(scanDetails.program_name, scanDetails.year_level);
-    if (programYear) {
-        messageLines.push(`Program & Year: ${programYear}`);
-    }
-
-    return messageLines.join("\n");
+    if (!scanDetails) return "Scan processed.";
+    const name = scanDetails.first_name ? `${scanDetails.first_name} ${scanDetails.last_name}` : "Unknown Person";
+    const role = formatRoleLabel(scanDetails.role || scanDetails.roles);
+    const context = scanDetails.department_name || scanDetails.program_name || "";
+    return `${name} (${role})${context ? ` - ${context}` : ""}`;
 };
 
 export const EventActionMenu = ({ setView, branding }) => {
@@ -102,7 +79,8 @@ export const EventActionMenu = ({ setView, branding }) => {
         fallbackMessage,
         modalActive
     }) => {
-        const successMessage = fallbackMessage || `${result.message} - ${result.person_name} (${result.role})`;
+        const roleLabel = result.role || (result.roles && result.roles.length > 0 ? result.roles[0] : "User");
+        const successMessage = fallbackMessage || `${result.message} - ${result.person_name} (${roleLabel})`;
         const normalizedRole = (result.role || "").toString().trim().toLowerCase();
         const shouldShowDetailedToast = modalActive && DETAILED_TOAST_ROLES.has(normalizedRole);
 
@@ -169,10 +147,45 @@ export const EventActionMenu = ({ setView, branding }) => {
         } catch(e) { console.error("Audio beep failed", e); }
     };
 
+    const flattenEvent = (item) => {
+        const { event, weekly_schedules, date_range_schedules, required_roles } = item;
+        const schedule_type = (weekly_schedules && weekly_schedules.length > 0) ? 'weekly' : 'date_range';
+        
+        let event_date = '';
+        let start_date = '';
+        let end_date = '';
+        let start_time = '';
+        let end_time = '';
+
+        if (schedule_type === 'weekly' && weekly_schedules && weekly_schedules.length > 0) {
+            event_date = weekly_schedules.map(s => s.day_of_week).join(', ');
+            start_time = weekly_schedules[0].start_time;
+            end_time = weekly_schedules[0].end_time;
+        } else if (date_range_schedules && date_range_schedules.length > 0) {
+            start_date = date_range_schedules[0].start_date;
+            end_date = date_range_schedules[0].end_date;
+            start_time = date_range_schedules[0].start_time;
+            end_time = date_range_schedules[0].end_time;
+        }
+
+        return {
+            ...event,
+            schedule_type,
+            event_date,
+            start_date,
+            end_date,
+            start_time,
+            end_time,
+            required_role: required_roles && required_roles.length > 0 ? required_roles.map(r => r.role_name).join(',') : 'all'
+        };
+    };
+
     useEffect(() => {
         const fetchEvents = async () => {
             try {
                 const data = await invoke('get_events');
+                const flattenedData = data.map(flattenEvent);
+                
                 const now = new Date();
                 const currentDay = now.toLocaleDateString('en-US', { weekday: 'long' });
                 const currentDate = getLocalDateKey(now);
@@ -181,7 +194,7 @@ export const EventActionMenu = ({ setView, branding }) => {
                 const currentTime = `${hours}:${minutes}`;
                 const currentDateObj = toDateOnly(currentDate);
 
-                const activeEvents = data.filter(e => {
+                const activeEvents = flattenedData.filter(e => {
                     if (!e.is_enabled) return false;
                     
                     let isCorrectDay = false;
@@ -245,14 +258,17 @@ export const EventActionMenu = ({ setView, branding }) => {
         try {
             const result = await invoke('log_event_attendance', {
                 eventId: parseInt(selectedEventId, 10),
-                idNumber: manualId
+                idNumber: manualId,
+                scannerId: 1
             });
 
             if (result.success) {
+                setShowManualModal(false);
+                setManualId("");
                 await showScanSuccessFeedback({
                     result,
                     scannedId: manualId,
-                    modalActive: true
+                    modalActive: false
                 });
             } else {
                 showError(result.message);
@@ -266,7 +282,8 @@ export const EventActionMenu = ({ setView, branding }) => {
         }
     };
 
-    const handleQrScan = async (scannedId) => {
+    const handleQrScan = useCallback(async (scannedId, modalActiveOverride = null) => {
+        const modalActive = modalActiveOverride !== null ? modalActiveOverride : isModalOpen;
         if (!selectedEventId) {
             showWarning("No active event selected.");
             return;
@@ -275,7 +292,8 @@ export const EventActionMenu = ({ setView, branding }) => {
         try {
             const result = await invoke('log_event_attendance', {
                 eventId: parseInt(selectedEventId, 10),
-                idNumber: scannedId
+                idNumber: scannedId,
+                scannerId: 1
             });
 
             if (result.success) {
@@ -285,7 +303,7 @@ export const EventActionMenu = ({ setView, branding }) => {
                     result,
                     scannedId,
                     fallbackMessage: `Attendance Recorded: ${eventName} - ${result.person_name} (${result.role})`,
-                    modalActive: isModalOpen
+                    modalActive
                 });
                 
                 playSuccessBeep();
@@ -298,90 +316,41 @@ export const EventActionMenu = ({ setView, branding }) => {
             console.error(error);
             showError("System Error. Failed to process ID.");
         }
-    };
+    }, [selectedEventId, events, showScanSuccessFeedback, isModalOpen, showError, showWarning, playSuccessBeep]);
 
-    // --- Keyboard Wedge Listener Logic ---
-    useEffect(() => {
-        let buffer = "";
-        let lastKeyTime = Date.now();
-        let timeoutId = null;
+    const processWedgeInput = useCallback(async (rawString) => {
+        const scannedId = extractScanId(rawString);
 
-        const handleFocusIn = () => {
-            buffer = "";
-        };
-        window.addEventListener("focusin", handleFocusIn);
+        if (!scannedId) {
+            showError("Invalid ID Format: No University ID detected.");
+            return;
+        }
 
-        const processWedgeInput = async (rawString) => {
-            const scannedId = extractScanId(rawString);
+        if (!selectedEventId) {
+            showWarning("Please select an event first.");
+            return;
+        }
 
-            if (!scannedId) {
-                showError("Invalid ID Format: No University ID detected.");
-                return;
-            }
-
-            if (!selectedEventId) {
-                showWarning("Please select an event first.");
-                return;
-            }
-
-            setIsProcessingScanner(true);
-            showProcessing("Processing event scan...");
-            
-            // Clean up any stray input in case the manual modal was open
-            setManualId("");
+        setIsProcessingScanner(true);
+        
+        // Capture modal state before potentially closing one
+        const wasModalOpen = isModalOpen;
+        
+        // If it was a manual modal, we close it as the scan is more specific
+        if (showManualModal) {
             setShowManualModal(false);
+            setManualId("");
+        }
 
-            await handleQrScan(scannedId);
+        await handleQrScan(scannedId, wasModalOpen);
 
-            setTimeout(() => setIsProcessingScanner(false), 500); 
-        };
+        setTimeout(() => setIsProcessingScanner(false), 500); 
+    }, [selectedEventId, handleQrScan, showError, showWarning, showProcessing, isModalOpen, showManualModal]);
 
-        const handleKeyDown = (e) => {
-            if (isProcessingScanner) {
-                e.preventDefault();
-                e.stopPropagation();
-                return;
-            }
-
-            const activeEl = document.activeElement;
-            const isInputActive = activeEl && ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeEl.tagName);
-
-            if (isModalOpen || isInputActive) {
-                buffer = "";
-                return;
-            }
-
-            const currentTime = Date.now();
-            const timeDiff = currentTime - lastKeyTime;
-            lastKeyTime = currentTime;
-
-            if (timeDiff > 30 && buffer.length > 0) {
-                buffer = "";
-            }
-
-            if (e.key === "Enter") {
-                if (buffer.length >= 5) { 
-                    e.preventDefault();
-                    e.stopPropagation();
-                    processWedgeInput(buffer);
-                }
-                buffer = "";
-            } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                buffer += e.key;
-                clearTimeout(timeoutId);
-                timeoutId = setTimeout(() => {
-                    buffer = "";
-                }, 500);
-            }
-        };
-
-        window.addEventListener("keydown", handleKeyDown, { capture: true });
-        return () => {
-            window.removeEventListener("keydown", handleKeyDown, { capture: true });
-            window.removeEventListener("focusin", handleFocusIn);
-            clearTimeout(timeoutId);
-        };
-    }, [isProcessingScanner, isModalOpen, selectedEventId, events]);
+    useGhostScannerListener({
+        enabled: true,
+        onScanBuffer: processWedgeInput
+    });
 
     const currentEvent = events.find(e => e.event_id === parseInt(selectedEventId, 10));
 
@@ -559,7 +528,7 @@ export const EventActionMenu = ({ setView, branding }) => {
                         <div className="grid grid-cols-1 gap-4 text-base text-slate-100 sm:grid-cols-2">
                             <div>
                                 <p className="text-xs uppercase tracking-widest text-slate-300/80">Role</p>
-                                <p className="mt-1 text-xl font-semibold">{formatRoleLabel(activeScanCard.role)}</p>
+                                <p className="mt-1 text-xl font-semibold">{formatRoleLabel(activeScanCard.role || activeScanCard.roles?.[0])}</p>
                             </div>
                             <div>
                                 <p className="text-xs uppercase tracking-widest text-slate-300/80">ID Number</p>
@@ -567,13 +536,21 @@ export const EventActionMenu = ({ setView, branding }) => {
                             </div>
                             <div>
                                 <p className="text-xs uppercase tracking-widest text-slate-300/80">Department</p>
-                                <p className="mt-1 font-semibold">{activeScanCard.department_name || "N/A"}</p>
+                                <p className="mt-1 font-semibold">{activeScanCard.department_name || "---"}</p>
                             </div>
-                            {getProgramYearLabel(activeScanCard.program_name, activeScanCard.year_level) && (
+                            {getProgramYearLabel(activeScanCard) && (
                                 <div>
                                     <p className="text-xs uppercase tracking-widest text-slate-300/80">Program & Year</p>
-                                    <p className="mt-1 font-semibold">
-                                        {getProgramYearLabel(activeScanCard.program_name, activeScanCard.year_level)}
+                                    <p className="mt-1 font-semibold text-cyan-200">
+                                        {getProgramYearLabel(activeScanCard)}
+                                    </p>
+                                </div>
+                            )}
+                            {activeScanCard.position_title && (
+                                <div>
+                                    <p className="text-xs uppercase tracking-widest text-slate-300/80">Position Title</p>
+                                    <p className="mt-1 font-semibold text-cyan-200">
+                                        {activeScanCard.position_title}
                                     </p>
                                 </div>
                             )}
@@ -624,7 +601,7 @@ export const EventActionMenu = ({ setView, branding }) => {
                             showError(error || "Invalid scan target.");
                             return;
                         }
-                        handleQrScan(scannedId);
+                        handleQrScan(scannedId, false);
                     }} 
                     onClose={() => setShowQrScanner(false)} 
                     scannerFunction="event" 
@@ -637,7 +614,7 @@ export const EventActionMenu = ({ setView, branding }) => {
                     onClose={() => setShowFaceScanner(false)}
                     onIdentify={(scannedId) => {
                         setShowFaceScanner(false);
-                        handleQrScan(scannedId);
+                        handleQrScan(scannedId, false);
                     }}
                 />
             )}

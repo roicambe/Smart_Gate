@@ -49,3 +49,4 @@ hnsw_rs = "0.3"
 # Image decoding, resizing, and pixel manipulation
 image = "0.24"
 rayon = "1.10"
+regex = "1.12.3"
