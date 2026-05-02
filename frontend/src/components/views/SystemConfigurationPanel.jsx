@@ -6,8 +6,8 @@ import { AdminModal } from '../common/AdminModal';
 
 export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession, showToast }) => {
     const isSystemAdministrator = adminSession?.role === 'System Administrator';
-    const [strictEmailDomain, setStrictEmailDomain] = useState(false);
-    const [enableFaceRecognition, setEnableFaceRecognition] = useState(false);
+    const [strictEmailDomain, setStrictEmailDomain] = useState(true);
+    const [enableFaceRecognition, setEnableFaceRecognition] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
 
     // Promotion Modal state
@@ -18,7 +18,7 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
     useEffect(() => {
         if (branding) {
             setStrictEmailDomain(branding.strict_email_domain ?? true);
-            setEnableFaceRecognition(branding.enable_face_recognition ?? false);
+            setEnableFaceRecognition(branding.enable_face_recognition ?? true);
         }
     }, [branding]);
 
@@ -27,23 +27,8 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
         
         setIsSaving(true);
         try {
-            await invoke('update_system_branding', {
+            await invoke('update_system_configuration', {
                 adminId: adminSession.account_id,
-                name: branding.system_name,
-                logoBase64: branding.system_logo,
-                systemTitle: branding.system_title,
-                reportAddress: branding.report_address,
-                reportPhone: branding.report_phone,
-                reportEmail: branding.report_email,
-                primaryLogo: branding.primary_logo,
-                secondaryLogo1: branding.secondary_logo_1,
-                secondaryLogo2: branding.secondary_logo_2,
-                primaryCircle: branding.primary_circle,
-                secondary1Circle: branding.secondary1_circle,
-                secondary2Circle: branding.secondary2_circle,
-                primaryLogoEnabled: branding.primary_logo_enabled,
-                secondaryLogo1Enabled: branding.secondary_logo_1_enabled,
-                secondaryLogo2Enabled: branding.secondary_logo_2_enabled,
                 strictEmailDomain: strictEmailDomain,
                 enableFaceRecognition: enableFaceRecognition
             });
@@ -259,6 +244,11 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
                                 type="text"
                                 value={confirmInput}
                                 onChange={(e) => setConfirmInput(e.target.value.toUpperCase())}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && canSubmitPromotion) {
+                                        handlePromote();
+                                    }
+                                }}
                                 placeholder="PROMOTE"
                                 className="w-full text-center text-base tracking-widest font-mono px-4 py-3 bg-black/40 border-2 border-amber-500/30 focus:border-amber-500 rounded-2xl text-white placeholder-white/5 focus:outline-none focus:ring-4 focus:ring-amber-500/10 transition-all shadow-inner"
                                 autoFocus

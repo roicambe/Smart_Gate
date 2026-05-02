@@ -67,7 +67,7 @@ export const FaceRecognitionManagement = ({ adminSession, branding }) => {
                 user.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 user.id_number.toLowerCase().includes(searchQuery.toLowerCase());
 
-            const matchesRole = filterRole === 'all' || user.role === filterRole;
+            const matchesRole = filterRole === 'all' || user.roles?.some(r => r.toLowerCase() === filterRole.toLowerCase());
 
             const matchesFaceStatus =
                 filterStatus === 'all' ||
@@ -218,9 +218,13 @@ export const FaceRecognitionManagement = ({ adminSession, branding }) => {
                                         <td className="px-4 py-2.5 font-mono font-medium text-slate-900">{user.id_number}</td>
                                         <td className="px-4 py-2.5 font-medium text-slate-900">{user.full_name}</td>
                                         <td className="px-4 py-2.5">
-                                            <span className="inline-flex items-center px-2.5 py-0.5 text-xs font-semibold rounded-full bg-slate-100 text-slate-700 border border-slate-200 capitalize">
-                                                {formatRoleLabel(user.role)}
-                                            </span>
+                                            <div className="flex flex-wrap gap-1">
+                                                {user.roles?.map(role => (
+                                                    <span key={role} className="inline-flex items-center px-2.5 py-0.5 text-xs font-semibold rounded-full bg-slate-100 text-slate-700 border border-slate-200 capitalize">
+                                                        {formatRoleLabel(role)}
+                                                    </span>
+                                                ))}
+                                            </div>
                                         </td>
                                         <td className="px-4 py-2.5">
                                             {user.face_registered ? (
@@ -314,7 +318,7 @@ export const FaceRecognitionManagement = ({ adminSession, branding }) => {
                                 {selectedUser.first_name?.charAt(0)}
                             </div>
                             <div>
-                                <h3 className="text-lg font-bold text-white">
+                                <h3 className="text-lg font-bold text-white break-words">
                                     {selectedUser.first_name} {selectedUser.middle_name} {selectedUser.last_name}
                                 </h3>
                                 <p className="text-sm font-mono text-white/50">{selectedUser.id_number}</p>
@@ -324,7 +328,7 @@ export const FaceRecognitionManagement = ({ adminSession, branding }) => {
                         <div className="grid grid-cols-2 gap-y-4 gap-x-6 text-sm">
                             <div>
                                 <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Role</p>
-                                <p className="font-semibold text-white capitalize">{selectedUser.role}</p>
+                                <p className="font-semibold text-white capitalize break-words">{selectedUser.roles?.join(', ') || 'N/A'}</p>
                             </div>
                             <div>
                                 <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Face Status</p>
@@ -339,17 +343,21 @@ export const FaceRecognitionManagement = ({ adminSession, branding }) => {
                                 )}
                             </div>
 
-                            {selectedUser.role === 'student' && (
+                            {selectedUser.roles?.some(r => r.toLowerCase() === 'student') && (
                                 <>
-                                    <div>
+                                    <div className="col-span-2">
+                                        <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Department</p>
+                                        <p className="font-semibold text-white break-words">{selectedUser.department_name || 'N/A'}</p>
+                                    </div>
+                                    <div className="col-span-2">
                                         <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Program</p>
-                                        <p className="font-semibold text-white">{selectedUser.program_name || 'N/A'}</p>
+                                        <p className="font-semibold text-white break-words">{selectedUser.program_name || 'N/A'}</p>
                                     </div>
                                     <div>
                                         <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Year Level</p>
                                         <p className="font-semibold text-white">{selectedUser.year_level || 'N/A'}</p>
                                     </div>
-                                    <div className="col-span-2">
+                                    <div>
                                         <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Classification</p>
                                         <p className={`font-bold ${selectedUser.is_irregular ? 'text-amber-400' : 'text-white'}`}>
                                             {selectedUser.is_irregular ? 'Irregular' : 'Regular'}
@@ -358,22 +366,26 @@ export const FaceRecognitionManagement = ({ adminSession, branding }) => {
                                 </>
                             )}
 
-                            {(selectedUser.role === 'professor' || selectedUser.role === 'staff') && (
+                            {selectedUser.roles?.some(r => ['professor', 'staff', 'dean'].includes(r.toLowerCase())) && (
                                 <>
                                     <div className="col-span-2">
                                         <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Department</p>
-                                        <p className="font-semibold text-white">{selectedUser.department_name || 'N/A'}</p>
+                                        <p className="font-semibold text-white break-words">{selectedUser.department_name || 'N/A'}</p>
                                     </div>
                                     <div className="col-span-2">
                                         <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Position/Title</p>
-                                        <p className="font-semibold text-white">{selectedUser.position_title || 'N/A'}</p>
+                                        <p className="font-semibold text-white break-words">{selectedUser.position_title || 'N/A'}</p>
                                     </div>
                                 </>
                             )}
 
-                            <div>
-                                <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Email</p>
-                                <p className="font-semibold text-white truncate max-w-[150px]">{selectedUser.email || 'N/A'}</p>
+                            <div className="col-span-2">
+                                <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Email Address</p>
+                                <p className="font-semibold text-white break-all">{selectedUser.email || 'N/A'}</p>
+                            </div>
+                            <div className="col-span-2">
+                                <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Contact Number</p>
+                                <p className="font-semibold text-white break-all">{selectedUser.contacts?.find(c => c.contact_type.toLowerCase() === 'phone')?.contact_value || 'N/A'}</p>
                             </div>
                             <div>
                                 <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Status</p>

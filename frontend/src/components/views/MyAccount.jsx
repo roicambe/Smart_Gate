@@ -26,8 +26,13 @@ export const MyAccount = ({ adminSession, setIsAdminLoggedIn, setView, showToast
                 email: email.trim(),
                 activeAdminId: adminSession.account_id,
             });
+            setIsAdminLoggedIn({
+                ...adminSession,
+                username: username.trim(),
+                full_name: fullName.trim(),
+                email: email.trim(),
+            });
             showToast('Profile Updated: Personal information saved successfully.', 'success');
-            // Note: In a real app, we'd update the global adminSession state here too.
         } catch (err) {
             showToast(typeof err === 'string' ? err : 'Failed to update profile.', 'error');
         } finally {

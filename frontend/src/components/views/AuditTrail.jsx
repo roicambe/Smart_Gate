@@ -10,22 +10,7 @@ import { useToast } from '../toast/ToastProvider';
 import { drawInstitutionalHeader, prepareInstitutionalHeaderAssets } from '../../utils/pdfInstitutionalHeader';
 import { AdminModal } from '../common/AdminModal';
 
-// ─── Human-Readable Translator (Dual-Layer) ──────────────────────────────────
-// Layer 1: getShortSummary() — concise 3-4 word label for the table column.
-// Layer 2: translateAuditLog() — full descriptive sentence for the modal view.
-
-const FRIENDLY_TABLE_NAMES = {
-    accounts: 'Administrator Account',
-    persons: 'User Profile',
-    students: 'Student Record',
-    employees: 'Employee Record',
-    visitors: 'Visitor Record',
-    events: 'Event',
-    settings: 'System Setting',
-    departments: 'Department',
-    programs: 'Program',
-    scanners: 'Scanner',
-};
+// ─── Human-Readable Translator ───────────────────────────────────────────────
 
 const FRIENDLY_FIELD_NAMES = {
     system_name: 'System Name',
@@ -36,13 +21,18 @@ const FRIENDLY_FIELD_NAMES = {
     middle_name: 'Middle Name',
     id_number: 'ID Number',
     email: 'Email',
+    emails: 'Emails',
     contact_number: 'Contact Number',
+    phones: 'Contact Numbers',
     role: 'Role',
+    roles: 'Roles',
     username: 'Username',
     password_hash: 'Password',
     is_active: 'Active Status',
     is_first_login: 'First Login Status',
+    program: 'Program',
     program_id: 'Program',
+    department: 'Department',
     department_id: 'Department',
     year_level: 'Year Level',
     position_title: 'Position Title',
@@ -60,249 +50,56 @@ const FRIENDLY_FIELD_NAMES = {
     setting_value: 'Setting Value',
     activation_otp: 'Activation OTP',
     activation_otp_expires_at: 'OTP Expiration',
+    day_of_week: 'Day of Week',
+    start_date: 'Start Date',
+    end_date: 'End Date',
+    is_irregular: 'Irregular Status',
+    purpose_of_visit: 'Purpose of Visit',
+    person_to_visit: 'Person to Visit',
 };
 
 const getFriendlyFieldName = (key) => FRIENDLY_FIELD_NAMES[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
-const getFriendlyTableName = (table) => FRIENDLY_TABLE_NAMES[table] || table.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-
 const formatFieldValue = (key, value) => {
     if (value === null || value === undefined || value === '') return '(empty)';
     if (key === 'password_hash') return '••••••••';
-    if (key === 'is_active' || key === 'is_first_login' || key === 'is_enabled') return value ? 'Yes' : 'No';
-    if (key === 'system_logo') return value ? '(image data)' : '(empty)';
+    if (key === 'is_active' || key === 'is_first_login' || key === 'is_enabled' || key === 'is_archived') {
+        if (value === '1' || value === 1 || value === true || value === 'true') return 'Yes';
+        if (value === '0' || value === 0 || value === false || value === 'false') return 'No';
+    }
+    if (key === 'system_logo' || key === 'primary_logo' || key === 'secondary_logo_1' || key === 'secondary_logo_2') return value ? '(image data)' : '(empty)';
     return String(value);
-};
-
-const safeParseJSON = (val) => {
-    if (!val) return null;
-    if (typeof val === 'object') return val;
-    try { return JSON.parse(val); } catch { return null; }
-};
-
-const isValueDifferent = (o, n) => {
-    let oVal = o;
-    let nVal = n;
-    if (typeof oVal === 'boolean') oVal = oVal ? 1 : 0;
-    if (typeof nVal === 'boolean') nVal = nVal ? 1 : 0;
-    if (oVal == null) oVal = '';
-    if (nVal == null) nVal = '';
-    return String(oVal) !== String(nVal);
 };
 
 const FIELD_ORDER_WEIGHTS = {
     'Role': 1,
+    'Roles': 1,
     'ID Number': 2,
     'Last Name': 3,
     'First Name': 4,
     'Middle Name': 5,
     'Email': 6,
-    'Contact Number': 7
-};
-
-// ─── Layer 1: Short Summary (Table Column) ───────────────────────────────────
-// Returns a concise 3-4 word label for the main table's "Details" column.
-const getShortSummary = (log) => {
-    const oldObj = safeParseJSON(log.old_values);
-    const newObj = safeParseJSON(log.new_values);
-
-    if (newObj && typeof newObj.summary === 'string' && newObj.summary.trim()) {
-        return newObj.summary;
-    }
-
-    const getIdNumber = () => (newObj && newObj.id_number) || (oldObj && oldObj.id_number) || 'User';
-    const getUsername = () => (newObj && newObj.username) || (oldObj && oldObj.username) || 'Account';
-    const getEventName = () => (newObj && newObj.event_name) || (oldObj && oldObj.event_name) || 'Event';
-    const getOriginalEventName = () => (oldObj && oldObj.event_name) || (newObj && newObj.event_name) || 'Event';
-
-    if (log.action_type === 'INSERT') {
-        if (['persons', 'students', 'employees', 'visitors'].includes(log.target_table)) {
-            return `Registered user: ${getIdNumber()}`;
-        }
-        if (log.target_table === 'accounts') return `Registered account: ${getUsername()}`;
-        if (log.target_table === 'events') return `Created event: ${getEventName()}`;
-    }
-
-    if (log.action_type === 'DELETE') {
-        if (['persons', 'students', 'employees', 'visitors'].includes(log.target_table)) {
-            return `Removed user: ${getIdNumber()}`;
-        }
-        if (log.target_table === 'accounts') return `Removed account: ${getUsername()}`;
-        if (log.target_table === 'events') return `Removed event: ${getEventName()}`;
-    }
-
-    if (log.action_type === 'UPDATE') {
-        let fieldStr = 'Profile';
-        let changedFields = [];
-
-        if (oldObj && newObj) {
-            const allKeys = new Set([...Object.keys(oldObj), ...Object.keys(newObj)]);
-            for (const key of allKeys) {
-                if (isValueDifferent(oldObj[key], newObj[key])) {
-                    changedFields.push(getFriendlyFieldName(key));
-                }
-            }
-            if (changedFields.length === 1) {
-                fieldStr = changedFields[0];
-            } else if (changedFields.length > 1) {
-                const prioritized = changedFields.filter(f => f !== 'Active Status' && f !== 'Enabled Status');
-                fieldStr = prioritized.length === 1 ? prioritized[0] : (log.target_table === 'events' ? 'Event Details' : (log.target_table === 'accounts' ? 'Account' : 'Profile'));
-            } else {
-                fieldStr = 'Details';
-            }
-        }
-
-        if (['persons', 'students', 'employees', 'visitors'].includes(log.target_table)) {
-            return `Updated ${fieldStr} for ${getIdNumber()}`;
-        }
-        if (log.target_table === 'accounts') {
-            return `Updated ${fieldStr} for ${getUsername()}`;
-        }
-        if (log.target_table === 'events') {
-            if (changedFields.includes('Event Name')) return `Updated Event Name for ${getOriginalEventName()}`;
-            return `Updated ${fieldStr} for ${getOriginalEventName()}`;
-        }
-        if (log.target_table === 'departments') {
-            const code = (newObj && newObj.department_code) || (oldObj && oldObj.department_code) || 'Dept';
-            return `Updated ${changedFields.length === 1 ? changedFields[0] : 'Department'} for ${code}`;
-        }
-        if (log.target_table === 'programs') {
-            const code = (newObj && newObj.program_code) || (oldObj && oldObj.program_code) || 'Program';
-            return `Updated ${changedFields.length === 1 ? changedFields[0] : 'Program'} for ${code}`;
-        }
-        if (log.target_table === 'settings') {
-            if (changedFields.includes('System Name')) return 'Updated System Name';
-            if (changedFields.includes('System Logo')) return 'Updated System Logo';
-            return `Changed System Settings`;
-        }
-    }
-
-    if (log.action_type === 'EXPORT') {
-        const obj = newObj || oldObj;
-        if (obj && obj.format) {
-            return `Exported ${getFriendlyTableName(log.target_table)} to ${obj.format}`;
-        }
-    }
-
-    const friendlyTable = getFriendlyTableName(log.target_table).toLowerCase();
-    switch (log.action_type) {
-        case 'INSERT': return `Created ${friendlyTable}`;
-        case 'UPDATE': return `Updated ${friendlyTable}`;
-        case 'DELETE': return `Removed ${friendlyTable}`;
-        case 'EXPORT': return `Exported ${friendlyTable}`;
-        default: return 'System change';
-    }
-};
-
-// ─── Layer 2: Full Translator (Modal View) ───────────────────────────────────
-// Returns a complete, human-readable description for the View Details modal.
-// Handles N/A / empty details gracefully with contextual fallback sentences.
-const EMPTY_STATE_SENTENCES = {
-    accounts: {
-        INSERT: 'A new administrative account was successfully created in the system.',
-        UPDATE: 'An existing administrator account was modified.',
-        DELETE: 'An administrator account was permanently removed from the system.',
-    },
-    persons: {
-        INSERT: 'A new user profile was successfully registered in the database.',
-        UPDATE: 'An existing user profile was updated with new information.',
-        DELETE: 'A user profile was permanently deleted from the system.',
-    },
-    students: {
-        INSERT: 'A new student record was successfully added to the database.',
-        UPDATE: 'An existing student record was updated.',
-        DELETE: 'A student record was permanently removed from the system.',
-    },
-    employees: {
-        INSERT: 'A new employee record was successfully added to the database.',
-        UPDATE: 'An existing employee record was updated.',
-        DELETE: 'An employee record was permanently removed from the system.',
-    },
-    visitors: {
-        INSERT: 'A new visitor was successfully registered in the system.',
-        UPDATE: 'An existing visitor record was updated.',
-        DELETE: 'A visitor record was removed from the system.',
-    },
-    events: {
-        INSERT: 'A new event was successfully created in the system.',
-        UPDATE: 'An existing event configuration was modified.',
-        DELETE: 'An event was permanently removed from the system.',
-    },
-    settings: {
-        INSERT: 'A new system setting was added.',
-        UPDATE: 'A system configuration setting was changed.',
-        DELETE: 'A system setting was removed.',
-    },
-};
-
-const getEmptyStateSentence = (log) => {
-    const tableFallbacks = EMPTY_STATE_SENTENCES[log.target_table];
-    if (tableFallbacks && tableFallbacks[log.action_type]) {
-        return tableFallbacks[log.action_type];
-    }
-    const friendlyTable = getFriendlyTableName(log.target_table);
-    switch (log.action_type) {
-        case 'INSERT': return `A new record was successfully added to ${friendlyTable}.`;
-        case 'UPDATE': return `An existing record in ${friendlyTable} was modified.`;
-        case 'DELETE': return `A record was permanently removed from ${friendlyTable}.`;
-        default: return `A system operation was performed on ${friendlyTable}.`;
-    }
-};
-
-const translateAuditLog = (log) => {
-    const oldObj = safeParseJSON(log.old_values);
-    const newObj = safeParseJSON(log.new_values);
-
-    // If no structured data is available, return a contextual empty-state sentence
-    if (!oldObj && !newObj) {
-        return getEmptyStateSentence(log);
-    }
-
-    const summary = getShortSummary(log);
-    return summary.endsWith('.') ? summary : `${summary}.`;
-};
-
-// Produces an array of { field, oldValue, newValue } change items for the modal
-const getDetailedChanges = (log) => {
-    const oldObj = safeParseJSON(log.old_values);
-    const newObj = safeParseJSON(log.new_values);
-
-    let changes = [];
-
-    if (log.action_type === 'UPDATE' && oldObj && newObj) {
-        const allKeys = new Set([...Object.keys(oldObj), ...Object.keys(newObj)]);
-        for (const key of allKeys) {
-            changes.push({
-                field: getFriendlyFieldName(key),
-                oldValue: formatFieldValue(key, oldObj[key]),
-                newValue: formatFieldValue(key, newObj[key]),
-                changed: isValueDifferent(oldObj[key], newObj[key]),
-            });
-        }
-    } else if (log.action_type === 'INSERT' && newObj) {
-        changes = Object.entries(newObj).map(([key, val]) => ({
-            field: getFriendlyFieldName(key),
-            oldValue: null,
-            newValue: formatFieldValue(key, val),
-            changed: true,
-        }));
-    } else if (log.action_type === 'DELETE' && oldObj) {
-        changes = Object.entries(oldObj).map(([key, val]) => ({
-            field: getFriendlyFieldName(key),
-            oldValue: formatFieldValue(key, val),
-            newValue: null,
-            changed: true,
-        }));
-    }
-
-    changes.sort((a, b) => {
-        const orderA = FIELD_ORDER_WEIGHTS[a.field] || 99;
-        const orderB = FIELD_ORDER_WEIGHTS[b.field] || 99;
-        if (orderA !== orderB) return orderA - orderB;
-        return a.field.localeCompare(b.field);
-    });
-
-    return changes;
+    'Emails': 6,
+    'Contact Number': 7,
+    'Contact Numbers': 7,
+    'Department': 8,
+    'Program': 9,
+    'Year Level': 10,
+    'Irregular Status': 11,
+    'Position Title': 12,
+    'Purpose of Visit': 13,
+    'Person to Visit': 14,
+    'Event Name': 20,
+    'Description': 21,
+    'Day of Week': 22,
+    'Start Date': 23,
+    'End Date': 24,
+    'Start Time': 25,
+    'End Time': 26,
+    'Required Role': 27,
+    'Active Status': 30,
+    'Status': 30,
+    'Enabled Status': 30,
 };
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -354,10 +151,11 @@ export const AuditTrail = ({ branding, adminSession }) => {
                 startDate: startDate || null,
                 endDate: endDate || null
             });
-            console.log("Audit Logs:", data);
+            console.log("Audit Logs (Normalized):", data);
             setLogs(data);
         } catch (error) {
             console.error("Failed to fetch audit logs:", error);
+            showError("Failed to load audit logs.");
         } finally {
             setLoading(false);
         }
@@ -368,8 +166,11 @@ export const AuditTrail = ({ branding, adminSession }) => {
     }, []);
 
     const filteredLogs = logs.filter(log => {
-        const matchesSearch = log.admin_username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            log.target_table.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        const matchesSearch = 
+            log.admin_username.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            log.admin_full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            log.entity_type.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            log.entity_label.toLowerCase().includes(searchTerm.toLowerCase()) ||
             log.action_type.toLowerCase().includes(searchTerm.toLowerCase());
         const matchesAction = actionFilter === 'All' || log.action_type === actionFilter;
         return matchesSearch && matchesAction;
@@ -395,6 +196,42 @@ export const AuditTrail = ({ branding, adminSession }) => {
         setShowViewModal(true);
     };
 
+    const getShortSummary = (log) => {
+        const action = log.action_type.toLowerCase();
+        const type = log.entity_type;
+        const label = log.entity_label;
+
+        // Extract key fields for a more descriptive summary (especially for exports)
+        const findValue = (field) => {
+            const change = log.changes.find(c => c.field_name === field);
+            return change?.new_value || change?.old_value;
+        };
+
+        const idNum = findValue('id_number');
+        const program = findValue('program');
+        const department = findValue('department');
+
+        let meta = "";
+        if (idNum) meta += `ID: ${idNum}`;
+        if (program) meta += (meta ? " | " : "") + `Prog: ${program}`;
+        if (department) meta += (meta ? " | " : "") + `Dept: ${department}`;
+        const suffix = meta ? ` (${meta})` : '';
+
+        if (action === 'create') return `Created ${type}: ${label}${suffix}`;
+        if (action === 'archive') return `Moved ${type} to Archive: ${label}${suffix}`;
+        if (action === 'restore') return `Restored ${type} from Archive: ${label}${suffix}`;
+        if (action === 'delete') return `Permanently Deleted ${type}: ${label}${suffix}`;
+        if (action === 'update') {
+            const changeCount = log.changes.length;
+            if (changeCount === 0) return `Updated ${type}: ${label}`;
+            if (changeCount === 1) {
+                return `Updated ${getFriendlyFieldName(log.changes[0].field_name)} for ${label}`;
+            }
+            return `Updated ${changeCount} fields for ${label}`;
+        }
+        return `${log.action_type} action on ${type}: ${label}`;
+    };
+
     const handleExportExcel = async () => {
         if (filteredLogs.length === 0) return;
         setIsExporting(true);
@@ -404,10 +241,10 @@ export const AuditTrail = ({ branding, adminSession }) => {
         try {
             const exportData = filteredLogs.map(log => ({
                 'Timestamp': formatDate(log.created_at),
-                'Admin': log.admin_username,
+                'Performed By': `${log.admin_full_name} (@${log.admin_username})`,
                 'Action': log.action_type,
-                'Target Table': log.target_table,
-                'Target ID': log.target_id || '-',
+                'Entity Type': log.entity_type,
+                'Entity Label': log.entity_label,
                 'Details': getShortSummary(log)
             }));
 
@@ -415,11 +252,9 @@ export const AuditTrail = ({ branding, adminSession }) => {
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, "Audit Trail");
 
-            // Format default filename
             let filename = `AuditTrail_${new Date().toISOString().slice(0, 10)}`;
             if (startDate && endDate) filename = `AuditTrail_${startDate}_to_${endDate}`;
 
-            // Native Save Dialog for Excel
             const filePath = await save({
                 defaultPath: `${filename}.xlsx`,
                 filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }]
@@ -430,18 +265,8 @@ export const AuditTrail = ({ branding, adminSession }) => {
                 return;
             }
 
-            // Write via xlsx to buffer, then to Tauri fs
             const excelBuffer = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
             await writeFile(filePath, new Uint8Array(excelBuffer));
-
-            await invoke('log_frontend_action', {
-                adminId: adminSession?.account_id,
-                actionType: 'EXPORT',
-                targetTable: 'audit_logs',
-                targetId: null,
-                oldValues: null,
-                newValues: JSON.stringify({ format: 'Excel', filename, record_count: filteredLogs.length })
-            }).catch(e => console.error("Audit log failed for export", e));
 
             showSuccess(`Success: Report saved to ${filePath}`);
         } catch (error) {
@@ -450,33 +275,6 @@ export const AuditTrail = ({ branding, adminSession }) => {
         } finally {
             setIsExporting(false);
         }
-    };
-
-    // ─── Resolve target_id to a human-readable name ────────────────────────────
-    const resolveTargetName = (log) => {
-        const oldObj = safeParseJSON(log.old_values);
-        const newObj = safeParseJSON(log.new_values);
-        const obj = newObj || oldObj;
-        if (!obj) return '-';
-
-        // Try the most descriptive identifiers in order of priority
-        if (obj.full_name) return obj.full_name;
-        if (obj.first_name && obj.last_name) return `${obj.first_name} ${obj.last_name}`;
-        if (obj.username) return obj.username;
-        if (obj.event_name) return obj.event_name;
-        if (obj.id_number) return obj.id_number;
-        if (obj.department_code) return obj.department_code;
-        if (obj.department_name) return obj.department_name;
-        if (obj.program_code) return obj.program_code;
-        if (obj.program_name) return obj.program_name;
-        if (obj.location_name) return obj.location_name;
-        if (obj.setting_key) return obj.setting_key;
-        if (obj.system_name) return obj.system_name;
-
-        // For EXPORT actions, show format info
-        if (log.action_type === 'EXPORT' && obj.format) return `${obj.format} Export`;
-
-        return '-';
     };
 
     const handleExportPDF = async () => {
@@ -489,7 +287,6 @@ export const AuditTrail = ({ branding, adminSession }) => {
             const doc = new jsPDF();
             const headerAssets = await prepareInstitutionalHeaderAssets(branding);
 
-            // Store metadata string upfront
             let dateRangeStr = "All Time";
             if (startDate && endDate) dateRangeStr = `${startDate} To ${endDate}`;
             else if (startDate) dateRangeStr = `From ${startDate}`;
@@ -514,7 +311,6 @@ export const AuditTrail = ({ branding, adminSession }) => {
             };
             const headerLayout = drawHeader();
 
-            // Table Data — human-readable columns
             const tableColumn = ["Timestamp", "Admin", "Action", "Category", "Target", "Details"];
             const tableRows = [];
 
@@ -523,13 +319,12 @@ export const AuditTrail = ({ branding, adminSession }) => {
                     formatDate(log.created_at),
                     log.admin_username,
                     log.action_type,
-                    getFriendlyTableName(log.target_table),
-                    resolveTargetName(log),
+                    log.entity_type,
+                    log.entity_label,
                     getShortSummary(log)
                 ]);
             });
 
-            // Generate Table — matches Access Logs formatting
             autoTable(doc, {
                 startY: headerLayout.contentStartY + 2,
                 margin: { top: headerLayout.contentStartY + 2, left: headerLayout.margin, right: headerLayout.margin },
@@ -541,11 +336,11 @@ export const AuditTrail = ({ branding, adminSession }) => {
                 alternateRowStyles: { fillColor: [248, 250, 252] },
                 styles: { cellPadding: 2, overflow: 'linebreak', font: 'helvetica' },
                 columnStyles: {
-                    0: { cellWidth: 'auto' }, // Timestamp
-                    1: { cellWidth: 'auto' }, // Admin
-                    2: { cellWidth: 'auto', fontStyle: 'bold' }, // Action
-                    3: { cellWidth: 'auto' }, // Category
-                    4: { cellWidth: 'auto' }, // Target
+                    0: { cellWidth: 35 }, // Timestamp
+                    1: { cellWidth: 25 }, // Admin
+                    2: { cellWidth: 20, fontStyle: 'bold' }, // Action
+                    3: { cellWidth: 25 }, // Category
+                    4: { cellWidth: 35 }, // Target
                     5: { cellWidth: 'auto' }, // Details
                 },
                 didDrawPage: function (data) {
@@ -553,18 +348,22 @@ export const AuditTrail = ({ branding, adminSession }) => {
                 },
                 didParseCell: function (data) {
                     if (data.section === 'body' && data.column.index === 2) {
-                        if (data.cell.raw === 'INSERT') {
-                            data.cell.styles.textColor = [5, 150, 105];
-                        } else if (data.cell.raw === 'UPDATE') {
-                            data.cell.styles.textColor = [217, 119, 6];
-                        } else if (data.cell.raw === 'DELETE') {
-                            data.cell.styles.textColor = [225, 29, 72];
+                        const action = data.cell.raw;
+                        if (action === 'CREATE') {
+                            data.cell.styles.textColor = [5, 150, 105]; // Emerald
+                        } else if (action === 'UPDATE') {
+                            data.cell.styles.textColor = [217, 119, 6]; // Amber
+                        } else if (action === 'ARCHIVE') {
+                            data.cell.styles.textColor = [249, 115, 22]; // Orange
+                        } else if (action === 'RESTORE') {
+                            data.cell.styles.textColor = [79, 70, 229]; // Indigo
+                        } else if (action === 'DELETE') {
+                            data.cell.styles.textColor = [225, 29, 72]; // Rose
                         }
                     }
                 }
             });
 
-            // Formatted dynamic filename — matches Access Logs naming convention
             const now = new Date();
             const yyyy = now.getFullYear();
             const mm = String(now.getMonth() + 1).padStart(2, '0');
@@ -576,10 +375,7 @@ export const AuditTrail = ({ branding, adminSession }) => {
             const formattedTime = `${String(hours).padStart(2, '0')}.${minutes}${ampm}`;
             const filename = `AuditTrail_${yyyy}-${mm}-${dd}_${formattedTime}`;
 
-            // Generate ArrayBuffer from jsPDF
             const pdfBuffer = doc.output('arraybuffer');
-
-            // Native Save Dialog for PDF
             const filePath = await save({
                 defaultPath: `${filename}.pdf`,
                 filters: [{ name: 'PDF Document', extensions: ['pdf'] }]
@@ -590,18 +386,7 @@ export const AuditTrail = ({ branding, adminSession }) => {
                 return;
             }
 
-            // Write File via Tauri
             await writeFile(filePath, new Uint8Array(pdfBuffer));
-
-            await invoke('log_frontend_action', {
-                adminId: adminSession?.account_id,
-                actionType: 'EXPORT',
-                targetTable: 'audit_logs',
-                targetId: null,
-                oldValues: null,
-                newValues: JSON.stringify({ format: 'PDF', filename, record_count: filteredLogs.length })
-            }).catch(e => console.error("Audit log failed for PDF export", e));
-
             showSuccess(`Success: Report saved to ${filePath}`);
         } catch (error) {
             console.error("PDF export failed", error);
@@ -621,7 +406,7 @@ export const AuditTrail = ({ branding, adminSession }) => {
                         <ShieldAlert className="w-8 h-8 text-emerald-500" />
                         Audit Trail
                     </h1>
-                    <p className="text-slate-500 mt-1">Read-only log of all system configuration changes.</p>
+                    <p className="text-slate-500 mt-1">Normalized, field-level system activity logs.</p>
                 </div>
 
                 <div className="flex items-center gap-3">
@@ -676,14 +461,13 @@ export const AuditTrail = ({ branding, adminSession }) => {
 
             {/* Filter Section  */}
             <div className="p-3 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col lg:flex-row gap-4">
-                {/* Search & Action (Upper row on small screens) */}
                 <div className="flex flex-col sm:flex-row gap-2 items-center flex-1">
                     <div className="relative w-full sm:w-80">
                         <Search className="w-5 h-5 absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400" />
                         <input
                             type="text"
                             className="block w-full pl-11 pr-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all font-medium"
-                            placeholder="Search Admin, Table, or Action..."
+                            placeholder="Search Admin, Category, or Label..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
@@ -696,14 +480,15 @@ export const AuditTrail = ({ branding, adminSession }) => {
                             className="bg-transparent text-sm font-medium text-slate-700 outline-none cursor-pointer w-full"
                         >
                             <option value="All">Action: All</option>
-                            <option value="INSERT">INSERT</option>
+                            <option value="CREATE">CREATE</option>
                             <option value="UPDATE">UPDATE</option>
+                            <option value="ARCHIVE">ARCHIVE</option>
+                            <option value="RESTORE">RESTORE</option>
                             <option value="DELETE">DELETE</option>
                         </select>
                     </div>
                 </div>
 
-                {/* Date Filters (Lower row on small screens) */}
                 <div className="flex flex-col sm:flex-row gap-3 lg:border-l lg:border-slate-200 lg:pl-4">
                     <div className="flex items-center gap-2">
                         <Calendar className="w-4 h-4 text-slate-400" />
@@ -733,7 +518,7 @@ export const AuditTrail = ({ branding, adminSession }) => {
                 </div>
             </div>
 
-            {/* Table View - scroll container with sticky headers (solid enterprise) */}
+            {/* Table View */}
             <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 shadow-sm rounded-xl relative">
                 <div className="flex-1 min-h-0 overflow-x-auto overflow-y-auto">
                     <table className="w-full text-left border-collapse text-sm">
@@ -742,35 +527,41 @@ export const AuditTrail = ({ branding, adminSession }) => {
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Timestamp</th>
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Admin</th>
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Action</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Target Table</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Details</th>
+                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Category</th>
+                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Target</th>
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {paginatedLogs.length > 0 ? (
                                 paginatedLogs.map((log) => (
-                                    <tr key={log.audit_id} className="hover:bg-slate-50 transition-colors group">
+                                    <tr key={log.event_id} className="hover:bg-slate-50 transition-colors group">
                                         <td className="px-5 py-3 text-slate-600 whitespace-nowrap font-mono text-xs">
                                             {formatDate(log.created_at)}
                                         </td>
-                                        <td className="px-5 py-3 font-semibold text-slate-900">
-                                            {log.admin_username}
+                                        <td className="px-5 py-3">
+                                            <div className="flex flex-col">
+                                                <span className="font-semibold text-slate-900">{log.admin_full_name}</span>
+                                                <span className="text-xs text-slate-400">@{log.admin_username}</span>
+                                            </div>
                                         </td>
                                         <td className="px-5 py-3">
-                                            <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${log.action_type === 'INSERT' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
+                                            <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${
+                                                log.action_type === 'CREATE' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' :
                                                 log.action_type === 'UPDATE' ? 'bg-amber-100 text-amber-700 border-amber-200' :
-                                                    log.action_type === 'DELETE' ? 'bg-rose-100 text-rose-700 border-rose-200' :
-                                                        'bg-slate-100 text-slate-700 border-slate-200'
-                                                }`}>
+                                                log.action_type === 'ARCHIVE' ? 'bg-orange-100 text-orange-700 border-orange-200' :
+                                                log.action_type === 'RESTORE' ? 'bg-indigo-100 text-indigo-700 border-indigo-200' :
+                                                log.action_type === 'DELETE' ? 'bg-rose-100 text-rose-700 border-rose-200' :
+                                                'bg-slate-100 text-slate-700 border-slate-200'
+                                            }`}>
                                                 {log.action_type}
                                             </span>
                                         </td>
                                         <td className="px-5 py-3 text-slate-600 font-medium">
-                                            {getFriendlyTableName(log.target_table)}
+                                            {log.entity_type}
                                         </td>
                                         <td className="px-5 py-3 text-slate-600 text-sm">
-                                            {getShortSummary(log)}
+                                            {log.entity_label}
                                         </td>
                                         <td className="px-5 py-3 text-right">
                                             <button
@@ -797,7 +588,6 @@ export const AuditTrail = ({ branding, adminSession }) => {
                     </table>
                 </div>
 
-                {/* Footer: counts + pagination (only when records > items per page) */}
                 <div className="px-5 py-3 border-t border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 flex flex-wrap items-center justify-between gap-3 shrink-0 rounded-b-xl">
                     <div>
                         Showing {paginatedLogs.length > 0 ? (currentPage - 1) * ITEMS_PER_PAGE + 1 : 0}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredLogs.length)} of {filteredLogs.length} (Total: {logs.length})
@@ -841,31 +631,33 @@ export const AuditTrail = ({ branding, adminSession }) => {
                     isOpen={showViewModal}
                     onClose={() => setShowViewModal(false)}
                     title="Audit Log Details"
-                    subtitle="Full record of this system change."
+                    subtitle="Normalized record of this system change."
                     icon={<FileText className="w-5 h-5 text-white" />}
                     tone="default"
                     size="lg"
                     bodyClassName="space-y-6"
                 >
                     <div className="space-y-6">
-                            {/* Meta Info Grid */}
                             <div className="grid grid-cols-2 gap-y-4 gap-x-6 text-sm">
                                 <div>
-                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Log ID</p>
-                                    <p className="font-semibold text-white font-mono">{selectedLog.audit_id}</p>
+                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Event ID</p>
+                                    <p className="font-semibold text-white font-mono">{selectedLog.event_id}</p>
                                 </div>
                                 <div>
                                     <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Performed By</p>
                                     <p className="font-semibold text-white">{selectedLog.admin_full_name}</p>
-                                    <p className="text-white/30 text-xs font-mono">@{selectedLog.admin_username} · ID #{selectedLog.admin_id}</p>
+                                    <p className="text-white/30 text-xs font-mono">@{selectedLog.admin_username} · ID #{selectedLog.performed_by}</p>
                                 </div>
                                 <div>
                                     <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Action</p>
-                                    <span className={`inline-flex px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${selectedLog.action_type === 'INSERT' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30' :
+                                    <span className={`inline-flex px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${
+                                        selectedLog.action_type === 'CREATE' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30' :
                                         selectedLog.action_type === 'UPDATE' ? 'bg-amber-500/20 text-amber-300 border-amber-400/30' :
-                                            selectedLog.action_type === 'DELETE' ? 'bg-rose-500/20 text-rose-300 border-rose-400/30' :
-                                                'bg-white/5 text-white/50 border-white/10'
-                                        }`}>
+                                        selectedLog.action_type === 'ARCHIVE' ? 'bg-orange-500/20 text-orange-300 border-orange-400/30' :
+                                        selectedLog.action_type === 'RESTORE' ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/30' :
+                                        selectedLog.action_type === 'DELETE' ? 'bg-rose-500/20 text-rose-300 border-rose-400/30' :
+                                        'bg-white/5 text-white/50 border-white/10'
+                                    }`}>
                                         {selectedLog.action_type}
                                     </span>
                                 </div>
@@ -874,81 +666,88 @@ export const AuditTrail = ({ branding, adminSession }) => {
                                     <p className="font-semibold text-white font-mono text-xs">{formatDate(selectedLog.created_at)}</p>
                                 </div>
                                 <div>
-                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Target Table</p>
-                                    <p className="font-semibold text-white">{getFriendlyTableName(selectedLog.target_table)} <span className="text-white/30 font-mono text-xs">({selectedLog.target_table})</span></p>
+                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Entity Type</p>
+                                    <p className="font-semibold text-white">{selectedLog.entity_type}</p>
                                 </div>
                                 <div>
-                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Target ID</p>
-                                    <p className="font-semibold text-white font-mono">{selectedLog.target_id || '-'}</p>
+                                    <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Entity Label</p>
+                                    <p className="font-semibold text-white">{selectedLog.entity_label} <span className="text-white/30 font-mono text-xs">({selectedLog.entity_id})</span></p>
                                 </div>
                             </div>
 
-                            {/* Human-Readable Summary */}
                             <div className="border-t border-white/10 pt-5">
                                 <p className="text-white/40 mb-2 text-xs uppercase tracking-wider font-semibold">Summary</p>
                                 <div className="bg-white/5 border border-white/10 rounded-xl p-4">
                                     <p className="text-sm text-white/90 leading-relaxed font-medium italic">
-                                        {translateAuditLog(selectedLog)}
+                                        {getShortSummary(selectedLog)}.
                                     </p>
                                 </div>
                             </div>
 
-                            {/* Detailed Changes Table */}
-                            {(() => {
-                                const changes = getDetailedChanges(selectedLog);
-                                if (changes.length === 0) return null;
-                                return (
-                                    <div className="border-t border-white/10 pt-5">
-                                        <p className="text-white/40 mb-3 text-xs uppercase tracking-wider font-semibold">
-                                            {selectedLog.action_type === 'UPDATE' ? 'Field Changes' : selectedLog.action_type === 'INSERT' ? 'New Values' : 'Removed Values'}
-                                        </p>
-                                        <div className="rounded-xl border border-white/10 overflow-x-auto bg-black/20">
-                                            <table className="w-full text-sm text-left">
-                                                <thead className="bg-white/5 border-b border-white/10">
-                                                    <tr className="text-xs uppercase text-white/40">
-                                                        <th className="px-4 py-2.5 font-semibold tracking-wider">Field</th>
+                            {selectedLog.changes && selectedLog.changes.length > 0 && (
+                                <div className="border-t border-white/10 pt-5">
+                                    <p className="text-white/40 mb-3 text-xs uppercase tracking-wider font-semibold">
+                                        {selectedLog.action_type === 'UPDATE' ? 'Field Changes' : selectedLog.action_type === 'CREATE' ? 'New Values' : 'Removed Values'}
+                                    </p>
+                                    <div className="rounded-xl border border-white/10 overflow-x-auto bg-black/20">
+                                        <table className="w-full text-sm text-left">
+                                            <thead className="bg-white/5 border-b border-white/10">
+                                                <tr className="text-xs uppercase text-white/40">
+                                                    <th className="px-4 py-2.5 font-semibold tracking-wider">Field</th>
+                                                    {selectedLog.action_type === 'UPDATE' ? (
+                                                        <>
+                                                            <th className="px-4 py-2.5 font-semibold tracking-wider">Old Value</th>
+                                                            <th className="px-4 py-2.5 font-semibold tracking-wider">New Value</th>
+                                                        </>
+                                                    ) : (
+                                                        <th className="px-4 py-2.5 font-semibold tracking-wider">Value</th>
+                                                    )}
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-white/5">
+                                                 {[...selectedLog.changes]
+                                                    .filter(change => {
+                                                        const val = change.new_value || change.old_value;
+                                                        // Requirement 4: Hide "0" schedule counts, "null", "N/A" and non-applicable fields
+                                                        if (change.field_name.includes('schedules') && (val === '0' || val === 0)) return false;
+                                                        if (val === null || val === undefined || val === '' || val === 'null' || val === 'N/A') return false;
+                                                        if (change.field_name === 'is_irregular' && (val === '0' || val === 0 || val === false || val === 'false')) return false;
+                                                        return true;
+                                                    })
+                                                    .sort((a, b) => (FIELD_ORDER_WEIGHTS[getFriendlyFieldName(a.field_name)] || 999) - (FIELD_ORDER_WEIGHTS[getFriendlyFieldName(b.field_name)] || 999))
+                                                    .map((change, idx) => (
+
+                                                    <tr key={idx}>
+                                                        <td className="px-4 py-2 font-medium text-white/80 whitespace-nowrap">
+                                                            {getFriendlyFieldName(change.field_name)}
+                                                        </td>
                                                         {selectedLog.action_type === 'UPDATE' ? (
                                                             <>
-                                                                <th className="px-4 py-2.5 font-semibold tracking-wider">Old Value</th>
-                                                                <th className="px-4 py-2.5 font-semibold tracking-wider">New Value</th>
-                                                            </>
-                                                        ) : (
-                                                            <th className="px-4 py-2.5 font-semibold tracking-wider">Value</th>
-                                                        )}
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-white/5">
-                                                    {changes.map((change, idx) => (
-                                                        <tr key={idx} className={change.changed ? 'bg-amber-400/5' : ''}>
-                                                            <td className="px-4 py-2 font-medium text-white/80 whitespace-nowrap">{change.field}</td>
-                                                            {selectedLog.action_type === 'UPDATE' ? (
-                                                                <>
-                                                                    <td className={`px-4 py-2 font-mono text-xs whitespace-nowrap ${change.changed ? 'text-rose-400 line-through' : 'text-white/40'}`}>
-                                                                        <div className="max-w-[150px] sm:max-w-[220px] overflow-x-auto pb-1 [scrollbar-width:thin]">
-                                                                            {change.oldValue || '-'}
-                                                                        </div>
-                                                                    </td>
-                                                                    <td className={`px-4 py-2 font-mono text-xs whitespace-nowrap ${change.changed ? 'text-emerald-400 font-semibold' : 'text-white/40'}`}>
-                                                                        <div className="max-w-[150px] sm:max-w-[220px] overflow-x-auto pb-1 [scrollbar-width:thin]">
-                                                                            {change.newValue || '-'}
-                                                                        </div>
-                                                                    </td>
-                                                                </>
-                                                            ) : (
-                                                                <td className="px-4 py-2 font-mono text-xs text-white/70 whitespace-nowrap">
-                                                                    <div className="max-w-[150px] sm:max-w-[300px] overflow-x-auto pb-1 [scrollbar-width:thin]">
-                                                                        {change.newValue || change.oldValue || '-'}
+                                                                <td className="px-4 py-2 font-mono text-xs whitespace-nowrap text-rose-400 line-through">
+                                                                    <div className="max-w-[150px] sm:max-w-[220px] overflow-x-auto pb-1 [scrollbar-width:thin]">
+                                                                        {formatFieldValue(change.field_name, change.old_value)}
                                                                     </div>
                                                                 </td>
-                                                            )}
-                                                        </tr>
-                                                    ))}
-                                                </tbody>
-                                            </table>
-                                        </div>
+                                                                <td className="px-4 py-2 font-mono text-xs whitespace-nowrap text-emerald-400 font-semibold">
+                                                                    <div className="max-w-[150px] sm:max-w-[220px] overflow-x-auto pb-1 [scrollbar-width:thin]">
+                                                                        {formatFieldValue(change.field_name, change.new_value)}
+                                                                    </div>
+                                                                </td>
+                                                            </>
+                                                        ) : (
+                                                            <td className="px-4 py-2 font-mono text-xs text-white/70 whitespace-nowrap">
+                                                                <div className="max-w-[150px] sm:max-w-[300px] overflow-x-auto pb-1 [scrollbar-width:thin]">
+                                                                    {formatFieldValue(change.field_name, change.new_value || change.old_value)}
+                                                                </div>
+                                                            </td>
+                                                        )}
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
                                     </div>
-                                );
-                            })()}
+                                </div>
+                            )}
                     </div>
                 </AdminModal>
             )}

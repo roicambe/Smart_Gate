@@ -127,48 +127,39 @@ fn cell_to_string(cell: &Data) -> String {
     }
 }
 
-fn role_matches_event_requirement(required_roles: &str, person_role: &str) -> bool {
-    let normalized_person = person_role.trim().to_lowercase();
-    if normalized_person.is_empty() {
-        return false;
-    }
-
-    let normalized_required = required_roles
-        .split(',')
-        .map(|role| role.trim().to_lowercase())
-        .filter(|role| !role.is_empty())
-        .collect::<Vec<String>>();
-
-    if normalized_required.is_empty() || normalized_required.iter().any(|role| role == "all") {
-        return true;
-    }
-
-    normalized_required
-        .iter()
-        .any(|required| required == &normalized_person)
+fn get_person_roles(conn: &rusqlite::Connection, person_id: i64) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT r.role_name FROM roles r JOIN person_roles pr ON r.role_id = pr.role_id WHERE pr.person_id = ?1")
+        .map_err(|e| e.to_string())?;
+    let roles = stmt
+        .query_map([person_id], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(roles)
 }
 
-fn id_matches_requirement(requirement_str: &Option<String>, id_to_check: &str) -> bool {
-    if let Some(req_str) = requirement_str {
-        if req_str.is_empty() {
-            return true;
-        }
-        let normalized_req = req_str
-            .split(',')
-            .map(|s| s.trim())
-            .collect::<Vec<&str>>();
-
-        if normalized_req.is_empty() || normalized_req.iter().any(|&s| s.to_lowercase() == "all") {
-            return true;
-        }
-
-        return normalized_req.iter().any(|&s| s == id_to_check);
-    }
-    true
+fn get_person_contacts(conn: &rusqlite::Connection, person_id: i64) -> Result<Vec<PersonContact>, String> {
+    let mut stmt = conn
+        .prepare("SELECT contact_id, person_id, contact_type, contact_value, is_primary FROM person_contacts WHERE person_id = ?1")
+        .map_err(|e| e.to_string())?;
+    let contacts = stmt
+        .query_map([person_id], |row| {
+            Ok(PersonContact {
+                contact_id: row.get(0)?,
+                person_id: row.get(1)?,
+                contact_type: row.get(2)?,
+                contact_value: row.get(3)?,
+                is_primary: row.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<PersonContact>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(contacts)
 }
 
 pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
-    // Determine the path to the database file
     let app_dir = app_handle
         .path()
         .app_data_dir()
@@ -177,416 +168,345 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
     fs::create_dir_all(&app_dir).map_err(|e| format!("Failed to create App Directory: {}", e))?;
 
     let db_path = app_dir.join("smart_gate.sqlite");
-
-    // Set up the connection manager and pool
     let manager = SqliteConnectionManager::file(&db_path);
-    let pool =
-        r2d2::Pool::new(manager).map_err(|e| format!("Failed to create database pool: {}", e))?;
+    let pool = r2d2::Pool::new(manager).map_err(|e| format!("Failed to create database pool: {}", e))?;
 
-    // Initialize the database with schema.sql
+    let conn = pool.get().map_err(|e| format!("Failed to get connection from pool: {}", e))?;
+
+    // Check if migration to normalized schema is needed
+    let migration_needed = table_has_column(&conn, "persons", "role").unwrap_or(false);
+
+    if migration_needed {
+        log::info!("Starting database normalization migration...");
+        // Ensure foreign keys are OFF for migration to avoid constraint errors during table drops/recreation
+        conn.execute("PRAGMA foreign_keys = OFF;", []).map_err(|e| e.to_string())?;
+        run_normalization_migration(&conn)?;
+        log::info!("Database normalization migration completed.");
+    }
+
+    // Enable foreign keys
+    conn.execute("PRAGMA foreign_keys = ON;", []).map_err(|e| e.to_string())?;
+
+    // Execute schema.sql (contains IF NOT EXISTS for everything)
     let schema = include_str!("../../docs/database/schema.sql");
-    let conn = pool
-        .get()
-        .map_err(|e| format!("Failed to get connection from pool: {}", e))?;
-    conn.execute_batch(schema)
-        .map_err(|e| format!("Failed to execute schema: {}", e))?;
+    conn.execute_batch(schema).map_err(|e| format!("Failed to execute schema: {}", e))?;
 
-    // One-time migration: Convert existing UTC timestamps to Local time strings for consistent display.
-    // We check if this migration has run by looking for a 'timezone_migration_v1' key in settings.
-    let migration_check: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM settings WHERE setting_key = 'timezone_migration_v1'",
+    // Fix audit_events check constraint for existing databases if they lack ARCHIVE/RESTORE
+    let audit_sql: String = conn.query_row(
+        "SELECT sql FROM sqlite_master WHERE name='audit_events'",
         [],
         |row| row.get(0)
-    ).unwrap_or(0);
-
-    if migration_check == 0 {
-        let _ = conn.execute_batch("
-            UPDATE audit_logs SET created_at = datetime(created_at, 'localtime');
-            UPDATE accounts SET created_at = datetime(created_at, 'localtime');
-            UPDATE persons SET created_at = datetime(created_at, 'localtime');
-            INSERT INTO settings (setting_key, setting_value) VALUES ('timezone_migration_v1', 'completed');
-        ");
-    }
-
-    // Normalize legacy person schema to the current id_number/email/contact_number layout.
-    if table_has_column(&conn, "persons", "school_id_number")?
-        && !table_has_column(&conn, "persons", "id_number")?
-    {
-        conn.execute(
-            "ALTER TABLE persons RENAME COLUMN school_id_number TO id_number",
-            params![],
-        )
-        .map_err(|e| format!("Failed to migrate persons.id_number: {}", e))?;
-    }
-
-    let _ = conn.execute(
-        "ALTER TABLE persons ADD COLUMN email VARCHAR NULL",
-        params![],
-    );
-    let _ = conn.execute(
-        "ALTER TABLE persons ADD COLUMN contact_number VARCHAR NULL",
-        params![],
-    );
-
-    // Drop the UNIQUE constraint on email by recreating the table if it exists
-    let persons_sql: String = conn
-        .query_row(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='persons'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap_or_default();
-
-    if persons_sql.contains("email VARCHAR UNIQUE") {
-        conn.execute_batch(
-            "
-            PRAGMA foreign_keys = OFF;
-            CREATE TABLE IF NOT EXISTS persons_new (
-                person_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                id_number VARCHAR UNIQUE NOT NULL,
-                role TEXT CHECK(role IN ('student', 'professor', 'staff', 'visitor')) NOT NULL,
-                first_name VARCHAR NOT NULL,
-                middle_name VARCHAR NULL,
-                last_name VARCHAR NOT NULL,
-                email VARCHAR NULL,
-                contact_number VARCHAR NULL,
-                face_template_path VARCHAR NULL,
-                is_active BOOLEAN NOT NULL DEFAULT 1    
-            );
-            INSERT INTO persons_new SELECT * FROM persons;
-            DROP TABLE persons;
-            ALTER TABLE persons_new RENAME TO persons;
-            PRAGMA foreign_keys = ON;
-        ",
-        )
-        .map_err(|e| format!("Failed to migrate un-unique email: {}", e))?;
-    }
-
-    // Add created_at if missing (For Same-Day Expiry logic)
-    if !table_has_column(&conn, "persons", "created_at")? {
-        // SQLite doesn't allow adding a column with a non-constant default (CURRENT_TIMESTAMP) via ALTER TABLE.
-        // We add it as nullable, then update existing rows.
-        conn.execute(
-            "ALTER TABLE persons ADD COLUMN created_at DATETIME",
-            params![],
-        )
-        .map_err(|e| format!("Failed to add created_at column to persons: {}", e))?;
-
-        conn.execute(
-            "UPDATE persons SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL",
-            params![],
-        )
-        .map_err(|e| format!("Failed to populate created_at for existing rows: {}", e))?;
-    }
-
-    // Fix Visitor Schema (dynamically add person_to_visit if missing) and move legacy contact data into persons.
-    let _ = conn.execute(
-        "ALTER TABLE visitors ADD COLUMN person_to_visit TEXT DEFAULT ''",
-        params![],
-    );
-    if table_has_column(&conn, "visitors", "contact_number")? {
-        conn.execute(
-            "UPDATE persons
-             SET contact_number = COALESCE(persons.contact_number, (
-                 SELECT v.contact_number FROM visitors v WHERE v.person_id = persons.person_id
-             ))
-             WHERE role = 'visitor'",
-            params![],
-        )
-        .map_err(|e| format!("Failed to migrate visitor contact numbers: {}", e))?;
-    }
-
-    if table_has_column(&conn, "visitors", "id_presented")? {
-        conn.execute_batch(
-            "
-            PRAGMA foreign_keys = OFF;
-            CREATE TABLE IF NOT EXISTS visitors_new (
-                person_id INTEGER PRIMARY KEY,
-                purpose_of_visit VARCHAR NOT NULL,
-                person_to_visit VARCHAR NOT NULL,
-                FOREIGN KEY (person_id) REFERENCES persons(person_id)
-            );
-            INSERT INTO visitors_new (person_id, purpose_of_visit, person_to_visit)
-            SELECT person_id, purpose_of_visit, person_to_visit FROM visitors;
-            DROP TABLE visitors;
-            ALTER TABLE visitors_new RENAME TO visitors;
-            PRAGMA foreign_keys = ON;
-        ",
-        )
-        .map_err(|e| format!("Failed to migrate visitors id_presented: {}", e))?;
-    }
-
-    if !table_has_column(&conn, "students", "is_irregular")? {
-        conn.execute(
-            "ALTER TABLE students ADD COLUMN is_irregular BOOLEAN NOT NULL DEFAULT 0",
-            params![],
-        )
-        .map_err(|e| format!("Failed to add is_irregular col to students: {}", e))?;
-    }
-
-    // Add new branding settings
-    let _ = conn.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('primary_logo', '')", params![]);
-    let _ = conn.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('secondary_logo_1', '')", params![]);
-    let _ = conn.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('secondary_logo_2', '')", params![]);
-    let _ = conn.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('strict_email_domain', 'true')", params![]);
-    let _ = conn.execute("INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES ('enable_face_recognition', 'false')", params![]);
-
-    // Force strict_email_domain to true once for existing installations
-    let email_migration_check: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM settings WHERE setting_key = 'email_domain_migration_v1'",
-        [],
-        |row| row.get(0)
-    ).unwrap_or(0);
-
-    if email_migration_check == 0 {
-        let _ = conn.execute("UPDATE settings SET setting_value = 'true' WHERE setting_key = 'strict_email_domain'", []);
-        let _ = conn.execute("INSERT INTO settings (setting_key, setting_value) VALUES ('email_domain_migration_v1', 'true')", []);
-    }
-
-    // Admin RBAC updates and role normalization.
-    if !table_has_column(&conn, "events", "schedule_type")? {
-        conn.execute(
-            "ALTER TABLE events ADD COLUMN schedule_type VARCHAR NULL DEFAULT 'weekly'",
-            params![],
-        )
-        .map_err(|e| format!("Failed to add schedule_type col to events: {}", e))?;
-    }
-    if !table_has_column(&conn, "events", "start_date")? {
-        conn.execute(
-            "ALTER TABLE events ADD COLUMN start_date VARCHAR NULL",
-            params![],
-        )
-        .map_err(|e| format!("Failed to add start_date col to events: {}", e))?;
-    }
-    if !table_has_column(&conn, "events", "end_date")? {
-        conn.execute(
-            "ALTER TABLE events ADD COLUMN end_date VARCHAR NULL",
-            params![],
-        )
-        .map_err(|e| format!("Failed to add end_date col to events: {}", e))?;
-    }
-    if !table_has_column(&conn, "events", "description")? {
-        conn.execute(
-            "ALTER TABLE events ADD COLUMN description TEXT NULL",
-            params![],
-        )
-        .map_err(|e| format!("Failed to add description col to events: {}", e))?;
-    }
-    if !table_has_column(&conn, "events", "required_programs")? {
-        conn.execute(
-            "ALTER TABLE events ADD COLUMN required_programs TEXT NULL",
-            params![],
-        )
-        .map_err(|e| format!("Failed to add required_programs col to events: {}", e))?;
-    }
-    if !table_has_column(&conn, "events", "required_year_levels")? {
-        conn.execute(
-            "ALTER TABLE events ADD COLUMN required_year_levels TEXT NULL",
-            params![],
-        )
-        .map_err(|e| format!("Failed to add required_year_levels col to events: {}", e))?;
-    }
-    if !table_has_column(&conn, "event_attendance", "status")? {
-        conn.execute(
-            "ALTER TABLE event_attendance ADD COLUMN status TEXT NOT NULL DEFAULT 'On Time'",
-            params![],
-        )
-        .map_err(|e| format!("Failed to add status col to event_attendance: {}", e))?;
-    }
-    conn.execute(
-        "UPDATE event_attendance
-         SET status = 'On Time'
-         WHERE status IS NULL OR status NOT IN ('On Time', 'Late')",
-        params![],
-    )
-    .map_err(|e| format!("Failed to normalize event_attendance.status: {}", e))?;
-
-    let events_sql: String = conn
-        .query_row(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='events'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap_or_default();
-
-    if events_sql.contains("required_role IN ('all', 'student', 'staff', 'professor')") {
-        conn.execute_batch(
-            "
-            PRAGMA foreign_keys = OFF;
-            CREATE TABLE IF NOT EXISTS events_new (
+    ).unwrap_or_default();
+    
+    if !audit_sql.is_empty() && !audit_sql.contains("ARCHIVE") {
+        log::info!("Updating audit_events check constraint to support ARCHIVE/RESTORE...");
+        conn.execute("PRAGMA foreign_keys = OFF;", []).map_err(|e| e.to_string())?;
+        conn.execute_batch("
+            BEGIN TRANSACTION;
+            CREATE TABLE audit_events_new (
                 event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                event_name VARCHAR UNIQUE NOT NULL,
-                description TEXT NULL,
-                schedule_type VARCHAR NULL DEFAULT 'weekly',
-                event_date VARCHAR NOT NULL,
-                start_date VARCHAR NULL,
-                end_date VARCHAR NULL,
+                action_type TEXT CHECK(action_type IN ('CREATE', 'UPDATE', 'DELETE', 'ARCHIVE', 'RESTORE')) NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id INTEGER NOT NULL,
+                entity_label TEXT NOT NULL,
+                performed_by INTEGER NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (performed_by) REFERENCES accounts(account_id)
+            );
+            INSERT INTO audit_events_new SELECT event_id, action_type, entity_type, entity_id, entity_label, performed_by, created_at FROM audit_events;
+            DROP TABLE audit_events;
+            ALTER TABLE audit_events_new RENAME TO audit_events;
+            COMMIT;
+        ").map_err(|e| e.to_string())?;
+        conn.execute("PRAGMA foreign_keys = ON;", []).map_err(|e| e.to_string())?;
+    }
+
+    // Fix duplicate weekly schedules and add unique constraint if missing
+    let weekly_sql: String = conn.query_row(
+        "SELECT sql FROM sqlite_master WHERE name='event_weekly'",
+        [],
+        |row| row.get(0)
+    ).unwrap_or_default();
+    
+    if !weekly_sql.is_empty() && !weekly_sql.contains("UNIQUE") {
+        log::info!("Enforcing unique constraints on event schedules...");
+        conn.execute("PRAGMA foreign_keys = OFF;", []).map_err(|e| e.to_string())?;
+        conn.execute_batch("
+            BEGIN TRANSACTION;
+            
+            -- Fix event_weekly
+            CREATE TABLE event_weekly_new (
+                schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id INTEGER NOT NULL,
+                day_of_week TEXT NOT NULL,
                 start_time TIME NOT NULL,
                 end_time TIME NOT NULL,
-                required_role TEXT NOT NULL,
-                is_enabled BOOLEAN NOT NULL DEFAULT 1
+                UNIQUE(event_id, day_of_week, start_time, end_time),
+                FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE
             );
-            INSERT INTO events_new (event_id, event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled)
-            SELECT event_id, event_name, NULL, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled
-            FROM events;
-            DROP TABLE events;
-            ALTER TABLE events_new RENAME TO events;
-            PRAGMA foreign_keys = ON;
-        ",
-        )
-        .map_err(|e| format!("Failed to migrate events.required_role constraint: {}", e))?;
-    }
-
-    if !table_has_column(&conn, "accounts", "full_name")? {
-        conn.execute(
-            "ALTER TABLE accounts ADD COLUMN full_name VARCHAR DEFAULT 'Administrator'",
-            params![],
-        )
-        .map_err(|e| format!("Failed to add full_name column to accounts: {}", e))?;
-    }
-
-    if !table_has_column(&conn, "accounts", "role")? {
-        // If role column is missing, we add it.
-        // We use 'Gate Supervisor' as default for existing accounts to be safe,
-        // but 'admin' will be seeded as 'System Administrator' anyway.
-        conn.execute(
-            "ALTER TABLE accounts ADD COLUMN role TEXT DEFAULT 'Gate Supervisor'",
-            params![],
-        )
-        .map_err(|e| format!("Failed to add role column to accounts: {}", e))?;
-    }
-
-    if !table_has_column(&conn, "accounts", "email")? {
-        conn.execute(
-            "ALTER TABLE accounts ADD COLUMN email VARCHAR NULL",
-            params![],
-        )
-        .map_err(|e| format!("Failed to add email column to accounts: {}", e))?;
-    }
-
-    if !table_has_column(&conn, "accounts", "is_first_login")? {
-        conn.execute(
-            "ALTER TABLE accounts ADD COLUMN is_first_login BOOLEAN NOT NULL DEFAULT 0",
-            params![],
-        )
-        .map_err(|e| format!("Failed to add is_first_login column to accounts: {}", e))?;
-    }
-
-    if !table_has_column(&conn, "accounts", "activation_otp")? {
-        conn.execute(
-            "ALTER TABLE accounts ADD COLUMN activation_otp VARCHAR NULL",
-            params![],
-        )
-        .map_err(|e| format!("Failed to add activation_otp column to accounts: {}", e))?;
-    }
-
-    if !table_has_column(&conn, "accounts", "activation_otp_expires_at")? {
-        conn.execute(
-            "ALTER TABLE accounts ADD COLUMN activation_otp_expires_at DATETIME NULL",
-            params![],
-        )
-        .map_err(|e| {
-            format!(
-                "Failed to add activation_otp_expires_at column to accounts: {}",
-                e
-            )
-        })?;
-    }
-
-    conn.execute(
-        "UPDATE accounts
-         SET full_name = COALESCE(NULLIF(TRIM(full_name), ''), 'Administrator')",
-        params![],
-    )
-    .map_err(|e| format!("Failed to normalize account names: {}", e))?;
-
-    conn.execute(
-        "UPDATE accounts
-         SET role = CASE
-             WHEN role IN ('Super Admin', 'System Administrator') THEN 'System Administrator'
-             WHEN role IN ('Admin', 'Gate Supervisor') THEN 'Gate Supervisor'
-             ELSE role
-         END",
-        params![],
-    )
-    .map_err(|e| format!("Failed to normalize account roles: {}", e))?;
-
-    conn.execute(
-        "UPDATE accounts
-         SET email = NULL
-         WHERE TRIM(COALESCE(email, '')) = ''",
-        params![],
-    )
-    .map_err(|e| format!("Failed to normalize account emails: {}", e))?;
-
-    conn.execute(
-        "UPDATE accounts
-         SET is_first_login = COALESCE(is_first_login, 0)",
-        params![],
-    )
-    .map_err(|e| format!("Failed to normalize first-login flags: {}", e))?;
-
-    // Migrate system_settings to settings
-    let _ = conn.execute(
-        "INSERT OR IGNORE INTO settings (setting_key, setting_value) SELECT setting_key, setting_value FROM system_settings;",
-        params![]
-    );
-    let _ = conn.execute("DROP TABLE IF EXISTS system_settings", params![]);
-    conn.execute(
-        "INSERT OR IGNORE INTO accounts (username, password_hash, full_name, role)
-         VALUES ('admin', 'admin123', 'Administrator', 'System Administrator')",
-        params![],
-    )
-    .map_err(|e| format!("Failed to seed default admin account: {}", e))?;
-
-    // Fix audit_logs CHECK constraint migration:
-    // Old schema used lowercase ('create','read','update','delete') but the Rust code inserts
-    // uppercase ('INSERT','UPDATE','DELETE'). We recreate the table if the old constraint is present.
-    let old_constraint_exists: bool = conn.query_row(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='audit_logs' AND sql LIKE \"%'create'%\"",
-        [],
-        |row| row.get::<_, i64>(0),
-    ).unwrap_or(0) > 0;
-
-    if old_constraint_exists {
-        conn.execute_batch("
-            PRAGMA foreign_keys = OFF;
-            CREATE TABLE IF NOT EXISTS audit_logs_new (
-                audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                admin_id INTEGER NOT NULL,
-                action_type TEXT CHECK(action_type IN ('INSERT', 'READ', 'UPDATE', 'DELETE')) NOT NULL,
-                target_table VARCHAR NOT NULL,
-                target_id INTEGER NOT NULL,
-                old_values JSON NULL,
-                new_values JSON NULL,
-                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (admin_id) REFERENCES accounts(account_id)
+            INSERT OR IGNORE INTO event_weekly_new (event_id, day_of_week, start_time, end_time) 
+            SELECT event_id, day_of_week, start_time, end_time FROM event_weekly;
+            DROP TABLE event_weekly;
+            ALTER TABLE event_weekly_new RENAME TO event_weekly;
+            
+            -- Fix event_date_range
+            CREATE TABLE event_date_range_new (
+                schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id INTEGER NOT NULL,
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
+                start_time TIME NOT NULL,
+                end_time TIME NOT NULL,
+                UNIQUE(event_id, start_date, end_date, start_time, end_time),
+                FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE
             );
-            DROP TABLE audit_logs;
-            ALTER TABLE audit_logs_new RENAME TO audit_logs;
-            PRAGMA foreign_keys = ON;
-        ").map_err(|e| format!("Failed to migrate audit_logs: {}", e))?;
-    }
-
-    // Archive system migration: add is_archived + archived_at to core tables
-    for table in &["persons", "departments", "programs", "events"] {
-        if !table_has_column(&conn, table, "is_archived")? {
-            conn.execute(
-                &format!("ALTER TABLE {table} ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT 0"),
-                params![],
-            )
-            .map_err(|e| format!("Failed to add is_archived to {table}: {e}"))?;
-        }
-        if !table_has_column(&conn, table, "archived_at")? {
-            conn.execute(
-                &format!("ALTER TABLE {table} ADD COLUMN archived_at DATETIME NULL"),
-                params![],
-            )
-            .map_err(|e| format!("Failed to add archived_at to {table}: {e}"))?;
-        }
+            INSERT OR IGNORE INTO event_date_range_new (event_id, start_date, end_date, start_time, end_time)
+            SELECT event_id, start_date, end_date, start_time, end_time FROM event_date_range;
+            DROP TABLE event_date_range;
+            ALTER TABLE event_date_range_new RENAME TO event_date_range;
+            
+            COMMIT;
+        ").map_err(|e| e.to_string())?;
+        conn.execute("PRAGMA foreign_keys = ON;", []).map_err(|e| e.to_string())?;
     }
 
     Ok(pool)
+}
+
+fn run_normalization_migration(conn: &rusqlite::Connection) -> Result<(), String> {
+    conn.execute_batch("BEGIN TRANSACTION;")
+        .map_err(|e| e.to_string())?;
+
+    let run = || -> Result<(), String> {
+        // 1. Create new tables (temporary if they exist in schema.sql already)
+        // Note: We use the actual names from the new schema
+        conn.execute_batch("
+            CREATE TABLE IF NOT EXISTS roles (
+                role_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                role_name TEXT UNIQUE NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS person_roles (
+                person_id INTEGER NOT NULL,
+                role_id INTEGER NOT NULL,
+                PRIMARY KEY (person_id, role_id),
+                FOREIGN KEY (person_id) REFERENCES persons(person_id) ON DELETE CASCADE,
+                FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS person_contacts (
+                contact_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                person_id INTEGER NOT NULL,
+                contact_type TEXT CHECK(contact_type IN ('email', 'phone')) NOT NULL,
+                contact_value TEXT NOT NULL,
+                is_primary BOOLEAN NOT NULL DEFAULT 0,
+                FOREIGN KEY (person_id) REFERENCES persons(person_id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS event_weekly (
+                schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id INTEGER NOT NULL,
+                day_of_week TEXT NOT NULL,
+                start_time TIME NOT NULL,
+                end_time TIME NOT NULL,
+                FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS event_date_range (
+                schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id INTEGER NOT NULL,
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL,
+                start_time TIME NOT NULL,
+                end_time TIME NOT NULL,
+                FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS event_required_roles (
+                event_id INTEGER NOT NULL,
+                role_id INTEGER NOT NULL,
+                PRIMARY KEY (event_id, role_id),
+                FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE,
+                FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS scanners (
+                scanner_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                location_name VARCHAR NOT NULL,
+                function TEXT CHECK(function IN ('entrance', 'exit', 'event')) NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS activity_logs (
+                log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                person_id INTEGER NOT NULL,
+                scanner_id INTEGER NOT NULL,
+                activity_type TEXT CHECK(activity_type IN ('entrance', 'exit', 'event')) NOT NULL,
+                event_id INTEGER NULL,
+                scanned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                status TEXT NULL,
+                FOREIGN KEY (person_id) REFERENCES persons(person_id),
+                FOREIGN KEY (scanner_id) REFERENCES scanners(scanner_id),
+                FOREIGN KEY (event_id) REFERENCES events(event_id)
+            );
+            -- Ensure a default scanner exists for migrated event logs
+            INSERT OR IGNORE INTO scanners (scanner_id, location_name, function) 
+            VALUES (1, 'Main Gate (Migrated)', 'event');
+        ").map_err(|e| e.to_string())?;
+
+        // 2. Seed default roles
+        conn.execute_batch("
+            INSERT OR IGNORE INTO roles (role_name) VALUES ('student'), ('professor'), ('staff'), ('visitor'), ('dean');
+        ").map_err(|e| e.to_string())?;
+
+        // 3. Migrate Persons data (Roles and Contacts)
+        let mut stmt = conn.prepare("SELECT person_id, role, email, contact_number FROM persons").map_err(|e| e.to_string())?;
+        let person_rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        }).map_err(|e| e.to_string())?;
+
+        for person in person_rows {
+            let (pid, role_name, email, phone) = person.map_err(|e| e.to_string())?;
+            
+            // Insert role
+            conn.execute(
+                "INSERT INTO person_roles (person_id, role_id) 
+                 SELECT ?1, role_id FROM roles WHERE role_name = ?2",
+                params![pid, role_name.to_lowercase()]
+            ).map_err(|e| e.to_string())?;
+
+            // Insert contacts
+            if let Some(e) = email {
+                if !e.trim().is_empty() {
+                    conn.execute(
+                        "INSERT INTO person_contacts (person_id, contact_type, contact_value, is_primary) VALUES (?1, 'email', ?2, 1)",
+                        params![pid, e]
+                    ).map_err(|e| e.to_string())?;
+                }
+            }
+            if let Some(p) = phone {
+                if !p.trim().is_empty() {
+                    conn.execute(
+                        "INSERT INTO person_contacts (person_id, contact_type, contact_value, is_primary) VALUES (?1, 'phone', ?2, 0)",
+                        params![pid, p]
+                    ).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+
+        // 4. Migrate Events data
+        let mut stmt = conn.prepare("SELECT event_id, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role FROM events").map_err(|e| e.to_string())?;
+        let event_rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
+            ))
+        }).map_err(|e| e.to_string())?;
+
+        for event in event_rows {
+            let (eid, s_type, e_date, s_date, end_date, s_time, end_time, req_role) = event.map_err(|e| e.to_string())?;
+            
+            // Migrate schedule
+            match s_type.as_deref() {
+                Some("weekly") => {
+                    conn.execute(
+                        "INSERT INTO event_weekly (event_id, day_of_week, start_time, end_time) VALUES (?1, ?2, ?3, ?4)",
+                        params![eid, e_date, s_time, end_time]
+                    ).map_err(|e| e.to_string())?;
+                },
+                Some("date_range") => {
+                    if let (Some(sd), Some(ed)) = (s_date, end_date) {
+                        conn.execute(
+                            "INSERT INTO event_date_range (event_id, start_date, end_date, start_time, end_time) VALUES (?1, ?2, ?3, ?4, ?5)",
+                            params![eid, sd, ed, s_time, end_time]
+                        ).map_err(|e| e.to_string())?;
+                    }
+                },
+                _ => {}
+            }
+
+            // Migrate required roles (CSV to junction table)
+            for role in req_role.split(',') {
+                let trimmed = role.trim().to_lowercase();
+                if trimmed == "all" {
+                    // Map 'all' to all existing roles
+                    conn.execute(
+                        "INSERT INTO event_required_roles (event_id, role_id) SELECT ?1, role_id FROM roles",
+                        params![eid]
+                    ).map_err(|e| e.to_string())?;
+                } else {
+                    conn.execute(
+                        "INSERT INTO event_required_roles (event_id, role_id) 
+                         SELECT ?1, role_id FROM roles WHERE role_name = ?2",
+                        params![eid, trimmed]
+                    ).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+
+        // 5. Migrate Logs
+        conn.execute_batch("
+            INSERT INTO activity_logs (person_id, scanner_id, activity_type, scanned_at)
+            SELECT person_id, scanner_id, 
+                   CASE WHEN (SELECT function FROM scanners WHERE scanner_id = entry_logs.scanner_id) = 'entrance' THEN 'entrance' ELSE 'exit' END,
+                   scanned_at
+            FROM entry_logs;
+
+            INSERT INTO activity_logs (person_id, scanner_id, activity_type, event_id, scanned_at, status)
+            SELECT person_id, 1, 'event', event_id, scanned_at, status FROM event_attendance;
+        ").map_err(|e| e.to_string())?;
+
+        // 6. Finalize persons and events table cleanup
+        conn.execute_batch("
+            -- Recreate persons without old columns
+            CREATE TABLE persons_new (
+                person_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                id_number VARCHAR UNIQUE NOT NULL,
+                first_name VARCHAR NOT NULL,
+                middle_name VARCHAR NULL,
+                last_name VARCHAR NOT NULL,
+                face_template_path VARCHAR NULL,
+                is_active BOOLEAN NOT NULL DEFAULT 1,
+                is_archived BOOLEAN NOT NULL DEFAULT 0,
+                archived_at DATETIME NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO persons_new (person_id, id_number, first_name, middle_name, last_name, face_template_path, is_active, is_archived, archived_at, created_at)
+            SELECT person_id, id_number, first_name, middle_name, last_name, face_template_path, is_active, is_archived, archived_at, created_at FROM persons;
+            DROP TABLE persons;
+            ALTER TABLE persons_new RENAME TO persons;
+
+            -- Recreate events without old columns
+            CREATE TABLE events_new (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_name VARCHAR UNIQUE NOT NULL,
+                description TEXT NULL,
+                is_enabled BOOLEAN NOT NULL DEFAULT 1,
+                is_archived BOOLEAN NOT NULL DEFAULT 0,
+                archived_at DATETIME NULL
+            );
+            INSERT INTO events_new (event_id, event_name, description, is_enabled, is_archived, archived_at)
+            SELECT event_id, event_name, description, is_enabled, is_archived, archived_at FROM events;
+            DROP TABLE events;
+            ALTER TABLE events_new RENAME TO events;
+
+            DROP TABLE entry_logs;
+            DROP TABLE event_attendance;
+        ").map_err(|e| e.to_string())?;
+
+        Ok(())
+    }();
+
+    if let Err(e) = run {
+        let _ = conn.execute("ROLLBACK;", []);
+        return Err(e);
+    }
+
+    conn.execute("COMMIT;", []).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 // ------ Face Embedding Storage ------
@@ -691,10 +611,7 @@ pub fn get_persons_face_status(pool: &DbPool) -> Result<Vec<serde_json::Value>, 
                 p.first_name,
                 COALESCE(p.middle_name, '') AS middle_name,
                 p.last_name,
-                p.role,
                 p.is_active,
-                p.email,
-                p.contact_number,
                 CASE WHEN fe.embedding_id IS NOT NULL THEN 1 ELSE 0 END AS face_registered,
                 fe.enrolled_at,
                 COALESCE(emp_dept.department_name, stu_dept.department_name) AS department_name,
@@ -709,7 +626,7 @@ pub fn get_persons_face_status(pool: &DbPool) -> Result<Vec<serde_json::Value>, 
              LEFT JOIN departments stu_dept ON prog.department_id = stu_dept.department_id
              LEFT JOIN employees emp ON p.person_id = emp.person_id
              LEFT JOIN departments emp_dept ON emp.department_id = emp_dept.department_id
-             WHERE p.role != 'visitor' AND p.is_archived = 0
+             WHERE p.is_archived = 0
              ORDER BY p.last_name, p.first_name",
         )
         .map_err(|e| e.to_string())?;
@@ -721,46 +638,47 @@ pub fn get_persons_face_status(pool: &DbPool) -> Result<Vec<serde_json::Value>, 
             let first_name: String = row.get(2)?;
             let middle_name: String = row.get(3)?;
             let last_name: String = row.get(4)?;
-            let role: String = row.get(5)?;
-            let is_active: bool = row.get(6)?;
-            let email: Option<String> = row.get(7)?;
-            let contact_number: Option<String> = row.get(8)?;
-            let face_registered: bool = row.get(9)?;
-            let enrolled_at: Option<String> = row.get(10)?;
-            let department_name: Option<String> = row.get(11)?;
-            let program_name: Option<String> = row.get(12)?;
-            let year_level: Option<i32> = row.get(13)?;
-            let position_title: Option<String> = row.get(14)?;
-            let is_irregular: Option<bool> = row.get(15)?;
+            let is_active: bool = row.get(5)?;
+            let face_registered: bool = row.get(6)?;
+            let enrolled_at: Option<String> = row.get(7)?;
+            let department_name: Option<String> = row.get(8)?;
+            let program_name: Option<String> = row.get(9)?;
+            let year_level: Option<i32> = row.get(10)?;
+            let position_title: Option<String> = row.get(11)?;
+            let is_irregular: Option<bool> = row.get(12)?;
 
             // Table format: First Last only (as requested)
             let full_name = format!("{} {}", first_name, last_name);
 
-            Ok(serde_json::json!({
-                "person_id": person_id,
-                "id_number": id_number,
-                "first_name": first_name,
-                "middle_name": middle_name,
-                "last_name": last_name,
-                "full_name": full_name,
-                "role": role,
-                "is_active": is_active,
-                "email": email,
-                "contact_number": contact_number,
-                "face_registered": face_registered,
-                "enrolled_at": enrolled_at,
-                "department_name": department_name,
-                "program_name": program_name,
-                "year_level": year_level,
-                "position_title": position_title,
-                "is_irregular": is_irregular.unwrap_or(false),
-            }))
+            Ok((person_id, id_number, first_name, middle_name, last_name, full_name, is_active, face_registered, enrolled_at, department_name, program_name, year_level, position_title, is_irregular))
         })
         .map_err(|e| e.to_string())?;
 
     let mut results = Vec::new();
     for row in rows {
-        results.push(row.map_err(|e| e.to_string())?);
+        let (person_id, id_number, first_name, middle_name, last_name, full_name, is_active, face_registered, enrolled_at, department_name, program_name, year_level, position_title, is_irregular) = row.map_err(|e| e.to_string())?;
+        
+        let roles = get_person_roles(&conn, person_id)?;
+        let contacts = get_person_contacts(&conn, person_id)?;
+
+        results.push(serde_json::json!({
+            "person_id": person_id,
+            "id_number": id_number,
+            "first_name": first_name,
+            "middle_name": middle_name,
+            "last_name": last_name,
+            "full_name": full_name,
+            "roles": roles,
+            "is_active": is_active,
+            "contacts": contacts,
+            "face_registered": face_registered,
+            "enrolled_at": enrolled_at,
+            "department_name": department_name,
+            "program_name": program_name,
+            "year_level": year_level,
+            "position_title": position_title,
+            "is_irregular": is_irregular.unwrap_or(false),
+        }));
     }
 
     Ok(results)
@@ -783,14 +701,15 @@ pub fn add_department(pool: &DbPool, department: Department, active_admin_id: i6
     let _ = log_audit_action(
         pool,
         active_admin_id,
-        "INSERT",
-        "departments",
+        "CREATE",
+        "Department",
         target_id,
+        &department.department_name,
         None,
         Some(json!({
             "department_code": department.department_code,
             "department_name": department.department_name
-        }).to_string()),
+        })),
     );
 
     Ok(target_id)
@@ -845,16 +764,17 @@ pub fn update_department(
         pool,
         active_admin_id,
         "UPDATE",
-        "departments",
+        "Department",
         department_id,
+        new_name,
         Some(json!({
             "department_code": old_code,
             "department_name": old_name
-        }).to_string()),
+        })),
         Some(json!({
             "department_code": new_code,
             "department_name": new_name
-        }).to_string()),
+        })),
     );
 
     Ok(())
@@ -892,11 +812,12 @@ pub fn delete_department(pool: &DbPool, department_id: i64, active_admin_id: i64
     let _ = log_audit_action(
         pool,
         active_admin_id,
-        "DELETE",
-        "departments",
+        "ARCHIVE",
+        "Department",
         department_id,
-        Some(json!({ "department_code": deleted_code, "department_name": deleted_name }).to_string()),
-        Some(json!({ "action": "archived" }).to_string()),
+        &deleted_name,
+        Some(json!({ "department_code": deleted_code, "department_name": deleted_name })),
+        None,
     );
 
     Ok(())
@@ -921,15 +842,16 @@ pub fn add_program(pool: &DbPool, program: Program, active_admin_id: i64) -> Res
     let _ = log_audit_action(
         pool,
         active_admin_id,
-        "INSERT",
-        "programs",
+        "CREATE",
+        "Program",
         target_id,
+        &program.program_name,
         None,
         Some(json!({
-            "department_id": program.department_id,
+            "department": conn.query_row("SELECT department_code FROM departments WHERE department_id = ?1", params![program.department_id], |row| row.get::<_, String>(0)).ok(),
             "program_code": program.program_code,
             "program_name": program.program_name
-        }).to_string()),
+        })),
     );
 
     Ok(target_id)
@@ -986,18 +908,19 @@ pub fn update_program(
         pool,
         active_admin_id,
         "UPDATE",
-        "programs",
+        "Program",
         program_id,
+        new_name,
         Some(json!({
-            "department_id": old_dept_id,
+            "department": conn.query_row("SELECT department_code FROM departments WHERE department_id = ?1", params![old_dept_id], |row| row.get::<_, String>(0)).ok(),
             "program_code": old_code,
             "program_name": old_name
-        }).to_string()),
+        })),
         Some(json!({
-            "department_id": department_id,
+            "department": conn.query_row("SELECT department_code FROM departments WHERE department_id = ?1", params![department_id], |row| row.get::<_, String>(0)).ok(),
             "program_code": new_code,
             "program_name": new_name
-        }).to_string()),
+        })),
     );
 
     Ok(())
@@ -1035,17 +958,40 @@ pub fn delete_program(pool: &DbPool, program_id: i64, active_admin_id: i64) -> R
     let _ = log_audit_action(
         pool,
         active_admin_id,
-        "DELETE",
-        "programs",
+        "ARCHIVE",
+        "Program",
         program_id,
-        Some(json!({ "department_id": deleted_dept_id, "program_code": deleted_code, "program_name": deleted_name }).to_string()),
-        Some(json!({ "action": "archived" }).to_string()),
+        &deleted_name,
+        Some(json!({
+            "department": conn.query_row("SELECT department_code FROM departments WHERE department_id = ?1", params![deleted_dept_id], |row| row.get::<_, String>(0)).ok(),
+            "program_code": deleted_code,
+            "program_name": deleted_name
+        })),
+        None,
     );
 
     Ok(())
 }
 
 // ------ User Management CRUD Operations ------
+
+pub fn get_roles(pool: &DbPool) -> Result<Vec<Role>, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare("SELECT role_id, role_name FROM roles ORDER BY role_id ASC")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |row| {
+        Ok(Role {
+            role_id: row.get(0)?,
+            role_name: row.get(1)?,
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut roles = Vec::new();
+    for row in rows {
+        roles.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(roles)
+}
 
 pub fn add_person(pool: &DbPool, person: Person) -> Result<i64, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
@@ -1054,16 +1000,13 @@ pub fn add_person(pool: &DbPool, person: Person) -> Result<i64, String> {
 
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     conn.execute(
-        "INSERT INTO persons (id_number, role, first_name, middle_name, last_name, email, contact_number, face_template_path, is_active, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO persons (id_number, first_name, middle_name, last_name, face_template_path, is_active, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             person.id_number,
-            person.role,
             person.first_name,
             person.middle_name,
             person.last_name,
-            person.email,
-            person.contact_number,
             person.face_template_path,
             is_active,
             now
@@ -1076,7 +1019,7 @@ pub fn add_person(pool: &DbPool, person: Person) -> Result<i64, String> {
 pub fn get_persons(pool: &DbPool) -> Result<Vec<Person>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT person_id, id_number, role, first_name, middle_name, last_name, email, contact_number, face_template_path, is_active FROM persons WHERE is_archived = 0")
+    let mut stmt = conn.prepare("SELECT person_id, id_number, first_name, middle_name, last_name, face_template_path, is_active FROM persons WHERE is_archived = 0")
         .map_err(|e| e.to_string())?;
 
     let person_iter = stmt
@@ -1084,14 +1027,11 @@ pub fn get_persons(pool: &DbPool) -> Result<Vec<Person>, String> {
             Ok(Person {
                 person_id: row.get(0)?,
                 id_number: row.get(1)?,
-                role: row.get(2)?,
-                first_name: row.get(3)?,
-                middle_name: row.get(4).unwrap_or(None),
-                last_name: row.get(5)?,
-                email: row.get(6).unwrap_or(None),
-                contact_number: row.get(7).unwrap_or(None),
-                face_template_path: row.get(8)?,
-                is_active: row.get::<_, i32>(9)? == 1,
+                first_name: row.get(2)?,
+                middle_name: row.get(3).unwrap_or(None),
+                last_name: row.get(4)?,
+                face_template_path: row.get(5)?,
+                is_active: row.get::<_, i32>(6)? == 1,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -1105,12 +1045,26 @@ pub fn get_persons(pool: &DbPool) -> Result<Vec<Person>, String> {
 }
 
 pub fn update_person_status(pool: &DbPool, person_id: i64, is_active: bool, active_admin_id: i64) -> Result<(), String> {
+    if active_admin_id <= 0 {
+        return Ok(());
+    }
+
     let conn = pool.get().map_err(|e| e.to_string())?;
-    let active_int = if is_active { 1 } else { 0 };
+
+    // Only log if the status actually changed
+    let current_status: bool = conn.query_row(
+        "SELECT is_active FROM persons WHERE person_id = ?1",
+        params![person_id],
+        |row| row.get(0)
+    ).map_err(|e| e.to_string())?;
+
+    if current_status == is_active {
+        return Ok(());
+    }
 
     conn.execute(
         "UPDATE persons SET is_active = ?1 WHERE person_id = ?2",
-        params![active_int, person_id],
+        params![is_active, person_id],
     )
     .map_err(|e| e.to_string())?;
 
@@ -1118,10 +1072,11 @@ pub fn update_person_status(pool: &DbPool, person_id: i64, is_active: bool, acti
         pool,
         active_admin_id,
         "UPDATE",
-        "persons",
+        "Person",
         person_id,
-        None,
-        Some(json!({ "is_active": is_active }).to_string()),
+        &format!("Profile Status Change ({})", if is_active { "Activated" } else { "Deactivated" }),
+        Some(json!({ "is_active": current_status })),
+        Some(json!({ "is_active": is_active })),
     );
 
     Ok(())
@@ -1140,36 +1095,55 @@ pub fn add_student(pool: &DbPool, student: Student) -> Result<(), String> {
 pub fn get_students(pool: &DbPool) -> Result<Vec<StudentDetails>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.email, p.contact_number, p.is_active,
-                s.program_id, pr.program_name, s.year_level, s.is_irregular
+        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.is_active,
+                s.program_id, pr.program_name, s.year_level, s.is_irregular, d.department_name
          FROM persons p
          JOIN students s ON p.person_id = s.person_id
          JOIN programs pr ON s.program_id = pr.program_id
+         JOIN departments d ON pr.department_id = d.department_id
          WHERE p.is_archived = 0"
     ).map_err(|e| e.to_string())?;
 
-    let iter = stmt
+    let rows = stmt
         .query_map([], |row| {
-            Ok(StudentDetails {
-                person_id: row.get(0)?,
-                id_number: row.get(1)?,
-                first_name: row.get(2)?,
-                middle_name: row.get(3).unwrap_or(None),
-                last_name: row.get(4)?,
-                email: row.get(5).unwrap_or(None),
-                contact_number: row.get(6).unwrap_or(None),
-                is_active: row.get::<_, i32>(7)? == 1,
-                program_id: row.get(8)?,
-                program_name: row.get(9)?,
-                year_level: row.get(10).unwrap_or(None),
-                is_irregular: row.get(11).unwrap_or(Some(false)),
-            })
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i32>(5)? == 1,
+                row.get::<_, i64>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, Option<i64>>(8)?,
+                row.get::<_, Option<bool>>(9)?,
+                row.get::<_, String>(10)?,
+            ))
         })
         .map_err(|e| e.to_string())?;
 
     let mut list = Vec::new();
-    for item in iter {
-        list.push(item.map_err(|e| e.to_string())?);
+    for row in rows {
+        let (person_id, id_number, first_name, middle_name, last_name, is_active, program_id, program_name, year_level, is_irregular, department_name) = row.map_err(|e| e.to_string())?;
+        
+        let roles = get_person_roles(&conn, person_id)?;
+        let contacts = get_person_contacts(&conn, person_id)?;
+
+        list.push(StudentDetails {
+            person_id,
+            id_number,
+            first_name,
+            middle_name,
+            last_name,
+            roles,
+            contacts,
+            is_active,
+            program_id,
+            program_name,
+            year_level,
+            is_irregular,
+            department_name,
+        });
     }
     Ok(list)
 }
@@ -1187,10 +1161,11 @@ pub fn promote_all_students(pool: &DbPool, active_admin_id: i64) -> Result<(), S
         pool,
         active_admin_id,
         "UPDATE",
-        "students",
+        "Student",
         0,
-        Some("Bulk Promotion".to_string()),
-        Some("All students year levels incremented by 1".to_string()),
+        "Bulk Year Level Promotion",
+        None,
+        Some(json!({ "summary": "All student year levels promoted" })),
     );
 
     Ok(())
@@ -1212,13 +1187,13 @@ pub fn add_employee(pool: &DbPool, employee: Employee) -> Result<(), String> {
 
 pub fn register_user(
     pool: &DbPool,
-    role: &str,
+    roles: Vec<String>, // Changed from &str to Vec<String>
     id_number: &str,
     first_name: &str,
     middle_name: Option<String>,
     last_name: &str,
-    email: Option<String>,
-    contact_number: Option<String>,
+    emails: Vec<String>, // Changed from Option<String> to Vec<String>
+    contact_numbers: Vec<String>, // Changed from Option<String> to Vec<String>
     program_id: Option<i64>,
     year_level: Option<i64>,
     is_irregular: Option<bool>,
@@ -1226,11 +1201,14 @@ pub fn register_user(
     position_title: Option<String>,
     purpose: Option<String>,
     person_to_visit: Option<String>,
+    is_active: bool,
     active_admin_id: Option<i64>,
 ) -> Result<i64, String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
 
-    if role != "visitor" {
+    // Domain validation for university roles
+    let is_university_member = roles.iter().any(|r| r == "student" || r == "professor" || r == "staff");
+    if is_university_member {
         let strict_email: bool = conn.query_row(
             "SELECT setting_value FROM settings WHERE setting_key = 'strict_email_domain'",
             [],
@@ -1238,12 +1216,13 @@ pub fn register_user(
         ).unwrap_or(false);
 
         if strict_email {
-            if let Some(ref email_val) = email {
-                if !email_val.to_lowercase().ends_with("@plpasig.edu.ph") {
-                    return Err("Invalid email domain. Only @plpasig.edu.ph is allowed for university members.".to_string());
-                }
-            } else {
+            if emails.is_empty() {
                 return Err("Email is required for university members when strict domain is enabled.".to_string());
+            }
+            for email in &emails {
+                if !email.to_lowercase().ends_with("@plpasig.edu.ph") {
+                    return Err(format!("Invalid email domain for {}. Only @plpasig.edu.ph is allowed for university members.", email));
+                }
             }
         }
     }
@@ -1252,52 +1231,108 @@ pub fn register_user(
 
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     tx.execute(
-        "INSERT INTO persons (id_number, role, first_name, middle_name, last_name, email, contact_number, is_active, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8)",
-        params![id_number, role, first_name, middle_name, last_name, email, contact_number, now],
+        "INSERT INTO persons (id_number, first_name, middle_name, last_name, is_active, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![id_number, first_name, middle_name, last_name, is_active, now],
     ).map_err(|e| e.to_string())?;
 
     let person_id = tx.last_insert_rowid();
 
-    match role {
-        "student" => {
-            tx.execute(
-                "INSERT INTO students (person_id, program_id, year_level, is_irregular) VALUES (?1, ?2, ?3, ?4)",
-                params![person_id, program_id.unwrap_or(1), year_level, is_irregular.unwrap_or(false)],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        "professor" | "staff" => {
-            tx.execute(
-                "INSERT INTO employees (person_id, department_id, position_title) VALUES (?1, ?2, ?3)",
-                params![person_id, department_id.unwrap_or(1), position_title.unwrap_or_default()],
-            ).map_err(|e| e.to_string())?;
-        }
-        "visitor" => {
-            tx.execute(
-                "INSERT INTO visitors (person_id, purpose_of_visit, person_to_visit) VALUES (?1, ?2, ?3)",
-                params![person_id, purpose.unwrap_or_default(), person_to_visit.unwrap_or_default()],
-            ).map_err(|e| e.to_string())?;
-        }
-        _ => return Err("Invalid role specified".to_string()),
+    // Insert roles
+    for role_name in &roles {
+        tx.execute(
+            "INSERT INTO person_roles (person_id, role_id) 
+             SELECT ?1, role_id FROM roles WHERE role_name = ?2",
+            params![person_id, role_name.to_lowercase()],
+        ).map_err(|e| format!("Failed to assign role '{}': {}", role_name, e))?;
     }
+
+    // Insert contacts
+    for (idx, email) in emails.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO person_contacts (person_id, contact_type, contact_value, is_primary) VALUES (?1, 'email', ?2, ?3)",
+            params![person_id, email, if idx == 0 { 1 } else { 0 }],
+        ).map_err(|e| e.to_string())?;
+    }
+    for (idx, phone) in contact_numbers.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO person_contacts (person_id, contact_type, contact_value, is_primary) VALUES (?1, 'phone', ?2, ?3)",
+            params![person_id, phone, if idx == 0 && emails.is_empty() { 1 } else { 0 }],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    // Insert into subtype tables based on roles
+    for role in &roles {
+        match role.as_str() {
+            "student" => {
+                tx.execute(
+                    "INSERT INTO students (person_id, program_id, year_level, is_irregular) VALUES (?1, ?2, ?3, ?4)",
+                    params![person_id, program_id.unwrap_or(1), year_level, is_irregular.unwrap_or(false)],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            "professor" | "staff" => {
+                tx.execute(
+                    "INSERT INTO employees (person_id, department_id, position_title) VALUES (?1, ?2, ?3)",
+                    params![person_id, department_id.unwrap_or(1), position_title.as_deref().unwrap_or("")],
+                ).map_err(|e| e.to_string())?;
+            }
+            "visitor" => {
+                tx.execute(
+                    "INSERT INTO visitors (person_id, purpose_of_visit, person_to_visit) VALUES (?1, ?2, ?3)",
+                    params![person_id, purpose.as_deref().unwrap_or(""), person_to_visit.as_deref().unwrap_or("")],
+                ).map_err(|e| e.to_string())?;
+            }
+            _ => {} // Other roles might not have subtype tables
+        }
+    }
+
+    // Fetch final state for accurate logging
+    let final_roles = get_person_roles(&tx, person_id).unwrap_or_default();
+    let final_contacts = get_person_contacts(&tx, person_id).unwrap_or_default();
+    let final_emails: Vec<String> = final_contacts.iter().filter(|c| c.contact_type == "email").map(|c| c.contact_value.clone()).collect();
+    let final_phones: Vec<String> = final_contacts.iter().filter(|c| c.contact_type == "phone").map(|c| c.contact_value.clone()).collect();
 
     tx.commit().map_err(|e| e.to_string())?;
 
     if let Some(admin_id) = active_admin_id {
+        // Fetch names/codes for audit readability
+        let conn = pool.get().map_err(|e| e.to_string())?;
+        let program_code: Option<String> = program_id.and_then(|id| 
+            conn.query_row("SELECT program_code FROM programs WHERE program_id = ?1", params![id], |row| row.get(0)).ok()
+        );
+        let dept_code: Option<String> = department_id.and_then(|id| 
+            conn.query_row("SELECT department_code FROM departments WHERE department_id = ?1", params![id], |row| row.get(0)).ok()
+        );
+
+        let mut new_data = json!({
+            "id_number": id_number,
+            "first_name": first_name,
+            "middle_name": middle_name,
+            "last_name": last_name,
+            "roles": final_roles,
+            "emails": final_emails,
+            "phones": final_phones,
+            "is_active": is_active
+        });
+
+        if let Some(code) = program_code { new_data["program"] = json!(code); }
+        if let Some(code) = dept_code { new_data["department"] = json!(code); }
+        if let Some(yl) = year_level { new_data["year_level"] = json!(yl); }
+        if let Some(irreg) = is_irregular { new_data["is_irregular"] = json!(irreg); }
+        if let Some(pos) = position_title { new_data["position_title"] = json!(pos); }
+        if let Some(p) = purpose { new_data["purpose_of_visit"] = json!(p); }
+        if let Some(pv) = person_to_visit { new_data["person_to_visit"] = json!(pv); }
+
         let _ = log_audit_action(
             pool,
             admin_id,
-            "INSERT",
-            "persons",
+            "CREATE",
+            "Person",
             person_id,
+            &format!("{} {}", first_name, last_name),
             None,
-            Some(json!({
-                "id_number": id_number,
-                "role": role,
-                "first_name": first_name,
-                "last_name": last_name
-            }).to_string()),
+            Some(new_data),
         );
     }
 
@@ -1307,7 +1342,7 @@ pub fn register_user(
 pub fn bulk_import_users_from_excel(
     pool: &DbPool,
     file_path: &str,
-    role: &str,
+    role: &str, // This is still one role for the batch
     active_admin_id: i64,
 ) -> Result<BulkImportResult, String> {
     if !matches!(role, "student" | "professor" | "staff") {
@@ -1489,22 +1524,39 @@ pub fn bulk_import_users_from_excel(
             let tx = conn.transaction().map_err(|e| e.to_string())?;
             let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
             tx.execute(
-                "INSERT INTO persons (id_number, role, first_name, middle_name, last_name, email, contact_number, is_active, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8)",
+                "INSERT INTO persons (id_number, first_name, middle_name, last_name, is_active, created_at)
+                 VALUES (?1, ?2, ?3, ?4, 1, ?5)",
                 params![
                     id_number,
-                    role,
                     first_name,
                     if middle_name.is_empty() { None::<String> } else { Some(middle_name.clone()) },
                     last_name,
-                    if email.is_empty() { None::<String> } else { Some(email.clone()) },
-                    if contact_number.is_empty() { None::<String> } else { Some(contact_number.clone()) },
                     now
                 ],
             )
             .map_err(|e| e.to_string())?;
 
             let person_id = tx.last_insert_rowid();
+
+            // Link role
+            tx.execute(
+                "INSERT INTO person_roles (person_id, role_id) SELECT ?1, role_id FROM roles WHERE role_name = ?2",
+                params![person_id, role],
+            ).map_err(|e| e.to_string())?;
+
+            // Link contacts
+            if !email.is_empty() {
+                tx.execute(
+                    "INSERT INTO person_contacts (person_id, contact_type, contact_value, is_primary) VALUES (?1, 'email', ?2, 1)",
+                    params![person_id, email],
+                ).map_err(|e| e.to_string())?;
+            }
+            if !contact_number.is_empty() {
+                tx.execute(
+                    "INSERT INTO person_contacts (person_id, contact_type, contact_value, is_primary) VALUES (?1, 'phone', ?2, ?3)",
+                    params![person_id, contact_number, if email.is_empty() { 1 } else { 0 }],
+                ).map_err(|e| e.to_string())?;
+            }
 
             if role == "student" {
                 let program_name_value = get_col(idx_program_name);
@@ -1589,18 +1641,17 @@ pub fn bulk_import_users_from_excel(
         let _ = log_audit_action(
             pool,
             active_admin_id,
-            "INSERT",
-            "persons",
+            "CREATE",
+            "Person",
             0,
+            &format!("Bulk Import ({})", role_label),
             None,
             Some(
                 json!({
                     "summary": summary,
-                    "role": role,
-                    "count": success_count,
-                    "id_numbers": imported_ids
+                    "role": role_label,
+                    "count": success_count
                 })
-                .to_string(),
             ),
         );
     }
@@ -1616,13 +1667,13 @@ pub fn bulk_import_users_from_excel(
 pub fn update_user(
     pool: &DbPool,
     person_id: i64,
-    role: &str,
+    roles: Vec<String>,
     id_number: &str,
     first_name: &str,
     middle_name: Option<String>,
     last_name: &str,
-    email: Option<String>,
-    contact_number: Option<String>,
+    emails: Vec<String>,
+    contact_numbers: Vec<String>,
     program_id: Option<i64>,
     year_level: Option<i64>,
     is_irregular: Option<bool>,
@@ -1630,11 +1681,14 @@ pub fn update_user(
     position_title: Option<String>,
     purpose: Option<String>,
     person_to_visit: Option<String>,
+    is_active: bool,
     active_admin_id: i64,
 ) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
 
-    if role != "visitor" {
+    // Domain validation
+    let is_university_member = roles.iter().any(|r| r == "student" || r == "professor" || r == "staff");
+    if is_university_member {
         let strict_email: bool = conn.query_row(
             "SELECT setting_value FROM settings WHERE setting_key = 'strict_email_domain'",
             [],
@@ -1642,90 +1696,154 @@ pub fn update_user(
         ).unwrap_or(false);
 
         if strict_email {
-            if let Some(ref email_val) = email {
-                if !email_val.to_lowercase().ends_with("@plpasig.edu.ph") {
-                    return Err("Invalid email domain. Only @plpasig.edu.ph is allowed for university members.".to_string());
-                }
-            } else {
+            if emails.is_empty() {
                 return Err("Email is required for university members when strict domain is enabled.".to_string());
+            }
+            for email in &emails {
+                if !email.to_lowercase().ends_with("@plpasig.edu.ph") {
+                    return Err(format!("Invalid email domain for {}. Only @plpasig.edu.ph is allowed for university members.", email));
+                }
             }
         }
     }
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    let old_data: Option<serde_json::Value> = tx.query_row(
-        "SELECT id_number, first_name, middle_name, last_name, email, contact_number, role
-         FROM persons WHERE person_id = ?1",
+    // Fetch old data for audit log
+    let old_roles = get_person_roles(&tx, person_id)?;
+    let old_contacts = get_person_contacts(&tx, person_id)?;
+    let old_person_data: (String, String, Option<String>, String, bool) = tx.query_row(
+        "SELECT id_number, first_name, middle_name, last_name, is_active FROM persons WHERE person_id = ?1",
         params![person_id],
-        |row| {
-           Ok(json!({
-               "id_number": row.get::<_, String>(0)?,
-               "first_name": row.get::<_, String>(1)?,
-               "middle_name": row.get::<_, Option<String>>(2)?,
-               "last_name": row.get::<_, String>(3)?,
-               "email": row.get::<_, Option<String>>(4)?,
-               "contact_number": row.get::<_, Option<String>>(5)?,
-               "role": row.get::<_, String>(6)?
-           }))
-        }
-    ).ok();
-
-    tx.execute(
-        "UPDATE persons
-         SET id_number = ?1, first_name = ?2, middle_name = ?3, last_name = ?4, email = ?5, contact_number = ?6
-         WHERE person_id = ?7",
-        params![id_number, first_name, middle_name, last_name, email, contact_number, person_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
     ).map_err(|e| e.to_string())?;
 
-    match role {
-        "student" => {
-            tx.execute(
-                "UPDATE students SET program_id = ?1, year_level = ?2, is_irregular = ?3 WHERE person_id = ?4",
-                params![program_id.unwrap_or(1), year_level, is_irregular.unwrap_or(false), person_id],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        "professor" | "staff" => {
-            tx.execute(
-                "UPDATE employees SET department_id = ?1, position_title = ?2 WHERE person_id = ?3",
-                params![
-                    department_id.unwrap_or(1),
-                    position_title.unwrap_or_default(),
-                    person_id
-                ],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        "visitor" => {
-            tx.execute(
-                "UPDATE visitors SET purpose_of_visit = ?1, person_to_visit = ?2 WHERE person_id = ?3",
-                params![purpose.unwrap_or_default(), person_to_visit.unwrap_or_default(), person_id],
-            ).map_err(|e| e.to_string())?;
-        }
-        _ => return Err("Invalid role specified".to_string()),
+    let old_emails: Vec<String> = old_contacts.iter().filter(|c| c.contact_type == "email").map(|c| c.contact_value.clone()).collect();
+    let old_phones: Vec<String> = old_contacts.iter().filter(|c| c.contact_type == "phone").map(|c| c.contact_value.clone()).collect();
+
+    let old_program_code: Option<String> = tx.query_row(
+        "SELECT p.program_code FROM students s JOIN programs p ON s.program_id = p.program_id WHERE s.person_id = ?1",
+        params![person_id],
+        |row| row.get(0)
+    ).ok();
+
+    let old_dept_code: Option<String> = tx.query_row(
+        "SELECT d.department_code FROM employees e JOIN departments d ON e.department_id = d.department_id WHERE e.person_id = ?1",
+        params![person_id],
+        |row| row.get(0)
+    ).ok();
+
+    let old_data = json!({
+        "id_number": old_person_data.0,
+        "first_name": old_person_data.1,
+        "middle_name": old_person_data.2,
+        "last_name": old_person_data.3,
+        "roles": old_roles,
+        "emails": old_emails,
+        "phones": old_phones,
+        "program": old_program_code,
+        "department": old_dept_code,
+        "is_active": old_person_data.4
+    });
+
+    // Update core person data
+    tx.execute(
+        "UPDATE persons
+         SET id_number = ?1, first_name = ?2, middle_name = ?3, last_name = ?4, is_active = ?5
+         WHERE person_id = ?6",
+        params![id_number, first_name, middle_name, last_name, is_active, person_id],
+    ).map_err(|e| e.to_string())?;
+
+    // Update roles (replace)
+    tx.execute("DELETE FROM person_roles WHERE person_id = ?1", params![person_id]).map_err(|e| e.to_string())?;
+    for role_name in &roles {
+        tx.execute(
+            "INSERT INTO person_roles (person_id, role_id) 
+             SELECT ?1, role_id FROM roles WHERE role_name = ?2",
+            params![person_id, role_name.to_lowercase()],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    // Update contacts (replace)
+    tx.execute("DELETE FROM person_contacts WHERE person_id = ?1", params![person_id]).map_err(|e| e.to_string())?;
+    for (idx, email) in emails.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO person_contacts (person_id, contact_type, contact_value, is_primary) VALUES (?1, 'email', ?2, ?3)",
+            params![person_id, email, if idx == 0 { 1 } else { 0 }],
+        ).map_err(|e| e.to_string())?;
+    }
+    for (idx, phone) in contact_numbers.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO person_contacts (person_id, contact_type, contact_value, is_primary) VALUES (?1, 'phone', ?2, ?3)",
+            params![person_id, phone, if idx == 0 && emails.is_empty() { 1 } else { 0 }],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    // Update subtypes
+    // Clear old subtypes first? Or just update if exists.
+    // Given a person can have multiple roles, they can exist in multiple subtype tables.
+    
+    // Students
+    if roles.iter().any(|r| r == "student") {
+        tx.execute(
+            "INSERT OR REPLACE INTO students (person_id, program_id, year_level, is_irregular) VALUES (?1, ?2, ?3, ?4)",
+            params![person_id, program_id.unwrap_or(1), year_level, is_irregular.unwrap_or(false)],
+        ).map_err(|e| e.to_string())?;
+    } else {
+        tx.execute("DELETE FROM students WHERE person_id = ?1", params![person_id]).map_err(|e| e.to_string())?;
+    }
+
+    // Employees
+    if roles.iter().any(|r| r == "professor" || r == "staff") {
+        tx.execute(
+            "INSERT OR REPLACE INTO employees (person_id, department_id, position_title) VALUES (?1, ?2, ?3)",
+            params![person_id, department_id.unwrap_or(1), position_title.as_deref().unwrap_or("")],
+        ).map_err(|e| e.to_string())?;
+    } else {
+        tx.execute("DELETE FROM employees WHERE person_id = ?1", params![person_id]).map_err(|e| e.to_string())?;
+    }
+
+    // Visitors
+    if roles.iter().any(|r| r == "visitor") {
+        tx.execute(
+            "INSERT OR REPLACE INTO visitors (person_id, purpose_of_visit, person_to_visit) VALUES (?1, ?2, ?3)",
+            params![person_id, purpose.as_deref().unwrap_or(""), person_to_visit.as_deref().unwrap_or("")],
+        ).map_err(|e| e.to_string())?;
+    } else {
+        tx.execute("DELETE FROM visitors WHERE person_id = ?1", params![person_id]).map_err(|e| e.to_string())?;
     }
 
     tx.commit().map_err(|e| e.to_string())?;
+
+    let new_program_code: Option<String> = program_id.and_then(|id| 
+        conn.query_row("SELECT program_code FROM programs WHERE program_id = ?1", params![id], |row| row.get(0)).ok()
+    );
+    let new_dept_code: Option<String> = department_id.and_then(|id| 
+        conn.query_row("SELECT department_code FROM departments WHERE department_id = ?1", params![id], |row| row.get(0)).ok()
+    );
 
     let new_data = json!({
         "id_number": id_number,
         "first_name": first_name,
         "middle_name": middle_name,
         "last_name": last_name,
-        "email": email,
-        "contact_number": contact_number,
-        "role": role
+        "roles": roles,
+        "emails": emails,
+        "phones": contact_numbers,
+        "program": new_program_code,
+        "department": new_dept_code,
+        "is_active": is_active
     });
 
     let _ = log_audit_action(
         pool,
         active_admin_id,
         "UPDATE",
-        "persons",
+        "Person",
         person_id,
-        old_data.map(|v| v.to_string()),
-        Some(new_data.to_string()),
+        &format!("{} {}", first_name, last_name),
+        Some(old_data),
+        Some(new_data),
     );
 
     Ok(())
@@ -1734,22 +1852,52 @@ pub fn update_user(
 pub fn delete_user(pool: &DbPool, person_id: i64, _role: &str, active_admin_id: i64) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let old_data: Option<serde_json::Value> = conn.query_row(
-        "SELECT id_number, first_name, middle_name, last_name, email, contact_number, role
-         FROM persons WHERE person_id = ?1",
+    let roles = get_person_roles(&conn, person_id)?;
+    let contacts = get_person_contacts(&conn, person_id)?;
+    let emails: Vec<String> = contacts.iter().filter(|c| c.contact_type == "email").map(|c| c.contact_value.clone()).collect();
+    let phones: Vec<String> = contacts.iter().filter(|c| c.contact_type == "phone").map(|c| c.contact_value.clone()).collect();
+
+    let person_data: (String, String, Option<String>, String, bool) = conn.query_row(
+        "SELECT id_number, first_name, middle_name, last_name, is_active FROM persons WHERE person_id = ?1",
         params![person_id],
-        |row| {
-           Ok(json!({
-               "id_number": row.get::<_, String>(0)?,
-               "first_name": row.get::<_, String>(1)?,
-               "middle_name": row.get::<_, Option<String>>(2)?,
-               "last_name": row.get::<_, String>(3)?,
-               "email": row.get::<_, Option<String>>(4)?,
-               "contact_number": row.get::<_, Option<String>>(5)?,
-               "role": row.get::<_, String>(6)?
-           }))
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get::<_, i32>(4)? == 1))
+    ).map_err(|e| e.to_string())?;
+
+    let mut old_data = json!({
+        "id_number": person_data.0,
+        "first_name": person_data.1,
+        "middle_name": person_data.2,
+        "last_name": person_data.3,
+        "roles": roles,
+        "emails": emails,
+        "phones": phones,
+        "is_active": person_data.4
+    });
+
+    if roles.iter().any(|r| r == "student") {
+        let stu_info: Option<(String, Option<i64>, bool)> = conn.query_row(
+            "SELECT p.program_code, s.year_level, s.is_irregular FROM students s JOIN programs p ON s.program_id = p.program_id WHERE s.person_id = ?1",
+            params![person_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i32>(2)? == 1))
+        ).optional().map_err(|e| e.to_string())?;
+        if let Some((prog, y_lvl, irreg)) = stu_info {
+            old_data["program"] = json!(prog);
+            old_data["year_level"] = json!(y_lvl);
+            old_data["is_irregular"] = json!(irreg);
         }
-    ).ok();
+    }
+
+    if roles.iter().any(|r| r == "professor" || r == "staff") {
+        let emp_info: Option<(String, String)> = conn.query_row(
+            "SELECT d.department_code, e.position_title FROM employees e JOIN departments d ON e.department_id = d.department_id WHERE e.person_id = ?1",
+            params![person_id],
+            |row| Ok((row.get(0)?, row.get(1)?))
+        ).optional().map_err(|e| e.to_string())?;
+        if let Some((dept, pos)) = emp_info {
+            old_data["department"] = json!(dept);
+            old_data["position_title"] = json!(pos);
+        }
+    }
 
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     conn.execute(
@@ -1761,11 +1909,12 @@ pub fn delete_user(pool: &DbPool, person_id: i64, _role: &str, active_admin_id: 
     let _ = log_audit_action(
         pool,
         active_admin_id,
-        "DELETE",
-        "persons",
+        "ARCHIVE",
+        "Person",
         person_id,
-        old_data.map(|v| v.to_string()),
-        Some(json!({ "action": "archived" }).to_string()),
+        &format!("{} {}", person_data.1, person_data.3),
+        Some(old_data),
+        None,
     );
 
     Ok(())
@@ -1774,7 +1923,7 @@ pub fn delete_user(pool: &DbPool, person_id: i64, _role: &str, active_admin_id: 
 pub fn get_employees(pool: &DbPool) -> Result<Vec<EmployeeDetails>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.email, p.contact_number, p.is_active,
+        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.is_active,
                 e.department_id, e.position_title, d.department_name
          FROM persons p
          JOIN employees e ON p.person_id = e.person_id
@@ -1782,27 +1931,42 @@ pub fn get_employees(pool: &DbPool) -> Result<Vec<EmployeeDetails>, String> {
          WHERE p.is_archived = 0"
     ).map_err(|e| e.to_string())?;
 
-    let iter = stmt
+    let rows = stmt
         .query_map([], |row| {
-            Ok(EmployeeDetails {
-                person_id: row.get(0)?,
-                id_number: row.get(1)?,
-                first_name: row.get(2)?,
-                middle_name: row.get(3).unwrap_or(None),
-                last_name: row.get(4)?,
-                email: row.get(5).unwrap_or(None),
-                contact_number: row.get(6).unwrap_or(None),
-                is_active: row.get::<_, i32>(7)? == 1,
-                department_id: row.get(8)?,
-                position_title: row.get(9)?,
-                department_name: row.get(10)?,
-            })
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i32>(5)? == 1,
+                row.get::<_, i64>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+            ))
         })
         .map_err(|e| e.to_string())?;
 
     let mut list = Vec::new();
-    for item in iter {
-        list.push(item.map_err(|e| e.to_string())?);
+    for row in rows {
+        let (person_id, id_number, first_name, middle_name, last_name, is_active, department_id, position_title, department_name) = row.map_err(|e| e.to_string())?;
+        
+        let roles = get_person_roles(&conn, person_id)?;
+        let contacts = get_person_contacts(&conn, person_id)?;
+
+        list.push(EmployeeDetails {
+            person_id,
+            id_number,
+            first_name,
+            middle_name,
+            last_name,
+            roles,
+            contacts,
+            is_active,
+            department_id,
+            position_title,
+            department_name,
+        });
     }
     Ok(list)
 }
@@ -1818,43 +1982,54 @@ pub fn get_visitors(pool: &DbPool, sort_order: Option<String>) -> Result<Vec<Vis
         _ => "DESC",
     };
 
-    // Simplistic approach: get the first entry today as time_in, and the last exit today as time_out
     let query = format!(
-        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.email, p.contact_number, v.purpose_of_visit, v.person_to_visit, p.created_at,
-            (SELECT MIN(e.scanned_at) FROM entry_logs e JOIN scanners s ON e.scanner_id = s.scanner_id WHERE e.person_id = p.person_id AND s.function = 'entrance') as time_in,
-            (SELECT MAX(e.scanned_at) FROM entry_logs e JOIN scanners s ON e.scanner_id = s.scanner_id WHERE e.person_id = p.person_id AND s.function = 'exit') as time_out
+        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, v.purpose_of_visit, v.person_to_visit, p.created_at,
+            (SELECT MIN(scanned_at) FROM activity_logs WHERE person_id = p.person_id AND activity_type = 'entrance') as time_in,
+            (SELECT MAX(scanned_at) FROM activity_logs WHERE person_id = p.person_id AND activity_type = 'exit') as time_out
          FROM persons p
          JOIN visitors v ON p.person_id = v.person_id
-         WHERE p.role = 'visitor' AND p.is_archived = 0
+         WHERE p.is_archived = 0
          ORDER BY p.created_at {order_direction}"
     );
 
-    let mut stmt = conn.prepare(
-        &query
-    ).map_err(|e| e.to_string())?;
+    let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
 
-    let iter = stmt
+    let rows = stmt
         .query_map([], |row| {
-            Ok(VisitorDetails {
-                person_id: row.get(0)?,
-                id_number: row.get(1)?,
-                first_name: row.get(2)?,
-                middle_name: row.get(3).unwrap_or(None),
-                last_name: row.get(4)?,
-                email: row.get(5).unwrap_or(None),
-                contact_number: row.get(6).unwrap_or(None),
-                purpose_of_visit: row.get(7)?,
-                person_to_visit: row.get(8)?,
-                created_at: row.get(9).unwrap_or(None),
-                time_in: row.get(10).unwrap_or(None),
-                time_out: row.get(11).unwrap_or(None),
-            })
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
+                row.get::<_, Option<String>>(9)?,
+            ))
         })
         .map_err(|e| e.to_string())?;
 
     let mut list = Vec::new();
-    for item in iter {
-        list.push(item.map_err(|e| e.to_string())?);
+    for row in rows {
+        let (person_id, id_number, first_name, middle_name, last_name, purpose, person_to_visit, created_at, time_in, time_out) = row.map_err(|e| e.to_string())?;
+        
+        let contacts = get_person_contacts(&conn, person_id)?;
+
+        list.push(VisitorDetails {
+            person_id,
+            id_number,
+            first_name,
+            middle_name,
+            last_name,
+            contacts,
+            purpose_of_visit: purpose,
+            person_to_visit,
+            created_at,
+            time_in,
+            time_out,
+        });
     }
     Ok(list)
 }
@@ -1876,14 +2051,15 @@ pub fn add_scanner(pool: &DbPool, scanner: Scanner, active_admin_id: i64) -> Res
     let _ = log_audit_action(
         pool,
         active_admin_id,
-        "INSERT",
-        "scanners",
+        "CREATE",
+        "Scanner",
         target_id,
+        &scanner.location_name,
         None,
         Some(json!({
             "location_name": scanner.location_name,
             "function": scanner.function
-        }).to_string()),
+        })),
     );
 
     Ok(target_id)
@@ -1919,64 +2095,89 @@ pub fn get_access_logs(
     role_filter: Option<String>,
     action_type: Option<String>,
     department_id: Option<i64>,
+    program_id: Option<i64>,
+    year_level: Option<i64>,
     search_term: Option<String>,
     start_date: Option<String>,
     end_date: Option<String>,
-) -> Result<Vec<AccessLogDetails>, String> {
+) -> Result<Vec<ActivityLogDetails>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let base_query = "
-        SELECT l.log_id, l.scanned_at, p.first_name, p.last_name, p.id_number, p.role, COALESCE(d_s.department_name, d_e.department_name, 'N/A') as department_name, s.function
-        FROM entry_logs l
+        SELECT l.log_id, l.scanned_at, p.first_name, p.last_name, p.id_number, 
+               COALESCE(d_s.department_name, d_e.department_name, 'N/A') as department_name, 
+               s.location_name, l.activity_type, e.event_name, l.status, p.person_id
+        FROM activity_logs l
         JOIN persons p ON l.person_id = p.person_id
         JOIN scanners s ON l.scanner_id = s.scanner_id
+        LEFT JOIN events e ON l.event_id = e.event_id
         LEFT JOIN students stu ON p.person_id = stu.person_id
         LEFT JOIN programs prog ON stu.program_id = prog.program_id
         LEFT JOIN departments d_s ON prog.department_id = d_s.department_id
         LEFT JOIN employees emp ON p.person_id = emp.person_id
         LEFT JOIN departments d_e ON emp.department_id = d_e.department_id
         WHERE 1=1
-        AND (?1 IS NULL OR p.role = ?1)
-        AND (?2 IS NULL OR s.function = ?2)
+        AND (?1 IS NULL OR EXISTS (SELECT 1 FROM person_roles pr JOIN roles r ON pr.role_id = r.role_id WHERE pr.person_id = p.person_id AND r.role_name = ?1))
+        AND (?2 IS NULL OR l.activity_type = ?2)
         AND (?3 IS NULL OR COALESCE(prog.department_id, emp.department_id) = ?3)
-        AND (?4 IS NULL OR p.first_name LIKE '%' || ?4 || '%' OR p.last_name LIKE '%' || ?4 || '%' OR p.id_number LIKE '%' || ?4 || '%')
-        AND (?5 IS NULL OR DATE(l.scanned_at) >= DATE(?5))
-        AND (?6 IS NULL OR DATE(l.scanned_at) <= DATE(?6))
-        ORDER BY l.scanned_at DESC LIMIT 100
+        AND (?4 IS NULL OR prog.program_id = ?4)
+        AND (?5 IS NULL OR stu.year_level = ?5)
+        AND (?6 IS NULL OR p.first_name LIKE '%' || ?6 || '%' OR p.last_name LIKE '%' || ?6 || '%' OR p.id_number LIKE '%' || ?6 || '%')
+        AND (?7 IS NULL OR DATE(l.scanned_at) >= DATE(?7))
+        AND (?8 IS NULL OR DATE(l.scanned_at) <= DATE(?8))
+        ORDER BY l.scanned_at DESC LIMIT 500
     ";
 
     let mut stmt = conn.prepare(&base_query).map_err(|e| e.to_string())?;
 
-    let mut list = Vec::new();
-
-    let iter = stmt
+    let rows = stmt
         .query_map(
             params![
                 role_filter,
                 action_type,
                 department_id,
+                program_id,
+                year_level,
                 search_term,
                 start_date,
                 end_date
             ],
             |row| {
-                let first_name: String = row.get(2)?;
-                let last_name: String = row.get(3)?;
-                Ok(AccessLogDetails {
-                    log_id: row.get(0)?,
-                    scanned_at: row.get(1)?,
-                    person_name: format!("{} {}", first_name, last_name),
-                    id_number: row.get(4)?,
-                    role: row.get(5)?,
-                    department_name: row.get(6).unwrap_or_else(|_| "N/A".to_string()),
-                    scanner_function: row.get(7)?,
-                })
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                    row.get::<_, i64>(10)?,
+                ))
             },
         )
         .map_err(|e| e.to_string())?;
 
-    for item in iter {
-        list.push(item.map_err(|e| e.to_string())?);
+    let mut list = Vec::new();
+    for row in rows {
+        let (log_id, scanned_at, first_name, last_name, id_number, dept_name, scanner_loc, activity_type, event_name, status, person_id) = row.map_err(|e| e.to_string())?;
+        
+        let roles = get_person_roles(&conn, person_id)?;
+
+        list.push(ActivityLogDetails {
+            log_id,
+            scanned_at,
+            person_name: format!("{} {}", first_name, last_name),
+            id_number,
+            roles,
+            department_name: Some(dept_name),
+            scanner_location: scanner_loc,
+            activity_type,
+            event_name,
+            status,
+        });
     }
     Ok(list)
 }
@@ -1988,237 +2189,304 @@ pub fn get_event_attendance_logs(
     department_id: Option<i64>,
     program_id: Option<i64>,
     year_level: Option<i64>,
-) -> Result<Vec<EventAttendanceLog>, String> {
-    let conn = pool.get().map_err(|e| e.to_string())?;
-
-    let mut base_query = "
-        SELECT 
-            a.attendance_id, 
-            p.first_name, 
-            p.last_name, 
-            p.id_number, 
-            p.role, 
-            e.event_name, 
-            a.scanned_at, 
-            a.status,
-            COALESCE(d_s.department_name, d_e.department_name) as department_name,
-            prog.program_name,
-            s.year_level
-        FROM event_attendance a
-        JOIN persons p ON a.person_id = p.person_id
-        JOIN events e ON a.event_id = e.event_id
-        LEFT JOIN students s ON p.person_id = s.person_id
-        LEFT JOIN programs prog ON s.program_id = prog.program_id
-        LEFT JOIN departments d_s ON prog.department_id = d_s.department_id
-        LEFT JOIN employees emp ON p.person_id = emp.person_id
-        LEFT JOIN departments d_e ON emp.department_id = d_e.department_id
-        WHERE 1=1
-    ".to_string();
-
-    let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-
-    if let (Some(start), Some(end)) = (&start_date, &end_date) {
-        base_query.push_str(" AND DATE(a.scanned_at) BETWEEN DATE(?) AND DATE(?)");
-        params_vec.push(Box::new(start.clone()));
-        params_vec.push(Box::new(end.clone()));
-    } else if let Some(start) = &start_date {
-        base_query.push_str(" AND DATE(a.scanned_at) >= DATE(?)");
-        params_vec.push(Box::new(start.clone()));
-    } else if let Some(end) = &end_date {
-        base_query.push_str(" AND DATE(a.scanned_at) <= DATE(?)");
-        params_vec.push(Box::new(end.clone()));
-    }
-
-    if let Some(dept_id) = department_id {
-        base_query.push_str(" AND COALESCE(prog.department_id, emp.department_id) = ?");
-        params_vec.push(Box::new(dept_id));
-    }
-
-    if let Some(prog_id) = program_id {
-        base_query.push_str(" AND s.program_id = ?");
-        params_vec.push(Box::new(prog_id));
-    }
-
-    if let Some(year) = year_level {
-        base_query.push_str(" AND s.year_level = ?");
-        params_vec.push(Box::new(year));
-    }
-
-    base_query.push_str(" ORDER BY a.scanned_at DESC LIMIT 500");
-
-    let mut stmt = conn.prepare(&base_query).map_err(|e| e.to_string())?;
-    
-    let params_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
-
-    let iter = stmt.query_map(params_refs.as_slice(), |row| {
-        let first_name: String = row.get(1)?;
-        let last_name: String = row.get(2)?;
-        Ok(EventAttendanceLog {
-            log_id: row.get(0)?,
-            person_name: format!("{} {}", first_name, last_name),
-            id_number: row.get(3)?,
-            role: row.get(4)?,
-            event_name: row.get(5)?,
-            scanned_at: row.get(6)?,
-            status: row.get(7)?,
-            department_name: row.get(8)?,
-            program_name: row.get(9)?,
-            year_level: row.get(10)?,
-        })
-    }).map_err(|e| e.to_string())?;
-
-    let mut list = Vec::new();
-    for item in iter {
-        list.push(item.map_err(|e| e.to_string())?);
-    }
-    Ok(list)
+) -> Result<Vec<ActivityLogDetails>, String> {
+    // This is now similar to get_access_logs but filtered for activity_type = 'event'
+    get_access_logs(pool, None, Some("event".to_string()), department_id, program_id, year_level, None, start_date, end_date)
 }
 
-pub fn add_event(pool: &DbPool, event: Event, active_admin_id: i64) -> Result<i64, String> {
-    let conn = pool.get().map_err(|e| e.to_string())?;
+fn get_event_details_helper(conn: &rusqlite::Connection, event_id: i64) -> Result<EventDetails, String> {
+    let event = conn.query_row(
+        "SELECT event_id, event_name, description, is_enabled FROM events WHERE event_id = ?1",
+        params![event_id],
+        |row| Ok(Event {
+            event_id: row.get(0)?,
+            event_name: row.get(1)?,
+            description: row.get(2)?,
+            is_enabled: row.get::<_, i32>(3)? == 1,
+        })
+    ).map_err(|e| e.to_string())?;
 
-    let is_enabled = if event.is_enabled { 1 } else { 0 };
+    let mut stmt_w = conn.prepare("SELECT schedule_id, event_id, day_of_week, start_time, end_time FROM event_weekly WHERE event_id = ?1").map_err(|e| e.to_string())?;
+    let weekly = stmt_w.query_map([event_id], |row| {
+        Ok(EventWeeklySchedule {
+            schedule_id: row.get(0)?,
+            event_id: row.get(1)?,
+            day_of_week: row.get(2)?,
+            start_time: row.get(3)?,
+            end_time: row.get(4)?,
+        })
+    }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
 
-    conn.execute(
-        "INSERT INTO events (event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, required_programs, required_year_levels, is_enabled)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+    let mut stmt_d = conn.prepare("SELECT schedule_id, event_id, start_date, end_date, start_time, end_time FROM event_date_range WHERE event_id = ?1").map_err(|e| e.to_string())?;
+    let date_range = stmt_d.query_map([event_id], |row| {
+        Ok(EventDateRangeSchedule {
+            schedule_id: row.get(0)?,
+            event_id: row.get(1)?,
+            start_date: row.get(2)?,
+            end_date: row.get(3)?,
+            start_time: row.get(4)?,
+            end_time: row.get(5)?,
+        })
+    }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+
+    let mut stmt_r = conn.prepare("SELECT r.role_id, r.role_name FROM roles r JOIN event_required_roles err ON r.role_id = err.role_id WHERE err.event_id = ?1").map_err(|e| e.to_string())?;
+    let roles = stmt_r.query_map([event_id], |row| {
+        Ok(Role {
+            role_id: row.get(0)?,
+            role_name: row.get(1)?,
+        })
+    }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+
+    Ok(EventDetails {
+        event,
+        weekly_schedules: weekly,
+        date_range_schedules: date_range,
+        required_roles: roles,
+    })
+}
+
+pub fn add_event(
+    pool: &DbPool, 
+    event_details: EventDetails, // Changed to handle complex structure
+    active_admin_id: i64
+) -> Result<i64, String> {
+    let mut conn = pool.get().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO events (event_name, description, is_enabled) VALUES (?1, ?2, ?3)",
         params![
-            event.event_name,
-            event.description,
-            event.schedule_type,
-            event.event_date,
-            event.start_date,
-            event.end_date,
-            event.start_time,
-            event.end_time,
-            event.required_role,
-            event.required_programs,
-            event.required_year_levels,
-            is_enabled
+            event_details.event.event_name,
+            event_details.event.description,
+            event_details.event.is_enabled
         ],
     ).map_err(|e| e.to_string())?;
 
-    let target_id = conn.last_insert_rowid();
+    let event_id = tx.last_insert_rowid();
+
+    // Insert weekly schedules
+    for s in &event_details.weekly_schedules {
+        tx.execute(
+            "INSERT INTO event_weekly (event_id, day_of_week, start_time, end_time) VALUES (?1, ?2, ?3, ?4)",
+            params![event_id, s.day_of_week, s.start_time, s.end_time],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    // Insert date range schedules
+    for s in &event_details.date_range_schedules {
+        tx.execute(
+            "INSERT INTO event_date_range (event_id, start_date, end_date, start_time, end_time) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![event_id, s.start_date, s.end_date, s.start_time, s.end_time],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    // Insert required roles
+    for role in &event_details.required_roles {
+        tx.execute(
+            "INSERT INTO event_required_roles (event_id, role_id) VALUES (?1, ?2)",
+            params![event_id, role.role_id],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+
+    let mut new_val = json!({
+        "event_name": event_details.event.event_name,
+        "description": event_details.event.description,
+        "is_enabled": event_details.event.is_enabled,
+    });
+
+    if !event_details.weekly_schedules.is_empty() {
+        new_val["day_of_week"] = json!(event_details.weekly_schedules.iter().map(|s| s.day_of_week.clone()).collect::<Vec<_>>().join(", "));
+        new_val["start_time"] = json!(event_details.weekly_schedules[0].start_time);
+        new_val["end_time"] = json!(event_details.weekly_schedules[0].end_time);
+    } else if !event_details.date_range_schedules.is_empty() {
+        new_val["start_date"] = json!(event_details.date_range_schedules[0].start_date);
+        new_val["end_date"] = json!(event_details.date_range_schedules[0].end_date);
+        new_val["start_time"] = json!(event_details.date_range_schedules[0].start_time);
+        new_val["end_time"] = json!(event_details.date_range_schedules[0].end_time);
+    }
 
     let _ = log_audit_action(
         pool,
         active_admin_id,
-        "INSERT",
-        "events",
-        target_id,
+        "CREATE",
+        "Event",
+        event_id,
+        &event_details.event.event_name,
         None,
-        Some(json!({
-            "event_name": event.event_name,
-            "description": event.description,
-            "event_date": event.event_date
-        }).to_string()),
+        Some(new_val),
     );
 
-    Ok(target_id)
+    Ok(event_id)
 }
 
-pub fn get_events(pool: &DbPool) -> Result<Vec<Event>, String> {
+pub fn get_events(pool: &DbPool) -> Result<Vec<EventDetails>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT event_id, event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, required_programs, required_year_levels, is_enabled FROM events WHERE is_archived = 0")
+    let mut stmt = conn.prepare("SELECT event_id, event_name, description, is_enabled FROM events WHERE is_archived = 0")
         .map_err(|e| e.to_string())?;
 
-    let iter = stmt
+    let event_rows = stmt
         .query_map([], |row| {
             Ok(Event {
                 event_id: row.get(0)?,
                 event_name: row.get(1)?,
                 description: row.get(2)?,
-                schedule_type: row.get(3)?,
-                event_date: row.get(4)?,
-                start_date: row.get(5)?,
-                end_date: row.get(6)?,
-                start_time: row.get(7)?,
-                end_time: row.get(8)?,
-                required_role: row.get(9)?,
-                required_programs: row.get(10)?,
-                required_year_levels: row.get(11)?,
-                is_enabled: row.get::<_, i32>(12)? == 1,
+                is_enabled: row.get::<_, i32>(3)? == 1,
             })
         })
         .map_err(|e| e.to_string())?;
 
     let mut list = Vec::new();
-    for item in iter {
-        list.push(item.map_err(|e| e.to_string())?);
+    for event in event_rows {
+        let event = event.map_err(|e| e.to_string())?;
+        let event_id = event.event_id;
+
+        // Get weekly schedules
+        let mut stmt_w = conn.prepare("SELECT schedule_id, event_id, day_of_week, start_time, end_time FROM event_weekly WHERE event_id = ?1").map_err(|e| e.to_string())?;
+        let weekly = stmt_w.query_map([event_id], |row| {
+            Ok(EventWeeklySchedule {
+                schedule_id: row.get(0)?,
+                event_id: row.get(1)?,
+                day_of_week: row.get(2)?,
+                start_time: row.get(3)?,
+                end_time: row.get(4)?,
+            })
+        }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+
+        // Get date range schedules
+        let mut stmt_d = conn.prepare("SELECT schedule_id, event_id, start_date, end_date, start_time, end_time FROM event_date_range WHERE event_id = ?1").map_err(|e| e.to_string())?;
+        let date_range = stmt_d.query_map([event_id], |row| {
+            Ok(EventDateRangeSchedule {
+                schedule_id: row.get(0)?,
+                event_id: row.get(1)?,
+                start_date: row.get(2)?,
+                end_date: row.get(3)?,
+                start_time: row.get(4)?,
+                end_time: row.get(5)?,
+            })
+        }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+
+        // Get required roles
+        let mut stmt_r = conn.prepare("SELECT r.role_id, r.role_name FROM roles r JOIN event_required_roles err ON r.role_id = err.role_id WHERE err.event_id = ?1").map_err(|e| e.to_string())?;
+        let roles = stmt_r.query_map([event_id], |row| {
+            Ok(Role {
+                role_id: row.get(0)?,
+                role_name: row.get(1)?,
+            })
+        }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+
+        list.push(EventDetails {
+            event,
+            weekly_schedules: weekly,
+            date_range_schedules: date_range,
+            required_roles: roles,
+        });
     }
 
     Ok(list)
 }
 
-pub fn update_event(pool: &DbPool, event_id: i64, event: Event, active_admin_id: i64) -> Result<(), String> {
-    let conn = pool.get().map_err(|e| e.to_string())?;
+pub fn update_event(
+    pool: &DbPool, 
+    event_id: i64, 
+    event_details: EventDetails, 
+    active_admin_id: i64
+) -> Result<(), String> {
+    let mut conn = pool.get().map_err(|e| e.to_string())?;
+    
+    // Fetch old data for audit log before updating
+    let old_event_details = match get_event_details_helper(&conn, event_id) {
+        Ok(details) => Some(details),
+        Err(_) => None,
+    };
 
-    let old_data: Option<serde_json::Value> = conn.query_row(
-        "SELECT event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, required_programs, required_year_levels, is_enabled FROM events WHERE event_id = ?1",
-        params![event_id],
-        |row| {
-           Ok(json!({
-               "event_name": row.get::<_, String>(0)?,
-               "description": row.get::<_, Option<String>>(1)?,
-               "schedule_type": row.get::<_, String>(2)?,
-               "event_date": row.get::<_, Option<String>>(3)?,
-               "start_date": row.get::<_, Option<String>>(4)?,
-               "end_date": row.get::<_, Option<String>>(5)?,
-               "start_time": row.get::<_, String>(6)?,
-               "end_time": row.get::<_, String>(7)?,
-               "required_role": row.get::<_, String>(8)?,
-               "required_programs": row.get::<_, Option<String>>(9)?,
-               "required_year_levels": row.get::<_, Option<String>>(10)?,
-               "is_enabled": row.get::<_, i32>(11)? == 1
-           }))
-        }
-    ).ok();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    let is_enabled = if event.is_enabled { 1 } else { 0 };
-
-    conn.execute(
-        "UPDATE events SET event_name = ?1, description = ?2, schedule_type = ?3, event_date = ?4, start_date = ?5, end_date = ?6, start_time = ?7, end_time = ?8, required_role = ?9, required_programs = ?10, required_year_levels = ?11, is_enabled = ?12 WHERE event_id = ?13",
+    tx.execute(
+        "UPDATE events SET event_name = ?1, description = ?2, is_enabled = ?3 WHERE event_id = ?4",
         params![
-            event.event_name,
-            event.description,
-            event.schedule_type,
-            event.event_date,
-            event.start_date,
-            event.end_date,
-            event.start_time,
-            event.end_time,
-            event.required_role,
-            event.required_programs,
-            event.required_year_levels,
-            is_enabled,
+            event_details.event.event_name,
+            event_details.event.description,
+            event_details.event.is_enabled,
             event_id
         ],
     ).map_err(|e| e.to_string())?;
 
-    let new_data = json!({
-        "event_name": event.event_name,
-        "description": event.description,
-        "schedule_type": event.schedule_type,
-        "event_date": event.event_date,
-        "start_date": event.start_date,
-        "end_date": event.end_date,
-        "start_time": event.start_time,
-        "end_time": event.end_time,
-        "required_role": event.required_role,
-        "required_programs": event.required_programs,
-        "required_year_levels": event.required_year_levels,
-        "is_enabled": event.is_enabled
+    // Update schedules (replace)
+    tx.execute("DELETE FROM event_weekly WHERE event_id = ?1", params![event_id]).map_err(|e| e.to_string())?;
+    for s in &event_details.weekly_schedules {
+        tx.execute(
+            "INSERT INTO event_weekly (event_id, day_of_week, start_time, end_time) VALUES (?1, ?2, ?3, ?4)",
+            params![event_id, s.day_of_week, s.start_time, s.end_time],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    tx.execute("DELETE FROM event_date_range WHERE event_id = ?1", params![event_id]).map_err(|e| e.to_string())?;
+    for s in &event_details.date_range_schedules {
+        tx.execute(
+            "INSERT INTO event_date_range (event_id, start_date, end_date, start_time, end_time) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![event_id, s.start_date, s.end_date, s.start_time, s.end_time],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    // Update roles
+    tx.execute("DELETE FROM event_required_roles WHERE event_id = ?1", params![event_id]).map_err(|e| e.to_string())?;
+    for role in &event_details.required_roles {
+        tx.execute(
+            "INSERT INTO event_required_roles (event_id, role_id) VALUES (?1, ?2)",
+            params![event_id, role.role_id],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+
+    let mut old_val_json = json!({});
+    let mut new_val_json = json!({
+        "event_name": event_details.event.event_name,
+        "description": event_details.event.description,
+        "is_enabled": event_details.event.is_enabled,
     });
+
+    if let Some(old) = old_event_details {
+        old_val_json = json!({
+            "event_name": old.event.event_name,
+            "description": old.event.description,
+            "is_enabled": old.event.is_enabled,
+        });
+        if !old.weekly_schedules.is_empty() {
+            old_val_json["day_of_week"] = json!(old.weekly_schedules.iter().map(|s| s.day_of_week.clone()).collect::<Vec<_>>().join(", "));
+            old_val_json["start_time"] = json!(old.weekly_schedules[0].start_time);
+            old_val_json["end_time"] = json!(old.weekly_schedules[0].end_time);
+        } else if !old.date_range_schedules.is_empty() {
+            old_val_json["start_date"] = json!(old.date_range_schedules[0].start_date);
+            old_val_json["end_date"] = json!(old.date_range_schedules[0].end_date);
+            old_val_json["start_time"] = json!(old.date_range_schedules[0].start_time);
+            old_val_json["end_time"] = json!(old.date_range_schedules[0].end_time);
+        }
+    }
+
+    if !event_details.weekly_schedules.is_empty() {
+        new_val_json["day_of_week"] = json!(event_details.weekly_schedules.iter().map(|s| s.day_of_week.clone()).collect::<Vec<_>>().join(", "));
+        new_val_json["start_time"] = json!(event_details.weekly_schedules[0].start_time);
+        new_val_json["end_time"] = json!(event_details.weekly_schedules[0].end_time);
+    } else if !event_details.date_range_schedules.is_empty() {
+        new_val_json["start_date"] = json!(event_details.date_range_schedules[0].start_date);
+        new_val_json["end_date"] = json!(event_details.date_range_schedules[0].end_date);
+        new_val_json["start_time"] = json!(event_details.date_range_schedules[0].start_time);
+        new_val_json["end_time"] = json!(event_details.date_range_schedules[0].end_time);
+    }
 
     let _ = log_audit_action(
         pool,
         active_admin_id,
         "UPDATE",
-        "events",
+        "Event",
         event_id,
-        old_data.map(|v| v.to_string()),
-        Some(new_data.to_string()),
+        &event_details.event.event_name,
+        Some(old_val_json),
+        Some(new_val_json),
     );
 
     Ok(())
@@ -2227,26 +2495,28 @@ pub fn update_event(pool: &DbPool, event_id: i64, event: Event, active_admin_id:
 pub fn delete_event(pool: &DbPool, event_id: i64, active_admin_id: i64) -> Result<(), String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let old_data: Option<serde_json::Value> = conn.query_row(
-        "SELECT event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, required_programs, required_year_levels, is_enabled FROM events WHERE event_id = ?1",
-        params![event_id],
-        |row| {
-           Ok(json!({
-               "event_name": row.get::<_, String>(0)?,
-               "description": row.get::<_, Option<String>>(1)?,
-               "schedule_type": row.get::<_, String>(2)?,
-               "event_date": row.get::<_, Option<String>>(3)?,
-               "start_date": row.get::<_, Option<String>>(4)?,
-               "end_date": row.get::<_, Option<String>>(5)?,
-               "start_time": row.get::<_, String>(6)?,
-               "end_time": row.get::<_, String>(7)?,
-               "required_role": row.get::<_, String>(8)?,
-               "required_programs": row.get::<_, Option<String>>(9)?,
-               "required_year_levels": row.get::<_, Option<String>>(10)?,
-               "is_enabled": row.get::<_, i32>(11)? == 1
-           }))
+    let old_event_details = get_event_details_helper(&conn, event_id).ok();
+    let mut old_data_json = json!({});
+    
+    if let Some(old) = &old_event_details {
+        old_data_json = json!({
+            "event_name": old.event.event_name,
+            "description": old.event.description,
+            "is_enabled": old.event.is_enabled,
+        });
+        if !old.weekly_schedules.is_empty() {
+            old_data_json["day_of_week"] = json!(old.weekly_schedules.iter().map(|s| s.day_of_week.clone()).collect::<Vec<_>>().join(", "));
+            old_data_json["start_time"] = json!(old.weekly_schedules[0].start_time);
+            old_data_json["end_time"] = json!(old.weekly_schedules[0].end_time);
+        } else if !old.date_range_schedules.is_empty() {
+            old_data_json["start_date"] = json!(old.date_range_schedules[0].start_date);
+            old_data_json["end_date"] = json!(old.date_range_schedules[0].end_date);
+            old_data_json["start_time"] = json!(old.date_range_schedules[0].start_time);
+            old_data_json["end_time"] = json!(old.date_range_schedules[0].end_time);
         }
-    ).ok();
+    }
+    
+    let old_data = if old_event_details.is_some() { Some(old_data_json) } else { None };
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     conn.execute(
         "UPDATE events SET is_archived = 1, archived_at = ?1 WHERE event_id = ?2",
@@ -2254,14 +2524,16 @@ pub fn delete_event(pool: &DbPool, event_id: i64, active_admin_id: i64) -> Resul
     )
     .map_err(|e| e.to_string())?;
 
+    let label = old_data.as_ref().and_then(|v| v.get("event_name")).and_then(|v| v.as_str()).unwrap_or("Unknown Event").to_string();
     let _ = log_audit_action(
         pool,
         active_admin_id,
-        "DELETE",
-        "events",
+        "ARCHIVE",
+        "Event",
         event_id,
-        old_data.map(|v| v.to_string()),
-        Some(json!({ "action": "archived" }).to_string()),
+        &label,
+        old_data,
+        None,
     );
 
     Ok(())
@@ -2273,139 +2545,103 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     // 1. Check if person exists and is active
-    let mut stmt = conn.prepare("SELECT first_name, last_name, role, is_active, DATE(created_at) == DATE('now', 'localtime') as is_created_today FROM persons WHERE person_id = ?1")
+    let mut stmt = conn.prepare("SELECT first_name, last_name, is_active, DATE(created_at) == DATE('now', 'localtime') as is_created_today FROM persons WHERE person_id = ?1")
         .map_err(|e| e.to_string())?;
 
-    let mut person_iter = stmt
-        .query_map(params![person_id], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i32>(3)? == 1,
-                row.get::<_, i32>(4)? == 1,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
+    let person_data = stmt.query_row(params![person_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, bool>(2)?,
+            row.get::<_, bool>(3)?,
+        ))
+    }).optional().map_err(|e| e.to_string())?;
 
-    let person_data = person_iter.next();
-
-    if let Some(Ok((first_name, last_name, role, is_active, is_created_today))) = person_data {
+    if let Some((first_name, last_name, is_active, is_created_today)) = person_data {
+        let roles = get_person_roles(&conn, person_id)?;
+        
         if !is_active {
             return Ok(ScanResult {
                 success: false,
                 message: "Access Denied: ID is inactive.".to_string(),
                 person_name: Some(format!("{} {}", first_name, last_name)),
-                role: Some(role),
+                roles: Some(roles),
             });
         }
 
-        // 2a. Check previous log to validate Entry/Exit sequence
-        // We need to know what kind of scanner this is (Entrance or Exit)
-        let scanner_function: String = conn
-            .query_row(
-                "SELECT function FROM scanners WHERE scanner_id = ?1",
-                params![scanner_id],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
+        // 2. Check scanner function
+        let scanner: Scanner = conn.query_row(
+            "SELECT scanner_id, location_name, function FROM scanners WHERE scanner_id = ?1",
+            params![scanner_id],
+            |row| Ok(Scanner {
+                scanner_id: row.get(0)?,
+                location_name: row.get(1)?,
+                function: row.get(2)?,
+            })
+        ).map_err(|e| e.to_string())?;
 
-        // Get the latest log for this person
-        let last_log_function: Option<String> = conn
-            .query_row(
-                "SELECT s.function FROM entry_logs e 
-             JOIN scanners s ON e.scanner_id = s.scanner_id 
-             WHERE e.person_id = ?1 
-             ORDER BY e.scanned_at DESC LIMIT 1",
-                params![person_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|e| e.to_string())?;
+        // 3. Logic check based on activity_logs
+        let last_log: Option<String> = conn.query_row(
+            "SELECT activity_type FROM activity_logs WHERE person_id = ?1 AND activity_type IN ('entrance', 'exit') ORDER BY scanned_at DESC LIMIT 1",
+            params![person_id],
+            |row| row.get(0)
+        ).optional().map_err(|e| e.to_string())?;
 
-        // Logic Re-Check
-        if scanner_function == "exit" {
-            // Can only exit if the last log was 'entrance'.
-            // If no logs (None) or last was 'exit', deny.
-            match last_log_function.as_deref() {
-                Some("entrance") => {
-                    // Valid exit
-                }
-                _ => {
-                    return Ok(ScanResult {
-                        success: false,
-                        message: "No entry record found for this ID".to_string(),
-                        person_name: Some(format!("{} {}", first_name, last_name)),
-                        role: Some(role),
-                    });
-                }
-            }
-        } else if scanner_function == "entrance" {
-            // Visitor Expiration Check
-            if role == "visitor" && !is_created_today {
-                let _ = conn.execute(
-                    "UPDATE persons SET is_active = 0 WHERE person_id = ?1",
-                    params![person_id],
-                );
+        if scanner.function == "exit" {
+            if last_log.as_deref() != Some("entrance") {
                 return Ok(ScanResult {
-                     success: false,
-                     message: "Access Denied: This Visitor Pass expired at 11:59 PM yesterday. Please re-register.".to_string(),
-                     person_name: Some(format!("{} {}", first_name, last_name)),
-                     role: Some(role),
-                 });
+                    success: false,
+                    message: "No entry record found for this ID".to_string(),
+                    person_name: Some(format!("{} {}", first_name, last_name)),
+                    roles: Some(roles),
+                });
+            }
+        } else if scanner.function == "entrance" {
+            // Visitor expiration
+            if roles.iter().any(|r| r == "visitor") && !is_created_today {
+                let _ = conn.execute("UPDATE persons SET is_active = 0 WHERE person_id = ?1", params![person_id]);
+                return Ok(ScanResult {
+                    success: false,
+                    message: "Access Denied: This Visitor Pass expired at 11:59 PM yesterday. Please re-register.".to_string(),
+                    person_name: Some(format!("{} {}", first_name, last_name)),
+                    roles: Some(roles),
+                });
             }
 
-            // Prevent double entry
-            match last_log_function.as_deref() {
-                Some("entrance") => {
-                    return Ok(ScanResult {
-                        success: false,
-                        message: "User is already on campus".to_string(),
-                        person_name: Some(format!("{} {}", first_name, last_name)),
-                        role: Some(role),
-                    });
-                }
-                _ => {
-                    // Valid entrance
-                }
+            if last_log.as_deref() == Some("entrance") {
+                return Ok(ScanResult {
+                    success: false,
+                    message: "User is already on campus".to_string(),
+                    person_name: Some(format!("{} {}", first_name, last_name)),
+                    roles: Some(roles),
+                });
             }
         }
 
-        // 2b. Insert into entry_logs
+        // 4. Log the activity
         let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         conn.execute(
-            "INSERT INTO entry_logs (person_id, scanner_id, scanned_at) VALUES (?1, ?2, ?3)",
-            params![person_id, scanner_id, now],
-        )
-        .map_err(|e| e.to_string())?;
+            "INSERT INTO activity_logs (person_id, scanner_id, activity_type, scanned_at) VALUES (?1, ?2, ?3, ?4)",
+            params![person_id, scanner_id, scanner.function, now],
+        ).map_err(|e| e.to_string())?;
 
-        // 2c. Visitor Exit Destruction
-        if scanner_function == "exit" && role == "visitor" {
-            let _ = conn.execute(
-                "UPDATE persons SET is_active = 0 WHERE person_id = ?1",
-                params![person_id],
-            );
+        // 5. Visitor auto-deactivation on exit
+        if scanner.function == "exit" && roles.iter().any(|r| r == "visitor") {
+            let _ = conn.execute("UPDATE persons SET is_active = 0 WHERE person_id = ?1", params![person_id]);
         }
 
         Ok(ScanResult {
             success: true,
-            message: format!(
-                "{} Successful.",
-                if scanner_function == "entrance" {
-                    "Entry"
-                } else {
-                    "Exit"
-                }
-            ),
+            message: format!("{} Successful.", if scanner.function == "entrance" { "Entry" } else { "Exit" }),
             person_name: Some(format!("{} {}", first_name, last_name)),
-            role: Some(role),
+            roles: Some(roles),
         })
     } else {
         Ok(ScanResult {
             success: false,
             message: "Access Denied: ID not found.".to_string(),
             person_name: None,
-            role: None,
+            roles: None,
         })
     }
 }
@@ -2427,132 +2663,103 @@ pub fn manual_id_entry(
 ) -> Result<ScanResult, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT person_id, first_name, last_name, role, is_active, DATE(created_at) == DATE('now', 'localtime') as is_created_today FROM persons WHERE id_number = ?1")
+    let mut stmt = conn.prepare("SELECT person_id, first_name, last_name, is_active, DATE(created_at) == DATE('now', 'localtime') as is_created_today FROM persons WHERE id_number = ?1")
         .map_err(|e| e.to_string())?;
 
-    let mut person_iter = stmt
-        .query_map(params![id_number], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, i32>(4)? == 1,
-                row.get::<_, i32>(5)? == 1,
-            ))
-        })
-        .map_err(|e| e.to_string())?;
+    let person_data = stmt.query_row(params![id_number], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, bool>(3)?,
+            row.get::<_, bool>(4)?,
+        ))
+    }).optional().map_err(|e| e.to_string())?;
 
-    let person_data = person_iter.next();
+    if let Some((person_id, first_name, last_name, is_active, is_created_today)) = person_data {
+        let roles = get_person_roles(&conn, person_id)?;
 
-    if let Some(Ok((person_id, first_name, last_name, role, is_active, is_created_today))) =
-        person_data
-    {
         if !is_active {
             return Ok(ScanResult {
                 success: false,
                 message: "Access Denied: ID is inactive.".to_string(),
                 person_name: Some(format!("{} {}", first_name, last_name)),
-                role: Some(role),
+                roles: Some(roles),
             });
         }
 
         // Find an appropriate scanner ID for logging (mocking based on function)
-        let scanner_id: i64 = conn
-            .query_row(
-                "SELECT scanner_id FROM scanners WHERE function = ?1 LIMIT 1",
-                params![scanner_function],
-                |row| row.get(0),
-            )
-            .unwrap_or(1); // Default to 1 if none found
+        let scanner: Scanner = conn.query_row(
+            "SELECT scanner_id, location_name, function FROM scanners WHERE function = ?1 LIMIT 1",
+            params![scanner_function],
+            |row| Ok(Scanner {
+                scanner_id: row.get(0)?,
+                location_name: row.get(1)?,
+                function: row.get(2)?,
+            })
+        ).unwrap_or(Scanner { scanner_id: 1, location_name: "Manual".to_string(), function: scanner_function.to_string() });
 
-        // Validation Logic for Manual Entry
-        let last_log_function: Option<String> = conn
-            .query_row(
-                "SELECT s.function FROM entry_logs e 
-             JOIN scanners s ON e.scanner_id = s.scanner_id 
-             WHERE e.person_id = ?1 
-             ORDER BY e.scanned_at DESC LIMIT 1",
-                params![person_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|e| e.to_string())?;
+        // Logic Check
+        let last_log: Option<String> = conn.query_row(
+            "SELECT activity_type FROM activity_logs WHERE person_id = ?1 AND activity_type IN ('entrance', 'exit') ORDER BY scanned_at DESC LIMIT 1",
+            params![person_id],
+            |row| row.get(0)
+        ).optional().map_err(|e| e.to_string())?;
 
-        if scanner_function == "exit" {
-            match last_log_function.as_deref() {
-                Some("entrance") => { /* Valid */ }
-                _ => {
-                    return Ok(ScanResult {
-                        success: false,
-                        message: "No entry record found for this ID".to_string(),
-                        person_name: Some(format!("{} {}", first_name, last_name)),
-                        role: Some(role),
-                    });
-                }
-            }
-        } else if scanner_function == "entrance" {
-            // Visitor Expiration Check
-            if role == "visitor" && !is_created_today {
-                let _ = conn.execute(
-                    "UPDATE persons SET is_active = 0 WHERE person_id = ?1",
-                    params![person_id],
-                );
+        if scanner.function == "exit" {
+            if last_log.as_deref() != Some("entrance") {
                 return Ok(ScanResult {
-                     success: false,
-                     message: "Access Denied: This Visitor Pass expired at 11:59 PM yesterday. Please re-register.".to_string(),
-                     person_name: Some(format!("{} {}", first_name, last_name)),
-                     role: Some(role),
-                 });
+                    success: false,
+                    message: "No entry record found for this ID".to_string(),
+                    person_name: Some(format!("{} {}", first_name, last_name)),
+                    roles: Some(roles),
+                });
+            }
+        } else if scanner.function == "entrance" {
+            // Visitor expiration
+            if roles.iter().any(|r| r == "visitor") && !is_created_today {
+                let _ = conn.execute("UPDATE persons SET is_active = 0 WHERE person_id = ?1", params![person_id]);
+                return Ok(ScanResult {
+                    success: false,
+                    message: "Access Denied: This Visitor Pass expired at 11:59 PM yesterday. Please re-register.".to_string(),
+                    person_name: Some(format!("{} {}", first_name, last_name)),
+                    roles: Some(roles),
+                });
             }
 
-            match last_log_function.as_deref() {
-                Some("entrance") => {
-                    return Ok(ScanResult {
-                        success: false,
-                        message: "User is already on campus".to_string(),
-                        person_name: Some(format!("{} {}", first_name, last_name)),
-                        role: Some(role),
-                    });
-                }
-                _ => { /* Valid */ }
+            if last_log.as_deref() == Some("entrance") {
+                return Ok(ScanResult {
+                    success: false,
+                    message: "User is already on campus".to_string(),
+                    person_name: Some(format!("{} {}", first_name, last_name)),
+                    roles: Some(roles),
+                });
             }
         }
 
         let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         conn.execute(
-            "INSERT INTO entry_logs (person_id, scanner_id, scanned_at) VALUES (?1, ?2, ?3)",
-            params![person_id, scanner_id, now],
-        )
-        .map_err(|e| e.to_string())?;
+            "INSERT INTO activity_logs (person_id, scanner_id, activity_type, scanned_at) VALUES (?1, ?2, ?3, ?4)",
+            params![person_id, scanner.scanner_id, scanner.function, now],
+        ).map_err(|e| e.to_string())?;
 
-        // Visitor Exit Destruction
-        if scanner_function == "exit" && role == "visitor" {
-            let _ = conn.execute(
-                "UPDATE persons SET is_active = 0 WHERE person_id = ?1",
-                params![person_id],
-            );
+        // Visitor destruction on exit
+        if scanner.function == "exit" && roles.iter().any(|r| r == "visitor") {
+            let _ = conn.execute("UPDATE persons SET is_active = 0 WHERE person_id = ?1", params![person_id]);
         }
 
         Ok(ScanResult {
             success: true,
-            message: format!(
-                "Manual {} Successful.",
-                if scanner_function == "entrance" {
-                    "Entry"
-                } else {
-                    "Exit"
-                }
-            ),
+            message: format!("Manual {} Successful.", if scanner.function == "entrance" { "Entry" } else { "Exit" }),
             person_name: Some(format!("{} {}", first_name, last_name)),
-            role: Some(role),
+            roles: Some(roles),
         })
     } else {
         Ok(ScanResult {
             success: false,
             message: "Access Denied: Record not found in database.".to_string(),
             person_name: None,
-            role: None,
+            roles: None,
         })
     }
 }
@@ -2563,85 +2770,172 @@ pub fn get_scan_person_details(
 ) -> Result<Option<ScanPersonDetails>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    conn.query_row(
-        "
-        SELECT
-            p.person_id,
-            p.role,
-            p.id_number,
-            p.first_name,
-            p.middle_name,
-            p.last_name,
-            COALESCE(emp_dept.department_name, stu_dept.department_name) AS department_name,
-            prog.program_name,
-            stu.year_level
-        FROM persons p
-        LEFT JOIN students stu ON p.person_id = stu.person_id
-        LEFT JOIN programs prog ON stu.program_id = prog.program_id
-        LEFT JOIN departments stu_dept ON prog.department_id = stu_dept.department_id
-        LEFT JOIN employees emp ON p.person_id = emp.person_id
-        LEFT JOIN departments emp_dept ON emp.department_id = emp_dept.department_id
-        WHERE p.id_number = ?1
-        LIMIT 1
-        ",
+    let person_basic = conn.query_row(
+        "SELECT person_id, id_number, first_name, middle_name, last_name FROM persons WHERE id_number = ?1",
         params![id_number],
-        |row| {
-            Ok(ScanPersonDetails {
-                person_id: row.get(0)?,
-                role: row.get(1)?,
-                id_number: row.get(2)?,
-                first_name: row.get(3)?,
-                middle_name: row.get(4)?,
-                last_name: row.get(5)?,
-                department_name: row.get(6)?,
-                program_name: row.get(7)?,
-                year_level: row.get(8)?,
-            })
-        },
-    )
-    .optional()
-    .map_err(|e| e.to_string())
+        |row| Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, String>(4)?,
+        ))
+    ).optional().map_err(|e| e.to_string())?;
+
+    if let Some((person_id, id_num, first, middle, last)) = person_basic {
+        let roles = get_person_roles(&conn, person_id)?;
+        
+        let mut dept_name = None;
+        let mut prog_name = None;
+        let mut y_lvl = None;
+
+        if roles.iter().any(|r| r == "student") {
+            let stu_info: Option<(String, Option<i64>)> = conn.query_row(
+                "SELECT p.program_name, s.year_level FROM students s JOIN programs p ON s.program_id = p.program_id WHERE s.person_id = ?1",
+                params![person_id],
+                |row| Ok((row.get(0)?, row.get(1)?))
+            ).optional().map_err(|e| e.to_string())?;
+            if let Some((p, y)) = stu_info {
+                prog_name = Some(p);
+                y_lvl = y;
+            }
+        }
+
+        if roles.iter().any(|r| r == "professor" || r == "staff") {
+            dept_name = conn.query_row(
+                "SELECT d.department_name FROM employees e JOIN departments d ON e.department_id = d.department_id WHERE e.person_id = ?1",
+                params![person_id],
+                |row| row.get(0)
+            ).optional().map_err(|e| e.to_string())?;
+        }
+
+        Ok(Some(ScanPersonDetails {
+            person_id,
+            roles,
+            id_number: id_num,
+            first_name: first,
+            middle_name: middle,
+            last_name: last,
+            department_name: dept_name,
+            program_name: prog_name,
+            year_level: y_lvl,
+        }))
+    } else {
+        Ok(None)
+    }
 }
 
 pub fn log_audit_action(
     pool: &DbPool,
     admin_id: i64,
     action_type: &str,
-    target_table: &str,
-    target_id: i64,
-    old_values: Option<String>,
-    new_values: Option<String>,
+    entity_type: &str,
+    entity_id: i64,
+    entity_label: &str,
+    old_values: Option<serde_json::Value>,
+    new_values: Option<serde_json::Value>,
 ) -> Result<(), String> {
-    if action_type == "UPDATE" {
-        if let (Some(old_str), Some(new_str)) = (&old_values, &new_values) {
-            if let (Ok(old_val), Ok(new_val)) = (
-                serde_json::from_str::<serde_json::Value>(old_str),
-                serde_json::from_str::<serde_json::Value>(new_str),
-            ) {
-                if let (Some(old_obj), Some(new_obj)) = (old_val.as_object(), new_val.as_object()) {
-                    let mut has_changes = false;
-                    for (k, v) in new_obj.iter() {
-                        if old_obj.get(k) != Some(v) {
-                            has_changes = true;
-                            break;
+    // Normalize action type (legacy INSERT -> CREATE)
+    let action = match action_type {
+        "INSERT" => "CREATE",
+        _ => action_type,
+    };
+
+    let mut conn = pool.get().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
+    tx.execute(
+        "INSERT INTO audit_events (action_type, entity_type, entity_id, entity_label, performed_by, created_at) 
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![action, entity_type, entity_id, entity_label, admin_id, now],
+    ).map_err(|e| e.to_string())?;
+
+    let event_id = tx.last_insert_rowid();
+
+    match action {
+        "CREATE" | "BULK_ACTION" => {
+            if let Some(new_val) = new_values {
+                if let Some(obj) = new_val.as_object() {
+                    for (field, val) in obj {
+                        let val_str = if val.is_string() {
+                            val.as_str().unwrap().to_string()
+                        } else {
+                            val.to_string()
+                        };
+                        
+                        if val_str != "null" && !val_str.trim().is_empty() {
+                            tx.execute(
+                                "INSERT INTO audit_changes (event_id, field_name, old_value, new_value) VALUES (?1, ?2, ?3, ?4)",
+                                params![event_id, field, None::<String>, val_str],
+                            ).map_err(|e| e.to_string())?;
                         }
-                    }
-                    if !has_changes {
-                        return Ok(()); // Skip logging empty changes
                     }
                 }
             }
-        }
+        },
+        "UPDATE" | "RESTORE" => {
+            let mut changes_made = false;
+            if let Some(new_val) = new_values.as_ref() {
+                if let Some(new_obj) = new_val.as_object() {
+                    let empty_obj = serde_json::Map::new();
+                    let old_obj = old_values.as_ref().and_then(|v| v.as_object()).unwrap_or(&empty_obj);
+                    
+                    for (field, new_v) in new_obj {
+                        let old_v = old_obj.get(field).unwrap_or(&serde_json::Value::Null);
+                        if old_v != new_v {
+                            let old_v_str = if old_v.is_string() {
+                                old_v.as_str().unwrap().to_string()
+                            } else {
+                                old_v.to_string()
+                            };
+                            let new_v_str = if new_v.is_string() {
+                                new_v.as_str().unwrap().to_string()
+                            } else {
+                                new_v.to_string()
+                            };
+                            
+                            tx.execute(
+                                "INSERT INTO audit_changes (event_id, field_name, old_value, new_value) VALUES (?1, ?2, ?3, ?4)",
+                                params![event_id, field, old_v_str, new_v_str],
+                            ).map_err(|e| e.to_string())?;
+                            changes_made = true;
+                        }
+                    }
+                }
+            }
+            
+            // If no fields actually changed (and it's not a RESTORE which is an action itself), rollback
+            if !changes_made && action == "UPDATE" {
+                tx.rollback().map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+        },
+        "DELETE" | "ARCHIVE" => {
+            if let Some(old_val) = old_values {
+                if let Some(obj) = old_val.as_object() {
+                    for (field, val) in obj {
+                        let val_str = if val.is_string() {
+                            val.as_str().unwrap().to_string()
+                        } else {
+                            val.to_string()
+                        };
+                        
+                        if val_str != "null" && !val_str.trim().is_empty() {
+                            tx.execute(
+                                "INSERT INTO audit_changes (event_id, field_name, old_value, new_value) VALUES (?1, ?2, ?3, ?4)",
+                                params![event_id, field, val_str, None::<String>],
+                            ).map_err(|e| e.to_string())?;
+                        }
+                    }
+                }
+            }
+        },
+        _ => {}
     }
 
-    let conn = pool.get().map_err(|e| e.to_string())?;
-    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-
-    conn.execute(
-        "INSERT INTO audit_logs (admin_id, action_type, target_table, target_id, old_values, new_values, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![admin_id, action_type, target_table, target_id, old_values, new_values, now],
-    ).map_err(|e| e.to_string())?;
-
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -2649,79 +2943,75 @@ pub fn get_audit_logs(
     pool: &DbPool,
     start_date: Option<String>,
     end_date: Option<String>,
-) -> Result<Vec<AuditLogDetails>, String> {
+) -> Result<Vec<AuditEvent>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let mut base_query = "
-        SELECT a.audit_id, a.admin_id, acc.username, acc.full_name, a.action_type, a.target_table, a.target_id, a.old_values, a.new_values, a.created_at 
-        FROM audit_logs a
-        LEFT JOIN accounts acc ON a.admin_id = acc.account_id
+        SELECT e.event_id, e.action_type, e.entity_type, e.entity_id, e.entity_label, e.performed_by, acc.username, acc.full_name, e.created_at 
+        FROM audit_events e
+        LEFT JOIN accounts acc ON e.performed_by = acc.account_id
     ".to_string();
 
-    if start_date.is_some() && end_date.is_some() {
-        base_query.push_str(" WHERE DATE(a.created_at) BETWEEN DATE(?1) AND DATE(?2)");
-    } else if start_date.is_some() {
-        base_query.push_str(" WHERE DATE(a.created_at) >= DATE(?1)");
-    } else if end_date.is_some() {
-        base_query.push_str(" WHERE DATE(a.created_at) <= DATE(?1)");
+    let mut where_clauses = Vec::new();
+    let mut params_vec: Vec<String> = Vec::new();
+
+    if let Some(start) = start_date {
+        where_clauses.push("DATE(e.created_at) >= DATE(?)");
+        params_vec.push(start);
+    }
+    if let Some(end) = end_date {
+        where_clauses.push("DATE(e.created_at) <= DATE(?)");
+        params_vec.push(end);
     }
 
-    base_query.push_str(" ORDER BY a.created_at DESC");
+    if !where_clauses.is_empty() {
+        base_query.push_str(" WHERE ");
+        base_query.push_str(&where_clauses.join(" AND "));
+    }
+
+    base_query.push_str(" ORDER BY e.created_at DESC");
 
     let mut stmt = conn.prepare(&base_query).map_err(|e| e.to_string())?;
-
-    let mut logs = Vec::new();
-
-    let map_row = |row: &rusqlite::Row| -> rusqlite::Result<AuditLogDetails> {
-        Ok(AuditLogDetails {
-            audit_id: row.get(0)?,
-            admin_id: row.get(1)?,
-            admin_username: row
-                .get::<_, Option<String>>(2)?
-                .unwrap_or_else(|| "Unknown".to_string()),
-            admin_full_name: row
-                .get::<_, Option<String>>(3)?
-                .unwrap_or_else(|| "Unknown Administrator".to_string()),
-            action_type: row.get(4)?,
-            target_table: row.get(5)?,
-            target_id: row.get(6)?,
-            old_values: row.get(7)?,
-            new_values: row.get(8)?,
-            created_at: row.get(9)?,
+    
+    let mut events = Vec::new();
+    let rows = stmt.query_map(rusqlite::params_from_iter(params_vec), |row| {
+        Ok(AuditEvent {
+            event_id: row.get(0)?,
+            action_type: row.get(1)?,
+            entity_type: row.get(2)?,
+            entity_id: row.get(3)?,
+            entity_label: row.get(4)?,
+            performed_by: row.get(5)?,
+            admin_username: row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "Unknown".to_string()),
+            admin_full_name: row.get::<_, Option<String>>(7)?.unwrap_or_else(|| "Unknown Administrator".to_string()),
+            created_at: row.get(8)?,
+            changes: Vec::new(),
         })
-    };
+    }).map_err(|e| e.to_string())?;
 
-    if let (Some(start), Some(end)) = (&start_date, &end_date) {
-        let iter = stmt
-            .query_map(params![start, end], map_row)
+    for event_res in rows {
+        let mut event = event_res.map_err(|e| e.to_string())?;
+        
+        let mut change_stmt = conn.prepare("SELECT change_id, event_id, field_name, old_value, new_value FROM audit_changes WHERE event_id = ?1")
             .map_err(|e| e.to_string())?;
-        for log in iter {
-            if let Ok(l) = log {
-                logs.push(l);
-            }
-        }
-    } else if let Some(date) = start_date.or(end_date) {
-        let iter = stmt
-            .query_map(params![date], map_row)
-            .map_err(|e| e.to_string())?;
-        for log in iter {
-            if let Ok(l) = log {
-                logs.push(l);
-            }
-        }
-    } else {
-        let iter = stmt
-            .query_map([], map_row)
-            .map_err(|e| e.to_string())?;
-        for log in iter {
-            if let Ok(l) = log {
-                logs.push(l);
-            }
-        }
+        
+        let changes = change_stmt.query_map([event.event_id], |row| {
+            Ok(AuditChange {
+                change_id: row.get(0)?,
+                event_id: row.get(1)?,
+                field_name: row.get(2)?,
+                old_value: row.get(3)?,
+                new_value: row.get(4)?,
+            })
+        }).map_err(|e| e.to_string())?
+        .collect::<Result<Vec<AuditChange>, _>>()
+        .map_err(|e| e.to_string())?;
+        
+        event.changes = changes;
+        events.push(event);
     }
 
-    Ok(logs)
-
+    Ok(events)
 }
 
 // ------ Admin Dashboard & Auth ------
@@ -2813,25 +3103,21 @@ pub fn update_admin_credentials(
             )
             .map_err(|e| e.to_string())?;
 
-            conn.execute(
-                "INSERT INTO audit_logs (admin_id, action_type, target_table, target_id, old_values, new_values)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    account_id,
-                    "UPDATE",
-                    "accounts",
-                    account_id,
-                    None::<String>,
-                    Some(
-                        json!({
-                            "summary": format!("Password changed for account: {}.", username),
-                            "password_hash": "(updated)"
-                        })
-                        .to_string()
-                    )
-                ],
-            )
-            .map_err(|e| e.to_string())?;
+            let _ = log_audit_action(
+                pool,
+                account_id,
+                "UPDATE",
+                "Security",
+                account_id,
+                "Administrator Password",
+                Some(json!({ "password_hash": "(old)" })),
+                Some(
+                    json!({
+                        "summary": "Password Updated",
+                        "password_hash": "(updated)"
+                    })
+                ),
+            );
             return Ok(true);
         }
     }
@@ -2914,17 +3200,17 @@ pub fn add_admin_account(
     let _ = log_audit_action(
         pool, 
         active_admin_id, 
-        "INSERT", 
-        "accounts", 
+        "CREATE", 
+        "Account", 
         target_id, 
+        full_name,
         None, 
         Some(json!({
-            "summary": format!("Created Administrator account for {}.", full_name),
             "username": username,
             "full_name": full_name,
             "email": email,
             "role": role
-        }).to_string())
+        }))
     );
     Ok(target_id)
 }
@@ -2953,13 +3239,13 @@ pub fn update_admin_role(
         pool, 
         active_admin_id, 
         "UPDATE", 
-        "accounts", 
+        "Account", 
         account_id, 
-        Some(json!({"role": old_role}).to_string()), 
+        &account_name,
+        Some(json!({"role": old_role})), 
         Some(json!({
-            "summary": format!("Updated Role for Account: {}", account_name),
             "role": new_role
-        }).to_string())
+        }))
     );
     Ok(())
 }
@@ -2994,15 +3280,15 @@ pub fn reset_admin_password(
         pool, 
         active_admin_id, 
         "UPDATE", 
-        "accounts", 
+        "Account", 
         account_id, 
-        Some(json!({"password_hash": "(old)"}).to_string()), 
+        &account_name,
+        Some(json!({"password_hash": "(old)"})), 
         Some(
             json!({
                 "summary": format!("Password reset for account: {}.", account_name),
                 "password_hash": "(new)"
             })
-            .to_string()
         )
     );
     Ok(())
@@ -3056,19 +3342,19 @@ pub fn update_admin_info(
         pool, 
         active_admin_id, 
         "UPDATE", 
-        "accounts", 
+        "Account", 
         account_id, 
+        full_name,
         Some(json!({
             "username": old_username,
             "full_name": old_full_name,
             "email": old_email
-        }).to_string()), 
+        })), 
         Some(json!({
-            "summary": format!("Updated information for Account: {}", full_name),
             "username": username,
             "full_name": full_name,
             "email": email
-        }).to_string())
+        }))
     );
     Ok(())
 }
@@ -3130,10 +3416,10 @@ pub fn delete_admin_account(
         |row| Ok((row.get(0)?, row.get(1)?))
     ).unwrap_or_else(|_| ("Unknown".to_string(), "Unknown".to_string()));
 
-    // Reassign audit_logs that reference the to-be-deleted account to the
+    // Reassign audit_events that reference the to-be-deleted account to the
     // active admin, so the FK constraint is satisfied without losing history.
     conn.execute(
-        "UPDATE audit_logs SET admin_id = ?1 WHERE admin_id = ?2",
+        "UPDATE audit_events SET performed_by = ?1 WHERE performed_by = ?2",
         params![active_admin_id, account_id],
     )
     .map_err(|e| format!("Failed to reassign audit logs: {}", e))?;
@@ -3148,12 +3434,13 @@ pub fn delete_admin_account(
         pool, 
         active_admin_id, 
         "DELETE", 
-        "accounts", 
+        "Account", 
         account_id, 
+        &deleted_full_name,
         Some(json!({
-            "summary": format!("Deleted Administrator account for {}.", deleted_full_name),
-            "username": deleted_username
-        }).to_string()), 
+            "username": deleted_username,
+            "full_name": deleted_full_name
+        })), 
         None
     );
     Ok(())
@@ -3337,7 +3624,10 @@ pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
 
     let total_students: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM persons WHERE role = 'student' AND is_archived = 0",
+            "SELECT COUNT(*) FROM persons p 
+             JOIN person_roles pr ON p.person_id = pr.person_id 
+             JOIN roles r ON pr.role_id = r.role_id 
+             WHERE r.role_name = 'student' AND p.is_archived = 0",
             [],
             |row| row.get(0),
         )
@@ -3345,7 +3635,10 @@ pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
 
     let total_employees: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM persons WHERE role IN ('professor', 'staff') AND is_archived = 0",
+            "SELECT COUNT(*) FROM persons p 
+             JOIN person_roles pr ON p.person_id = pr.person_id 
+             JOIN roles r ON pr.role_id = r.role_id 
+             WHERE r.role_name IN ('professor', 'staff', 'dean') AND p.is_archived = 0",
             [],
             |row| row.get(0),
         )
@@ -3353,32 +3646,36 @@ pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
 
     let total_visitors: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM persons WHERE role = 'visitor' AND is_archived = 0",
+            "SELECT COUNT(*) FROM persons p 
+             JOIN person_roles pr ON p.person_id = pr.person_id 
+             JOIN roles r ON pr.role_id = r.role_id 
+             WHERE r.role_name = 'visitor' AND p.is_archived = 0",
             [],
             |row| row.get(0),
         )
         .unwrap_or(0);
 
     let entries_today: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM entry_logs e JOIN scanners s ON e.scanner_id = s.scanner_id WHERE s.function = 'entrance' AND DATE(e.scanned_at) = DATE('now', 'localtime')",
+        "SELECT COUNT(*) FROM activity_logs l JOIN scanners s ON l.scanner_id = s.scanner_id WHERE s.function = 'entrance' AND DATE(l.scanned_at) = DATE('now', 'localtime')",
         [], |row| row.get(0)
     ).unwrap_or(0);
 
     let exits_today: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM entry_logs e JOIN scanners s ON e.scanner_id = s.scanner_id WHERE s.function = 'exit' AND DATE(e.scanned_at) = DATE('now', 'localtime')",
+        "SELECT COUNT(*) FROM activity_logs l JOIN scanners s ON l.scanner_id = s.scanner_id WHERE s.function = 'exit' AND DATE(l.scanned_at) = DATE('now', 'localtime')",
         [], |row| row.get(0)
     ).unwrap_or(0);
 
     let mut trend_stmt = conn
         .prepare(
-            "SELECT DATE(e.scanned_at) AS scan_date, p.role, COUNT(DISTINCT e.person_id) AS total
-         FROM entry_logs e
-         JOIN persons p ON p.person_id = e.person_id
-         JOIN scanners s ON s.scanner_id = e.scanner_id
+            "SELECT DATE(l.scanned_at) AS scan_date, r.role_name, COUNT(DISTINCT l.person_id) AS total
+         FROM activity_logs l
+         JOIN person_roles pr ON pr.person_id = l.person_id
+         JOIN roles r ON r.role_id = pr.role_id
+         JOIN scanners s ON s.scanner_id = l.scanner_id
          WHERE s.function = 'entrance'
-           AND DATE(e.scanned_at) BETWEEN ?1 AND ?2
-         GROUP BY DATE(e.scanned_at), p.role
-         ORDER BY DATE(e.scanned_at) ASC",
+           AND DATE(l.scanned_at) BETWEEN ?1 AND ?2
+         GROUP BY DATE(l.scanned_at), r.role_name
+         ORDER BY DATE(l.scanned_at) ASC",
         )
         .map_err(|e| e.to_string())?;
 
@@ -3441,216 +3738,151 @@ pub fn log_event_attendance(
     pool: &DbPool,
     event_id: i64,
     id_number: &str,
+    scanner_id: i64,
 ) -> Result<ScanResult, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    // 1. Fetch Event and Validate Date/Time
-    let event: Event = conn.query_row(
-        "SELECT event_id, event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, is_enabled, required_programs, required_year_levels FROM events WHERE event_id = ?1",
-        params![event_id],
-        |row| {
-            Ok(Event {
-                event_id: row.get(0)?,
-                event_name: row.get(1)?,
-                description: row.get(2)?,
-                schedule_type: row.get(3)?,
-                event_date: row.get(4)?,
-                start_date: row.get(5)?,
-                end_date: row.get(6)?,
-                start_time: row.get(7)?,
-                end_time: row.get(8)?,
-                required_role: row.get(9)?,
-                is_enabled: row.get::<_, i32>(10)? == 1,
-                required_programs: row.get(11)?,
-                required_year_levels: row.get(12)?,
-            })
-        }
-    ).map_err(|_| "Event not found.")?;
+    // 1. Fetch Event Details
+    let event_details = get_events(pool)?
+        .into_iter()
+        .find(|e| e.event.event_id == event_id)
+        .ok_or("Event not found.")?;
 
-    if !event.is_enabled {
+    if !event_details.event.is_enabled {
         return Ok(ScanResult {
             success: false,
             message: "Attendance Closed: Event is not enabled.".to_string(),
             person_name: None,
-            role: None,
+            roles: None,
         });
     }
 
+    // 2. Check Schedule
     let now = chrono::Local::now();
-    let current_day = now.format("%A").to_string(); // e.g. "Monday"
-    let current_date = now.format("%Y-%m-%d").to_string(); // e.g. "2026-03-18"
-    let current_time = now.format("%H:%M").to_string(); // e.g. "14:53"
+    let current_day = now.format("%A").to_string();
+    let current_date = now.format("%Y-%m-%d").to_string();
+    let current_time = now.format("%H:%M:%S").to_string();
 
-    let is_valid_day = if event.schedule_type.as_deref().unwrap_or("weekly") == "date_range" {
-        let event_start = event.start_date.clone().unwrap_or_default();
-        let event_end = event.end_date.clone().unwrap_or_default();
-        current_date >= event_start && current_date <= event_end
-    } else {
-        let days: Vec<&str> = event.event_date.split(',').map(|s| s.trim()).collect();
-        let current_day_lower = current_day.to_lowercase();
-        let current_date_lower = current_date.to_lowercase();
+    let mut is_scheduled_today = false;
 
-        days.iter().any(|d| {
-            let d_lower = d.to_lowercase();
-            d_lower == current_date_lower
-                || d_lower == current_day_lower
-                || d_lower == format!("every {}", current_day_lower)
-                || d_lower == "everyday"
-        })
-    };
+    // Check Weekly
+    for sw in &event_details.weekly_schedules {
+        if sw.day_of_week.to_lowercase() == current_day.to_lowercase() {
+            if current_time >= sw.start_time && current_time <= sw.end_time {
+                is_scheduled_today = true;
+                break;
+            }
+        }
+    }
 
-    if !is_valid_day || current_time > event.end_time {
+    // Check Date Range (override if matches)
+    if !is_scheduled_today {
+        for sd in &event_details.date_range_schedules {
+            if current_date >= sd.start_date && current_date <= sd.end_date {
+                if current_time >= sd.start_time && current_time <= sd.end_time {
+                    is_scheduled_today = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if !is_scheduled_today {
         return Ok(ScanResult {
             success: false,
-            message: "Event has already ended or is not scheduled for today.".to_string(),
+            message: "Event is not scheduled for today or is currently outside active hours.".to_string(),
             person_name: None,
-            role: None,
+            roles: None,
         });
     }
 
-    // 2. Check if person exists and is active (including student-specific data if applicable)
-    let mut stmt = conn.prepare("
-        SELECT 
-            p.person_id, 
-            p.first_name, 
-            p.last_name, 
-            p.role, 
-            p.is_active, 
-            DATE(p.created_at) == DATE('now', 'localtime') as is_created_today,
-            s.program_id,
-            s.year_level
-        FROM persons p
-        LEFT JOIN students s ON p.person_id = s.person_id
-        WHERE p.id_number = ?1
-    ")
-        .map_err(|e| e.to_string())?;
+    // 3. Fetch Person
+    let person_data = conn.query_row(
+        "SELECT person_id, first_name, last_name, is_active, DATE(created_at) == DATE('now', 'localtime') as is_created_today FROM persons WHERE id_number = ?1",
+        params![id_number],
+        |row| Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, bool>(3)?,
+            row.get::<_, bool>(4)?,
+        ))
+    ).optional().map_err(|e| e.to_string())?;
 
-    let mut person_iter = stmt
-        .query_map(params![id_number], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, i32>(4)? == 1,
-                row.get::<_, i32>(5)? == 1,
-                row.get::<_, Option<i64>>(6)?, // program_id
-                row.get::<_, Option<i64>>(7)?, // year_level
-            ))
-        })
-        .map_err(|e| e.to_string())?;
+    if let Some((person_id, first_name, last_name, is_active, is_created_today)) = person_data {
+        let roles = get_person_roles(&conn, person_id)?;
 
-    let person_data = person_iter.next();
-
-    if let Some(Ok((person_id, first_name, last_name, role, is_active, is_created_today, program_id, year_level))) = person_data {
         if !is_active {
             return Ok(ScanResult {
                 success: false,
                 message: "Access Denied: ID is inactive.".to_string(),
                 person_name: Some(format!("{} {}", first_name, last_name)),
-                role: Some(role.clone()),
+                roles: Some(roles),
             });
         }
 
-        if role == "visitor" {
-            // Visitor pass is valid only for the local calendar day it was created.
-            if !is_created_today {
-                let _ = conn.execute(
-                    "UPDATE persons SET is_active = 0 WHERE person_id = ?1",
-                    params![person_id],
-                );
-                return Ok(ScanResult {
-                    success: false,
-                    message: "Access Denied: This Visitor Pass expired at 11:59 PM yesterday. Please re-register.".to_string(),
-                    person_name: Some(format!("{} {}", first_name, last_name)),
-                    role: Some(role),
-                });
-            }
-        }
-
-        // Check if role matches required role(s).
-        if !role_matches_event_requirement(&event.required_role, &role) {
+        // Visitor check
+        if roles.iter().any(|r| r == "visitor") && !is_created_today {
+            let _ = conn.execute("UPDATE persons SET is_active = 0 WHERE person_id = ?1", params![person_id]);
             return Ok(ScanResult {
                 success: false,
-                message: format!(
-                    "Access Denied: Event requires one of the allowed roles ({}).",
-                    event.required_role
-                ),
+                message: "Access Denied: This Visitor Pass expired at 11:59 PM yesterday. Please re-register.".to_string(),
                 person_name: Some(format!("{} {}", first_name, last_name)),
-                role: Some(role),
+                roles: Some(roles),
             });
         }
 
-        // 2.1 Enforce Program and Year Level for Students
-        if role == "student" {
-            // Check Program
-            if let Some(p_id) = program_id {
-                if !id_matches_requirement(&event.required_programs, &p_id.to_string()) {
-                    return Ok(ScanResult {
-                        success: false,
-                        message: "Access Denied: Not in a required program for this event.".to_string(),
-                        person_name: Some(format!("{} {}", first_name, last_name)),
-                        role: Some(role),
-                    });
-                }
-            }
-            // Check Year Level
-            if let Some(y_lvl) = year_level {
-                if !id_matches_requirement(&event.required_year_levels, &y_lvl.to_string()) {
-                    return Ok(ScanResult {
-                        success: false,
-                        message: "Access Denied: Not in a required year level for this event.".to_string(),
-                        person_name: Some(format!("{} {}", first_name, last_name)),
-                        role: Some(role),
-                    });
-                }
-            }
-        }
+        // Role requirement check
+        let has_required_role = event_details.required_roles.is_empty() || event_details.required_roles.iter().any(|rr| {
+            roles.iter().any(|pr| pr.to_lowercase() == rr.role_name.to_lowercase())
+        });
 
-        // 3. Check if already recorded for this event
-        let existing: Option<i64> = conn
-            .query_row(
-                "SELECT attendance_id FROM event_attendance WHERE event_id = ?1 AND person_id = ?2",
-                params![event_id, person_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|e| e.to_string())?;
-
-        if existing.is_some() {
+        if !has_required_role {
             return Ok(ScanResult {
                 success: false,
-                message: "Attendance already recorded for this event".to_string(),
+                message: "Access Denied: You do not have the required role for this event.".to_string(),
                 person_name: Some(format!("{} {}", first_name, last_name)),
-                role: Some(role),
+                roles: Some(roles),
             });
         }
 
-        // 4. Insert into event_attendance with punctuality status.
-        let attendance_status = if current_time <= event.start_time {
-            "On Time"
-        } else {
-            "Late"
-        };
-        let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        // Check if already recorded for this event today (to prevent double scanning)
+        let already_logged: Option<i64> = conn.query_row(
+            "SELECT log_id FROM activity_logs WHERE person_id = ?1 AND event_id = ?2 AND activity_type = 'event' AND DATE(scanned_at) = DATE(?3) LIMIT 1",
+            params![person_id, event_id, current_date],
+            |row| row.get(0)
+        ).optional().map_err(|e| e.to_string())?;
+
+        if already_logged.is_some() {
+            return Ok(ScanResult {
+                success: false,
+                message: "Attendance already recorded for this event today.".to_string(),
+                person_name: Some(format!("{} {}", first_name, last_name)),
+                roles: Some(roles),
+            });
+        }
+
+        // 4. Log Attendance
+        let status = "Present"; 
+
         conn.execute(
-            "INSERT INTO event_attendance (event_id, person_id, scanned_at, status) VALUES (?1, ?2, ?3, ?4)",
-            params![event_id, person_id, now, attendance_status],
-        )
-        .map_err(|e| e.to_string())?;
+            "INSERT INTO activity_logs (person_id, scanner_id, activity_type, event_id, status, scanned_at) 
+             VALUES (?1, ?2, 'event', ?3, ?4, ?5)",
+            params![person_id, scanner_id, event_id, status, current_date.clone() + " " + &current_time],
+        ).map_err(|e| e.to_string())?;
 
         Ok(ScanResult {
             success: true,
-            message: "Event Attendance Recorded Successfully.".to_string(),
+            message: format!("Attendance logged for {}.", event_details.event.event_name),
             person_name: Some(format!("{} {}", first_name, last_name)),
-            role: Some(role),
+            roles: Some(roles),
         })
     } else {
         Ok(ScanResult {
             success: false,
             message: "Access Denied: ID not found.".to_string(),
             person_name: None,
-            role: None,
+            roles: None,
         })
     }
 }
@@ -3673,8 +3905,8 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
     let mut primary_logo_enabled: bool = true;
     let mut secondary_logo_1_enabled: bool = true;
     let mut secondary_logo_2_enabled: bool = true;
-    let mut strict_email_domain: bool = false;
-    let mut enable_face_recognition: bool = false;
+    let mut strict_email_domain: bool = true;
+    let mut enable_face_recognition: bool = true;
 
     let mut stmt = conn
         .prepare("SELECT setting_key, setting_value FROM settings")
@@ -3756,201 +3988,162 @@ pub fn update_system_branding(
     primary_logo_enabled: bool,
     secondary_logo_1_enabled: bool,
     secondary_logo_2_enabled: bool,
-    strict_email_domain: bool,
-    enable_face_recognition: bool,
 ) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
 
-    let old_system_name: Option<String> = conn.query_row("SELECT setting_value FROM settings WHERE setting_key = 'system_name'", [], |row| row.get(0)).unwrap_or(None);
-    let old_primary: Option<String> = conn.query_row("SELECT setting_value FROM settings WHERE setting_key = 'primary_logo'", [], |row| row.get(0)).unwrap_or(None);
-    let old_sec1: Option<String> = conn.query_row("SELECT setting_value FROM settings WHERE setting_key = 'secondary_logo_1'", [], |row| row.get(0)).unwrap_or(None);
-    let old_sec2: Option<String> = conn.query_row("SELECT setting_value FROM settings WHERE setting_key = 'secondary_logo_2'", [], |row| row.get(0)).unwrap_or(None);
-
-    let mut branding_changes = Vec::new();
-
-    let old_primary_len = old_primary.unwrap_or_default().len();
-    let new_primary_len = primary_logo.as_deref().unwrap_or_default().len();
-    if old_primary_len == 0 && new_primary_len > 0 { branding_changes.push("Added Primary Logo"); }
-    else if old_primary_len > 0 && new_primary_len == 0 { branding_changes.push("Removed Primary Logo"); }
-    else if old_primary_len > 0 && new_primary_len > 0 && old_primary_len != new_primary_len { branding_changes.push("Updated Primary Logo"); }
-
-    let old_sec1_len = old_sec1.unwrap_or_default().len();
-    let new_sec1_len = secondary_logo_1.as_deref().unwrap_or_default().len();
-    if old_sec1_len == 0 && new_sec1_len > 0 { branding_changes.push("Added Secondary Logo 1"); }
-    else if old_sec1_len > 0 && new_sec1_len == 0 { branding_changes.push("Removed Secondary Logo 1"); }
-    else if old_sec1_len > 0 && new_sec1_len > 0 && old_sec1_len != new_sec1_len { branding_changes.push("Updated Secondary Logo 1"); }
-
-    let old_sec2_len = old_sec2.unwrap_or_default().len();
-    let new_sec2_len = secondary_logo_2.as_deref().unwrap_or_default().len();
-    if old_sec2_len == 0 && new_sec2_len > 0 { branding_changes.push("Added Secondary Logo 2"); }
-    else if old_sec2_len > 0 && new_sec2_len == 0 { branding_changes.push("Removed Secondary Logo 2"); }
-    else if old_sec2_len > 0 && new_sec2_len > 0 && old_sec2_len != new_sec2_len { branding_changes.push("Updated Secondary Logo 2"); }
-
-    let name_changed = old_system_name.as_deref().unwrap_or_default() != name;
-
-    let summary_message = if branding_changes.is_empty() {
-        if name_changed {
-            format!("Updated System Branding. Name set to '{}'", name)
-        } else {
-            "Updated System Settings Appearance".to_string()
-        }
-    } else {
-        if name_changed {
-            format!("Updated System Branding. Name set to '{}' | Setup Logs: {}", name, branding_changes.join(", "))
-        } else {
-            branding_changes.join(", ")
-        }
-    };
+    // 1. Fetch Old Branding for Audit
+    let old = get_system_branding(pool).unwrap_or_default();
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    // We'll skip extensive audit logging for the 3 new logos to prevent massive bloat unless necessary, 
-    // but we'll do the standard inserts.
+    // 2. Update Settings
+    let settings_to_update = [
+        ("system_name", name.to_string()),
+        ("system_logo", logo_base64.to_string()),
+        ("system_title", system_title.to_string()),
+        ("report_address", report_address.to_string()),
+        ("report_phone", report_phone.to_string()),
+        ("report_email", report_email.to_string()),
+        ("primary_logo", primary_logo.clone().unwrap_or_default()),
+        ("secondary_logo_1", secondary_logo_1.clone().unwrap_or_default()),
+        ("secondary_logo_2", secondary_logo_2.clone().unwrap_or_default()),
+        ("primary_circle", if primary_circle { "1" } else { "0" }.to_string()),
+        ("secondary1_circle", if secondary1_circle { "1" } else { "0" }.to_string()),
+        ("secondary2_circle", if secondary2_circle { "1" } else { "0" }.to_string()),
+        ("primary_logo_enabled", if primary_logo_enabled { "1" } else { "0" }.to_string()),
+        ("secondary_logo_1_enabled", if secondary_logo_1_enabled { "1" } else { "0" }.to_string()),
+        ("secondary_logo_2_enabled", if secondary_logo_2_enabled { "1" } else { "0" }.to_string()),
+    ];
 
-    // Insert or update system_name
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('system_name', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![name],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Insert or update system_logo
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('system_logo', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![logo_base64],
-    )
-    .map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('system_title', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![system_title],
-    )
-    .map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('report_address', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![report_address],
-    )
-    .map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('report_phone', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![report_phone],
-    )
-    .map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('report_email', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![report_email],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Insert or update primary_logo
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('primary_logo', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![primary_logo.unwrap_or_default()],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Insert or update secondary_logo_1
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary_logo_1', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![secondary_logo_1.unwrap_or_default()],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Insert or update secondary_logo_2
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary_logo_2', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![secondary_logo_2.unwrap_or_default()],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Insert or update individual circle formats
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('primary_circle', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![if primary_circle { "1" } else { "0" }],
-    ).map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary1_circle', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![if secondary1_circle { "1" } else { "0" }],
-    ).map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary2_circle', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![if secondary2_circle { "1" } else { "0" }],
-    ).map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('primary_logo_enabled', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![if primary_logo_enabled { "1" } else { "0" }],
-    ).map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary_logo_1_enabled', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![if secondary_logo_1_enabled { "1" } else { "0" }],
-    ).map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('secondary_logo_2_enabled', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![if secondary_logo_2_enabled { "1" } else { "0" }],
-    ).map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('strict_email_domain', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![if strict_email_domain { "1" } else { "0" }],
-    ).map_err(|e| e.to_string())?;
-
-    tx.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES ('enable_face_recognition', ?1)
-         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-        params![if enable_face_recognition { "1" } else { "0" }],
-    ).map_err(|e| e.to_string())?;
+    for (key, value) in settings_to_update {
+        tx.execute(
+            "INSERT INTO settings (setting_key, setting_value) VALUES (?1, ?2)
+             ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+            params![key, value],
+        ).map_err(|e| e.to_string())?;
+    }
 
     tx.commit().map_err(|e| e.to_string())?;
 
-    // Log the branding update
+    // 3. Log Audit Action
+    let mask_img = |img: Option<String>| img.filter(|s| !s.is_empty()).map(|_| "(image update)".to_string()).unwrap_or_else(|| "(empty)".to_string());
+    
+    let branding_changed = name != old.system_name || 
+        mask_img(primary_logo.clone()) != mask_img(old.primary_logo.clone()) ||
+        mask_img(secondary_logo_1.clone()) != mask_img(old.secondary_logo_1.clone()) ||
+        mask_img(secondary_logo_2.clone()) != mask_img(old.secondary_logo_2.clone()) ||
+        primary_circle != old.primary_circle ||
+        secondary1_circle != old.secondary1_circle ||
+        secondary2_circle != old.secondary2_circle ||
+        primary_logo_enabled != old.primary_logo_enabled ||
+        secondary_logo_1_enabled != old.secondary_logo_1_enabled ||
+        secondary_logo_2_enabled != old.secondary_logo_2_enabled;
+
+    let pdf_changed = system_title != old.system_title ||
+        report_address != old.report_address ||
+        report_phone != old.report_phone ||
+        report_email != old.report_email;
+
+    let entity_label = if pdf_changed && !branding_changed {
+        "PDF Settings"
+    } else if branding_changed && !pdf_changed {
+        "System Branding"
+    } else {
+        "System Branding & PDF Settings"
+    };
+
+    let old_values = json!({
+        "system_name": old.system_name,
+        "system_title": old.system_title,
+        "report_address": old.report_address,
+        "report_phone": old.report_phone,
+        "report_email": old.report_email,
+        "primary_logo": mask_img(old.primary_logo),
+        "secondary_logo_1": mask_img(old.secondary_logo_1),
+        "secondary_logo_2": mask_img(old.secondary_logo_2),
+        "primary_circle": old.primary_circle,
+        "secondary1_circle": old.secondary1_circle,
+        "secondary2_circle": old.secondary2_circle,
+        "primary_logo_enabled": old.primary_logo_enabled,
+        "secondary_logo_1_enabled": old.secondary_logo_1_enabled,
+        "secondary_logo_2_enabled": old.secondary_logo_2_enabled,
+    });
+
+    let new_values = json!({
+        "system_name": name,
+        "system_title": system_title,
+        "report_address": report_address,
+        "report_phone": report_phone,
+        "report_email": report_email,
+        "primary_logo": mask_img(primary_logo),
+        "secondary_logo_1": mask_img(secondary_logo_1),
+        "secondary_logo_2": mask_img(secondary_logo_2),
+        "primary_circle": primary_circle,
+        "secondary1_circle": secondary1_circle,
+        "secondary2_circle": secondary2_circle,
+        "primary_logo_enabled": primary_logo_enabled,
+        "secondary_logo_1_enabled": secondary_logo_1_enabled,
+        "secondary_logo_2_enabled": secondary_logo_2_enabled,
+    });
+
     let _ = log_audit_action(
         pool,
         admin_id,
         "UPDATE",
-        "settings",
-        0, // Using 0 to represent a global/system level setting change
-        None,
-        Some(
-            serde_json::json!({
-                "summary": summary_message,
-                "system_name": name,
-                "system_title": system_title,
-                "report_address": report_address,
-                "report_phone": report_phone,
-                "report_email": report_email,
-                "primary_circle": primary_circle,
-                "secondary1_circle": secondary1_circle,
-                "secondary2_circle": secondary2_circle,
-                "primary_logo_enabled": primary_logo_enabled,
-                "secondary_logo_1_enabled": secondary_logo_1_enabled,
-                "secondary_logo_2_enabled": secondary_logo_2_enabled
-            })
-            .to_string(),
-        ),
+        "System",
+        0,
+        entity_label,
+        Some(old_values),
+        Some(new_values),
+    );
+
+    Ok(())
+}
+
+pub fn update_system_configuration(
+    pool: &DbPool,
+    admin_id: i64,
+    strict_email_domain: bool,
+    enable_face_recognition: bool,
+) -> Result<(), String> {
+    let mut conn = pool.get().map_err(|e| e.to_string())?;
+    let old = get_system_branding(pool).unwrap_or_default();
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    let settings_to_update = [
+        ("strict_email_domain", if strict_email_domain { "1" } else { "0" }.to_string()),
+        ("enable_face_recognition", if enable_face_recognition { "1" } else { "0" }.to_string()),
+    ];
+
+    for (key, value) in settings_to_update {
+        tx.execute(
+            "INSERT INTO settings (setting_key, setting_value) VALUES (?1, ?2)
+             ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+            params![key, value],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+
+    let old_values = json!({
+        "strict_email_domain": old.strict_email_domain,
+        "enable_face_recognition": old.enable_face_recognition,
+    });
+
+    let new_values = json!({
+        "strict_email_domain": strict_email_domain,
+        "enable_face_recognition": enable_face_recognition,
+    });
+
+    let _ = log_audit_action(
+        pool,
+        admin_id,
+        "UPDATE",
+        "System",
+        0,
+        "System Configuration",
+        Some(old_values),
+        Some(new_values),
     );
 
     Ok(())
@@ -4069,15 +4262,15 @@ pub fn reset_password_with_otp(
         pool,
         account_id,
         "UPDATE",
-        "accounts",
+        "Account",
         account_id,
-        Some(json!({ "password_hash": "(old)" }).to_string()),
+        &account_username,
+        Some(json!({ "password_hash": "(old)" })),
         Some(
             json!({
                 "summary": format!("Password reset via Forgot Password for account: {}.", account_username),
                 "password_hash": "(new)"
             })
-            .to_string(),
         ),
     );
 
@@ -4195,75 +4388,128 @@ mod tests {
 
 pub fn get_archived_users(pool: &DbPool) -> Result<Vec<serde_json::Value>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
+
     let mut stmt = conn.prepare(
-        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.role, p.email, p.archived_at,
-                COALESCE(stu_dept.department_name, emp_dept.department_name, '') as department_name,
-                pr.program_name,
-                s.year_level,
-                e.position_title,
-                COALESCE(pr.program_name, emp_dept.department_name, '') as affiliation
+        "SELECT 
+            p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.archived_at,
+            COALESCE(emp_dept.department_name, stu_dept.department_name) AS department_name,
+            prog.program_name,
+            stu.year_level,
+            emp.position_title
          FROM persons p
-         LEFT JOIN students s ON p.person_id = s.person_id
-         LEFT JOIN programs pr ON s.program_id = pr.program_id
-         LEFT JOIN departments stu_dept ON pr.department_id = stu_dept.department_id
-         LEFT JOIN employees e ON p.person_id = e.person_id
-         LEFT JOIN departments emp_dept ON e.department_id = emp_dept.department_id
+         LEFT JOIN students stu ON p.person_id = stu.person_id
+         LEFT JOIN programs prog ON stu.program_id = prog.program_id
+         LEFT JOIN departments stu_dept ON prog.department_id = stu_dept.department_id
+         LEFT JOIN employees emp ON p.person_id = emp.person_id
+         LEFT JOIN departments emp_dept ON emp.department_id = emp_dept.department_id
          WHERE p.is_archived = 1
          ORDER BY p.archived_at DESC"
     ).map_err(|e| e.to_string())?;
 
-    let iter = stmt.query_map([], |row| {
+    let rows = stmt.query_map([], |row| {
+        let person_id: i64 = row.get(0)?;
+        let roles = get_person_roles(&conn, person_id).unwrap_or_default();
+        let contacts = get_person_contacts(&conn, person_id).unwrap_or_default();
+        
+        // Pick primary role for display
+        let role = roles.first().cloned().unwrap_or_else(|| "User".to_string());
+
         Ok(json!({
-            "person_id": row.get::<_, i64>(0)?,
+            "person_id": person_id,
             "id_number": row.get::<_, String>(1)?,
             "first_name": row.get::<_, String>(2)?,
             "middle_name": row.get::<_, Option<String>>(3)?,
             "last_name": row.get::<_, String>(4)?,
-            "role": row.get::<_, String>(5)?,
-            "email": row.get::<_, Option<String>>(6)?,
-            "archived_at": row.get::<_, Option<String>>(7)?,
-            "department_name": row.get::<_, String>(8)?,
-            "program_name": row.get::<_, Option<String>>(9)?,
-            "year_level": row.get::<_, Option<i64>>(10)?,
-            "position_title": row.get::<_, Option<String>>(11)?,
-            "affiliation": row.get::<_, String>(12)?
+            "archived_at": row.get::<_, Option<String>>(5)?,
+            "department_name": row.get::<_, Option<String>>(6)?,
+            "program_name": row.get::<_, Option<String>>(7)?,
+            "year_level": row.get::<_, Option<i64>>(8)?,
+            "position_title": row.get::<_, Option<String>>(9)?,
+            "roles": roles,
+            "role": role,
+            "contacts": contacts
         }))
     }).map_err(|e| e.to_string())?;
 
     let mut list = Vec::new();
-    for item in iter {
-        list.push(item.map_err(|e| e.to_string())?);
+    for row in rows {
+        list.push(row.map_err(|e| e.to_string())?);
     }
     Ok(list)
 }
 
 pub fn get_archived_events(pool: &DbPool) -> Result<Vec<serde_json::Value>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare(
-        "SELECT event_id, event_name, description, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role, archived_at
-         FROM events WHERE is_archived = 1
-         ORDER BY archived_at DESC"
-    ).map_err(|e| e.to_string())?;
+    
+    // 1. Get basic event info
+    let mut stmt = conn.prepare("SELECT event_id, event_name, description, is_enabled, archived_at FROM events WHERE is_archived = 1 ORDER BY archived_at DESC")
+        .map_err(|e| e.to_string())?;
 
-    let iter = stmt.query_map([], |row| {
-        Ok(json!({
-            "event_id": row.get::<_, i64>(0)?,
-            "event_name": row.get::<_, String>(1)?,
-            "description": row.get::<_, Option<String>>(2)?,
-            "schedule_type": row.get::<_, Option<String>>(3)?,
-            "event_date": row.get::<_, Option<String>>(4)?,
-            "start_date": row.get::<_, Option<String>>(5)?,
-            "end_date": row.get::<_, Option<String>>(6)?,
-            "start_time": row.get::<_, Option<String>>(7)?,
-            "end_time": row.get::<_, Option<String>>(8)?,
-            "required_role": row.get::<_, Option<String>>(9)?,
-            "archived_at": row.get::<_, Option<String>>(10)?
-        }))
+    let event_rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, i32>(3)? == 1,
+            row.get::<_, Option<String>>(4)?
+        ))
     }).map_err(|e| e.to_string())?;
 
     let mut list = Vec::new();
-    for item in iter {
-        list.push(item.map_err(|e| e.to_string())?);
+    for event_row in event_rows {
+        let (event_id, event_name, description, is_enabled, archived_at) = event_row.map_err(|e| e.to_string())?;
+        
+        // 2. Get schedules and roles for flattening
+        let mut stmt_w = conn.prepare("SELECT day_of_week, start_time, end_time FROM event_weekly WHERE event_id = ?1").map_err(|e| e.to_string())?;
+        let weekly = stmt_w.query_map([event_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+
+        let mut stmt_d = conn.prepare("SELECT start_date, end_date, start_time, end_time FROM event_date_range WHERE event_id = ?1").map_err(|e| e.to_string())?;
+        let date_range = stmt_d.query_map([event_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+        }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+
+        let mut stmt_r = conn.prepare("SELECT r.role_name FROM roles r JOIN event_required_roles err ON r.role_id = err.role_id WHERE err.event_id = ?1").map_err(|e| e.to_string())?;
+        let required_roles = stmt_r.query_map([event_id], |row| {
+            row.get::<_, String>(0)
+        }).map_err(|e| e.to_string())?.collect::<Result<Vec<String>, _>>().map_err(|e| e.to_string())?;
+
+        // 3. Construct flattened JSON
+        let schedule_type = if !weekly.is_empty() { "weekly" } else { "date_range" };
+        let mut event_date = String::new();
+        let mut start_date = String::new();
+        let mut end_date = String::new();
+        let mut start_time = String::new();
+        let mut end_time = String::new();
+
+        if schedule_type == "weekly" && !weekly.is_empty() {
+            event_date = weekly.iter().map(|(d, _, _)| d.as_str()).collect::<Vec<_>>().join(", ");
+            start_time = weekly[0].1.clone();
+            end_time = weekly[0].2.clone();
+        } else if !date_range.is_empty() {
+            start_date = date_range[0].0.clone();
+            end_date = date_range[0].1.clone();
+            start_time = date_range[0].2.clone();
+            end_time = date_range[0].3.clone();
+        }
+
+        let required_role = if required_roles.is_empty() { "all".to_string() } else { required_roles.join(",") };
+
+        list.push(json!({
+            "event_id": event_id,
+            "event_name": event_name,
+            "description": description,
+            "is_enabled": is_enabled,
+            "archived_at": archived_at,
+            "schedule_type": schedule_type,
+            "event_date": event_date,
+            "start_date": start_date,
+            "end_date": end_date,
+            "start_time": start_time,
+            "end_time": end_time,
+            "required_role": required_role
+        }));
     }
     Ok(list)
 }
@@ -4356,11 +4602,12 @@ pub fn restore_user(pool: &DbPool, person_id: i64, active_admin_id: i64) -> Resu
     let _ = log_audit_action(
         pool,
         active_admin_id,
-        "UPDATE",
-        "persons",
+        "RESTORE",
+        "Person",
         person_id,
-        Some(json!({ "action": "restored_from_archive" }).to_string()),
-        Some(json!({ "name": name, "is_archived": false }).to_string()),
+        &name,
+        Some(json!({ "is_archived": true })),
+        Some(json!({ "name": name, "is_archived": false })),
     );
 
     Ok(())
@@ -4383,11 +4630,12 @@ pub fn restore_event(pool: &DbPool, event_id: i64, active_admin_id: i64) -> Resu
     let _ = log_audit_action(
         pool,
         active_admin_id,
-        "UPDATE",
-        "events",
+        "RESTORE",
+        "Event",
         event_id,
-        Some(json!({ "action": "restored_from_archive" }).to_string()),
-        Some(json!({ "event_name": name, "is_archived": false }).to_string()),
+        &name,
+        Some(json!({ "is_archived": true })),
+        Some(json!({ "event_name": name, "is_archived": false })),
     );
 
     Ok(())
@@ -4410,11 +4658,12 @@ pub fn restore_department(pool: &DbPool, department_id: i64, active_admin_id: i6
     let _ = log_audit_action(
         pool,
         active_admin_id,
-        "UPDATE",
-        "departments",
+        "RESTORE",
+        "Department",
         department_id,
-        Some(json!({ "action": "restored_from_archive" }).to_string()),
-        Some(json!({ "department_name": name, "is_archived": false }).to_string()),
+        &name,
+        Some(json!({ "is_archived": true })),
+        Some(json!({ "department_name": name, "is_archived": false })),
     );
 
     Ok(())
@@ -4437,11 +4686,12 @@ pub fn restore_program(pool: &DbPool, program_id: i64, active_admin_id: i64) -> 
     let _ = log_audit_action(
         pool,
         active_admin_id,
-        "UPDATE",
-        "programs",
+        "RESTORE",
+        "Program",
         program_id,
-        Some(json!({ "action": "restored_from_archive" }).to_string()),
-        Some(json!({ "program_name": name, "is_archived": false }).to_string()),
+        &name,
+        Some(json!({ "is_archived": true })),
+        Some(json!({ "program_name": name, "is_archived": false })),
     );
 
     Ok(())
@@ -4461,40 +4711,73 @@ pub fn permanent_delete_user(pool: &DbPool, person_id: i64, active_admin_id: i64
         return Err("Only archived records can be permanently deleted. Archive the record first.".to_string());
     }
 
-    let old_data: Option<serde_json::Value> = conn.query_row(
-        "SELECT id_number, first_name, last_name, role FROM persons WHERE person_id = ?1",
+    // Capture complete state for audit log before deletion
+    let roles = get_person_roles(&conn, person_id).unwrap_or_default();
+    let contacts = get_person_contacts(&conn, person_id).unwrap_or_default();
+    let emails: Vec<String> = contacts.iter().filter(|c| c.contact_type == "email").map(|c| c.contact_value.clone()).collect();
+    let phones: Vec<String> = contacts.iter().filter(|c| c.contact_type == "phone").map(|c| c.contact_value.clone()).collect();
+
+    let person_data: (String, String, Option<String>, String, bool) = conn.query_row(
+        "SELECT id_number, first_name, middle_name, last_name, is_active FROM persons WHERE person_id = ?1",
         params![person_id],
-        |row| {
-            Ok(json!({
-                "id_number": row.get::<_, String>(0)?,
-                "first_name": row.get::<_, String>(1)?,
-                "last_name": row.get::<_, String>(2)?,
-                "role": row.get::<_, String>(3)?
-            }))
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get::<_, i32>(4)? == 1))
+    ).map_err(|e| e.to_string())?;
+
+    let mut old_data = json!({
+        "id_number": person_data.0,
+        "first_name": person_data.1,
+        "middle_name": person_data.2,
+        "last_name": person_data.3,
+        "roles": roles,
+        "emails": emails,
+        "phones": phones,
+        "is_active": person_data.4
+    });
+
+    if roles.iter().any(|r| r == "student") {
+        let stu_info: Option<(String, Option<i64>, bool)> = conn.query_row(
+            "SELECT p.program_code, s.year_level, s.is_irregular FROM students s JOIN programs p ON s.program_id = p.program_id WHERE s.person_id = ?1",
+            params![person_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i32>(2)? == 1))
+        ).optional().map_err(|e| e.to_string())?;
+        if let Some((prog, y_lvl, irreg)) = stu_info {
+            old_data["program"] = json!(prog);
+            old_data["year_level"] = json!(y_lvl);
+            old_data["is_irregular"] = json!(irreg);
         }
-    ).ok();
+    }
+
+    if roles.iter().any(|r| r == "professor" || r == "staff") {
+        let emp_info: Option<(String, String)> = conn.query_row(
+            "SELECT d.department_code, e.position_title FROM employees e JOIN departments d ON e.department_id = d.department_id WHERE e.person_id = ?1",
+            params![person_id],
+            |row| Ok((row.get(0)?, row.get(1)?))
+        ).optional().map_err(|e| e.to_string())?;
+        if let Some((dept, pos)) = emp_info {
+            old_data["department"] = json!(dept);
+            old_data["position_title"] = json!(pos);
+        }
+    }
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    // Delete from role-specific tables
-    tx.execute("DELETE FROM students WHERE person_id = ?1", params![person_id]).ok();
-    tx.execute("DELETE FROM employees WHERE person_id = ?1", params![person_id]).ok();
-    tx.execute("DELETE FROM visitors WHERE person_id = ?1", params![person_id]).ok();
-    tx.execute("DELETE FROM event_attendance WHERE person_id = ?1", params![person_id]).ok();
-    tx.execute("DELETE FROM entry_logs WHERE person_id = ?1", params![person_id]).ok();
+    // Deleting from persons will cascade to subtype tables, person_roles, person_contacts, etc.
+    tx.execute("DELETE FROM activity_logs WHERE person_id = ?1", params![person_id]).ok();
     tx.execute("DELETE FROM persons WHERE person_id = ?1", params![person_id])
         .map_err(|e| e.to_string())?;
 
     tx.commit().map_err(|e| e.to_string())?;
 
+    let label = format!("{} {}", person_data.1, person_data.3);
     let _ = log_audit_action(
         pool,
         active_admin_id,
         "DELETE",
-        "persons",
+        "Person",
         person_id,
-        old_data.map(|v| v.to_string()),
-        Some(json!({ "action": "permanent_delete" }).to_string()),
+        &label,
+        Some(old_data),
+        None,
     );
 
     Ok(())
@@ -4520,19 +4803,21 @@ pub fn permanent_delete_event(pool: &DbPool, event_id: i64, active_admin_id: i64
     ).ok();
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM event_attendance WHERE event_id = ?1", params![event_id]).ok();
+    tx.execute("DELETE FROM activity_logs WHERE event_id = ?1", params![event_id]).ok();
     tx.execute("DELETE FROM events WHERE event_id = ?1", params![event_id])
         .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
 
+    let label = old_data.as_ref().and_then(|v| v.get("event_name")).and_then(|v| v.as_str()).unwrap_or("Unknown Event").to_string();
     let _ = log_audit_action(
         pool,
         active_admin_id,
         "DELETE",
-        "events",
+        "Event",
         event_id,
-        old_data.map(|v| v.to_string()),
-        Some(json!({ "action": "permanent_delete" }).to_string()),
+        &label,
+        old_data,
+        None,
     );
 
     Ok(())
@@ -4560,14 +4845,16 @@ pub fn permanent_delete_department(pool: &DbPool, department_id: i64, active_adm
     conn.execute("DELETE FROM departments WHERE department_id = ?1", params![department_id])
         .map_err(|e| e.to_string())?;
 
+    let label = old_data.as_ref().and_then(|v| v.get("department_name")).and_then(|v| v.as_str()).unwrap_or("Unknown Department").to_string();
     let _ = log_audit_action(
         pool,
         active_admin_id,
         "DELETE",
-        "departments",
+        "Department",
         department_id,
-        old_data.map(|v| v.to_string()),
-        Some(json!({ "action": "permanent_delete" }).to_string()),
+        &label,
+        old_data,
+        None,
     );
 
     Ok(())
@@ -4587,22 +4874,31 @@ pub fn permanent_delete_program(pool: &DbPool, program_id: i64, active_admin_id:
     }
 
     let old_data: Option<serde_json::Value> = conn.query_row(
-        "SELECT program_code, program_name FROM programs WHERE program_id = ?1",
+        "SELECT p.program_code, p.program_name, d.department_code 
+         FROM programs p 
+         JOIN departments d ON p.department_id = d.department_id 
+         WHERE p.program_id = ?1",
         params![program_id],
-        |row| Ok(json!({ "program_code": row.get::<_, String>(0)?, "program_name": row.get::<_, String>(1)? })),
+        |row| Ok(json!({ 
+            "program_code": row.get::<_, String>(0)?, 
+            "program_name": row.get::<_, String>(1)?,
+            "department": row.get::<_, String>(2)?
+        })),
     ).ok();
 
     conn.execute("DELETE FROM programs WHERE program_id = ?1", params![program_id])
         .map_err(|e| e.to_string())?;
 
+    let label = old_data.as_ref().and_then(|v| v.get("program_name")).and_then(|v| v.as_str()).unwrap_or("Unknown Program").to_string();
     let _ = log_audit_action(
         pool,
         active_admin_id,
         "DELETE",
-        "programs",
+        "Program",
         program_id,
-        old_data.map(|v| v.to_string()),
-        Some(json!({ "action": "permanent_delete" }).to_string()),
+        &label,
+        old_data,
+        None,
     );
 
     Ok(())
@@ -4669,8 +4965,8 @@ pub fn get_database_stats(app_handle: &tauri::AppHandle, pool: &DbPool) -> Resul
 
     let total_persons: i64 = conn.query_row("SELECT COUNT(*) FROM persons", [], |row| row.get(0)).unwrap_or(0);
     let total_events: i64 = conn.query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0)).unwrap_or(0);
-    let total_logs: i64 = conn.query_row("SELECT COUNT(*) FROM entry_logs", [], |row| row.get(0)).unwrap_or(0);
-    let total_audit: i64 = conn.query_row("SELECT COUNT(*) FROM audit_logs", [], |row| row.get(0)).unwrap_or(0);
+    let total_logs: i64 = conn.query_row("SELECT COUNT(*) FROM activity_logs", [], |row| row.get(0)).unwrap_or(0);
+    let total_audit: i64 = conn.query_row("SELECT COUNT(*) FROM audit_events", [], |row| row.get(0)).unwrap_or(0);
     let archived_persons: i64 = conn.query_row("SELECT COUNT(*) FROM persons WHERE is_archived = 1", [], |row| row.get(0)).unwrap_or(0);
     let archived_events: i64 = conn.query_row("SELECT COUNT(*) FROM events WHERE is_archived = 1", [], |row| row.get(0)).unwrap_or(0);
 
@@ -4679,7 +4975,7 @@ pub fn get_database_stats(app_handle: &tauri::AppHandle, pool: &DbPool) -> Resul
         "total_persons": total_persons,
         "total_events": total_events,
         "total_entry_logs": total_logs,
-        "total_audit_logs": total_audit,
+        "total_audit_events": total_audit,
         "archived_persons": archived_persons,
         "archived_events": archived_events
     }))
