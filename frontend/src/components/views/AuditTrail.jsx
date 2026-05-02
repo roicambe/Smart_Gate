@@ -50,6 +50,12 @@ const FRIENDLY_FIELD_NAMES = {
     setting_value: 'Setting Value',
     activation_otp: 'Activation OTP',
     activation_otp_expires_at: 'OTP Expiration',
+    day_of_week: 'Day of Week',
+    start_date: 'Start Date',
+    end_date: 'End Date',
+    is_irregular: 'Irregular Status',
+    purpose_of_visit: 'Purpose of Visit',
+    person_to_visit: 'Person to Visit',
 };
 
 const getFriendlyFieldName = (key) => FRIENDLY_FIELD_NAMES[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -66,8 +72,8 @@ const formatFieldValue = (key, value) => {
 };
 
 const FIELD_ORDER_WEIGHTS = {
-    'Roles': 1,
     'Role': 1,
+    'Roles': 1,
     'ID Number': 2,
     'Last Name': 3,
     'First Name': 4,
@@ -76,10 +82,24 @@ const FIELD_ORDER_WEIGHTS = {
     'Emails': 6,
     'Contact Number': 7,
     'Contact Numbers': 7,
-    'Program': 8,
-    'Department': 9,
-    'Active Status': 10,
-    'Status': 10,
+    'Department': 8,
+    'Program': 9,
+    'Year Level': 10,
+    'Irregular Status': 11,
+    'Position Title': 12,
+    'Purpose of Visit': 13,
+    'Person to Visit': 14,
+    'Event Name': 20,
+    'Description': 21,
+    'Day of Week': 22,
+    'Start Date': 23,
+    'End Date': 24,
+    'Start Time': 25,
+    'End Time': 26,
+    'Required Role': 27,
+    'Active Status': 30,
+    'Status': 30,
+    'Enabled Status': 30,
 };
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -181,14 +201,32 @@ export const AuditTrail = ({ branding, adminSession }) => {
         const type = log.entity_type;
         const label = log.entity_label;
 
-        if (action === 'create') return `Created ${type}: ${label}`;
-        if (action === 'archive') return `Moved ${type} to Archive: ${label}`;
-        if (action === 'restore') return `Restored ${type} from Archive: ${label}`;
-        if (action === 'delete') return `Permanently Deleted ${type}: ${label}`;
+        // Extract key fields for a more descriptive summary (especially for exports)
+        const findValue = (field) => {
+            const change = log.changes.find(c => c.field_name === field);
+            return change?.new_value || change?.old_value;
+        };
+
+        const idNum = findValue('id_number');
+        const program = findValue('program');
+        const department = findValue('department');
+
+        let meta = "";
+        if (idNum) meta += `ID: ${idNum}`;
+        if (program) meta += (meta ? " | " : "") + `Prog: ${program}`;
+        if (department) meta += (meta ? " | " : "") + `Dept: ${department}`;
+        const suffix = meta ? ` (${meta})` : '';
+
+        if (action === 'create') return `Created ${type}: ${label}${suffix}`;
+        if (action === 'archive') return `Moved ${type} to Archive: ${label}${suffix}`;
+        if (action === 'restore') return `Restored ${type} from Archive: ${label}${suffix}`;
+        if (action === 'delete') return `Permanently Deleted ${type}: ${label}${suffix}`;
         if (action === 'update') {
             const changeCount = log.changes.length;
             if (changeCount === 0) return `Updated ${type}: ${label}`;
-            if (changeCount === 1) return `Updated ${getFriendlyFieldName(log.changes[0].field_name)} for ${label}`;
+            if (changeCount === 1) {
+                return `Updated ${getFriendlyFieldName(log.changes[0].field_name)} for ${label}`;
+            }
             return `Updated ${changeCount} fields for ${label}`;
         }
         return `${log.action_type} action on ${type}: ${label}`;
@@ -310,12 +348,17 @@ export const AuditTrail = ({ branding, adminSession }) => {
                 },
                 didParseCell: function (data) {
                     if (data.section === 'body' && data.column.index === 2) {
-                        if (data.cell.raw === 'CREATE') {
-                            data.cell.styles.textColor = [5, 150, 105];
-                        } else if (data.cell.raw === 'UPDATE') {
-                            data.cell.styles.textColor = [217, 119, 6];
-                        } else if (data.cell.raw === 'DELETE') {
-                            data.cell.styles.textColor = [225, 29, 72];
+                        const action = data.cell.raw;
+                        if (action === 'CREATE') {
+                            data.cell.styles.textColor = [5, 150, 105]; // Emerald
+                        } else if (action === 'UPDATE') {
+                            data.cell.styles.textColor = [217, 119, 6]; // Amber
+                        } else if (action === 'ARCHIVE') {
+                            data.cell.styles.textColor = [249, 115, 22]; // Orange
+                        } else if (action === 'RESTORE') {
+                            data.cell.styles.textColor = [79, 70, 229]; // Indigo
+                        } else if (action === 'DELETE') {
+                            data.cell.styles.textColor = [225, 29, 72]; // Rose
                         }
                     }
                 }
@@ -610,6 +653,8 @@ export const AuditTrail = ({ branding, adminSession }) => {
                                     <span className={`inline-flex px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${
                                         selectedLog.action_type === 'CREATE' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30' :
                                         selectedLog.action_type === 'UPDATE' ? 'bg-amber-500/20 text-amber-300 border-amber-400/30' :
+                                        selectedLog.action_type === 'ARCHIVE' ? 'bg-orange-500/20 text-orange-300 border-orange-400/30' :
+                                        selectedLog.action_type === 'RESTORE' ? 'bg-indigo-500/20 text-indigo-300 border-indigo-400/30' :
                                         selectedLog.action_type === 'DELETE' ? 'bg-rose-500/20 text-rose-300 border-rose-400/30' :
                                         'bg-white/5 text-white/50 border-white/10'
                                     }`}>
@@ -660,7 +705,18 @@ export const AuditTrail = ({ branding, adminSession }) => {
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-white/5">
-                                                {[...selectedLog.changes].sort((a, b) => (FIELD_ORDER_WEIGHTS[getFriendlyFieldName(a.field_name)] || 999) - (FIELD_ORDER_WEIGHTS[getFriendlyFieldName(b.field_name)] || 999)).map((change, idx) => (
+                                                 {[...selectedLog.changes]
+                                                    .filter(change => {
+                                                        const val = change.new_value || change.old_value;
+                                                        // Requirement 4: Hide "0" schedule counts, "null", "N/A" and non-applicable fields
+                                                        if (change.field_name.includes('schedules') && (val === '0' || val === 0)) return false;
+                                                        if (val === null || val === undefined || val === '' || val === 'null' || val === 'N/A') return false;
+                                                        if (change.field_name === 'is_irregular' && (val === '0' || val === 0 || val === false || val === 'false')) return false;
+                                                        return true;
+                                                    })
+                                                    .sort((a, b) => (FIELD_ORDER_WEIGHTS[getFriendlyFieldName(a.field_name)] || 999) - (FIELD_ORDER_WEIGHTS[getFriendlyFieldName(b.field_name)] || 999))
+                                                    .map((change, idx) => (
+
                                                     <tr key={idx}>
                                                         <td className="px-4 py-2 font-medium text-white/80 whitespace-nowrap">
                                                             {getFriendlyFieldName(change.field_name)}
