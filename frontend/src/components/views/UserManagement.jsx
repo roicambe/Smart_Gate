@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Users, Search, Edit2, Trash2, UserPlus, Eye, Check, AlertTriangle, ChevronLeft, ChevronRight, Mail, Filter, Upload, FileSpreadsheet, Download, GraduationCap, BookOpen } from 'lucide-react';
+import { Users, Search, Edit2, Trash2, UserPlus, Eye, Check, AlertTriangle, ChevronLeft, ChevronRight, Mail, Filter, Upload, FileSpreadsheet, Download, GraduationCap, BookOpen, Loader2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
@@ -465,18 +465,29 @@ export const UserManagement = ({ adminSession, branding }) => {
         }
     };
 
-    useEffect(() => {
+    const clearAllFilters = () => {
         setSearchQuery('');
         setFilterDepartmentId('all');
         setFilterProgramId('all');
         setFilterYearLevel('all');
         setFilterStatus('all');
+        setCurrentPage(1);
+    };
+
+    useEffect(() => {
+        clearAllFilters();
     }, [mainTab, subTab]);
 
     // Filter logic
     const filteredUsers = users.filter(user => {
         const matchesSearch = (user.first_name + ' ' + (user.last_name || '')).toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (user.id_number || '').toLowerCase().includes(searchQuery.toLowerCase());
+            (user.id_number || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (user.email || '').toLowerCase().includes(searchQuery.toLowerCase());
+
+        // Visitor specific: only search matters
+        if (mainTab === 'visitors') {
+            return matchesSearch;
+        }
 
         // Student-specific filters
         if (subTab === 'student' && mainTab === 'members') {
@@ -491,7 +502,7 @@ export const UserManagement = ({ adminSession, branding }) => {
 
         // Dept filter for prof/staff
         let matchesDepartment = true;
-        if (subTab !== 'student' && filterDepartmentId !== 'all') {
+        if (mainTab === 'members' && subTab !== 'student' && filterDepartmentId !== 'all') {
             matchesDepartment = user.department_id?.toString() === filterDepartmentId;
         }
 
@@ -635,12 +646,18 @@ export const UserManagement = ({ adminSession, branding }) => {
                             <Search className="w-5 h-5 absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400" />
                             <input
                                 type="text"
-                                placeholder="Search by ID or Name..."
+                                placeholder="Search by ID, Name, or Email..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-2.5 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all font-medium"
                             />
                         </div>
+                        <button
+                            onClick={clearAllFilters}
+                            className="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors shrink-0"
+                        >
+                            Clear All
+                        </button>
                     </div>
                 </div>
             </div>
@@ -697,14 +714,32 @@ export const UserManagement = ({ adminSession, branding }) => {
                         <tbody className="divide-y divide-slate-100">
                             {isLoading ? (
                                 <tr>
-                                    <td colSpan={mainTab === 'visitors' ? 7 : 5} className="text-center py-20 text-slate-500">Loading data...</td>
+                                    <td colSpan={mainTab === 'visitors' ? 8 : 5} className="text-center py-20 text-slate-500">
+                                        <div className="flex flex-col items-center justify-center space-y-3">
+                                            <Loader2 className="w-10 h-10 animate-spin text-blue-500" />
+                                            <p className="text-slate-500 font-medium">Synchronizing profile data...</p>
+                                        </div>
+                                    </td>
                                 </tr>
                             ) : filteredUsers.length === 0 ? (
                                 <tr>
-                                    <td colSpan={mainTab === 'visitors' ? 7 : 5} className="text-center py-20">
-                                        <div className="flex flex-col items-center justify-center space-y-3">
-                                            <Users className="w-12 h-12 text-slate-300" />
-                                            <p className="text-slate-500 text-base">No {activeRole}s found.</p>
+                                    <td colSpan={mainTab === 'visitors' ? 8 : 5} className="p-12 text-center">
+                                        <div className="flex flex-col items-center justify-center space-y-4">
+                                            <div className="p-4 bg-slate-50 rounded-full border border-slate-100">
+                                                <Users className="w-10 h-10 text-slate-300" />
+                                            </div>
+                                            <div>
+                                                <p className="text-slate-900 font-bold text-lg">No Profiles Found</p>
+                                                <p className="text-slate-500 text-sm max-w-xs mx-auto">
+                                                    We couldn't find any {mainTab === 'visitors' ? 'visitors' : 'members'} matching your current search or filter criteria.
+                                                </p>
+                                            </div>
+                                            <button
+                                                onClick={clearAllFilters}
+                                                className="text-blue-600 font-semibold text-sm hover:underline"
+                                            >
+                                                Clear all filters
+                                            </button>
                                         </div>
                                     </td>
                                 </tr>

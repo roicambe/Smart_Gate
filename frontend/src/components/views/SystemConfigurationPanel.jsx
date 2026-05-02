@@ -24,7 +24,7 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
 
     const handleSave = async () => {
         if (!isSystemAdministrator) return;
-        
+
         setIsSaving(true);
         try {
             await invoke('update_system_configuration', {
@@ -32,7 +32,7 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
                 strictEmailDomain: strictEmailDomain,
                 enableFaceRecognition: enableFaceRecognition
             });
-            
+
             await fetchBranding();
             showToast('System configuration updated successfully.', 'success');
         } catch (error) {
@@ -45,7 +45,7 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
 
     const handlePromote = async () => {
         if (!isSystemAdministrator || confirmInput !== 'PROMOTE') return;
-        
+
         setIsPromoting(true);
         try {
             await invoke('promote_all_students', { activeAdminId: adminSession.account_id });
@@ -68,9 +68,9 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
 
     return (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 w-full flex flex-col animate-in fade-in duration-500">
-            <SettingsSectionHeader 
+            <SettingsSectionHeader
                 icon={ShieldCheck}
-                title="System Policies & Configuration" 
+                title="System Policies & Configuration"
                 description="Configure global access rules, biometric verification, and security settings."
                 iconWrapperClassName="border-blue-200 bg-blue-50 text-blue-600"
                 action={(
@@ -88,8 +88,8 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
                     </button>
                 )}
             />
-            
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-6">
+
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                 {/* Email Domain Restriction */}
                 <div className="flex flex-col justify-between gap-4 p-6 rounded-2xl bg-slate-50/60 border border-slate-200 transition-all hover:shadow-md">
                     <div className="flex gap-4">
@@ -173,7 +173,7 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
                         <div>
                             <h3 className="text-lg font-bold text-slate-900">Student Year Level Promotion</h3>
                             <p className="text-slate-500 text-sm mt-0.5">
-                                Securely increment the year level of all registered students by 1. 
+                                Securely increment the year level of all registered students by 1.
                                 <span className="hidden md:inline"> This is typically done at the start of a new academic year.</span>
                             </p>
                         </div>

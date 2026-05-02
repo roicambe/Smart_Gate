@@ -178,8 +178,11 @@ pub struct ActivityLogDetails {
     pub id_number: String,
     pub roles: Vec<String>,
     pub department_name: Option<String>,
+    pub program_name: Option<String>,
+    pub year_level: Option<i64>,
+    pub position_title: Option<String>,
     pub scanner_location: String,
-    pub activity_type: String,
+    pub scanner_function: String,
     pub event_name: Option<String>,
     pub status: Option<String>,
 }
@@ -217,12 +220,14 @@ pub struct ScanResult {
     pub message: String,
     pub person_name: Option<String>,
     pub roles: Option<Vec<String>>,
+    pub role: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ScanPersonDetails {
     pub person_id: i64,
     pub roles: Vec<String>,
+    pub role: String,
     pub id_number: String,
     pub first_name: String,
     pub middle_name: Option<String>,
@@ -230,6 +235,8 @@ pub struct ScanPersonDetails {
     pub department_name: Option<String>,
     pub program_name: Option<String>,
     pub year_level: Option<i64>,
+    pub position_title: Option<String>,
+    pub face_image: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
