@@ -142,14 +142,15 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                 lastName: visitorForm.lastName,
                 email: visitorForm.email,
                 contactNumber: visitorForm.contactNumber,
-                purpose: visitorForm.purpose,
-                personToVisit: visitorForm.personToVisit,
                 programId: null,
                 yearLevel: null,
+                isIrregular: false,
                 departmentId: null,
                 positionTitle: null,
                 purpose: visitorForm.purpose,
-                personToVisit: visitorForm.personToVisit
+                personToVisit: visitorForm.personToVisit,
+                isActive: true,
+                activeAdminId: null
             });
             
             const result = await invoke('manual_id_entry', {
@@ -509,24 +510,42 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                                 <p className="mt-1 text-xl font-semibold">{activeScanCard.id_number}</p>
                             </div>
                             <div>
-                                <p className="text-xs uppercase tracking-widest text-slate-300/80">Department</p>
-                                <p className="mt-1 font-semibold">{activeScanCard.department_name || "---"}</p>
+                                <p className="text-xs uppercase tracking-widest text-slate-300/80">
+                                    {activeScanCard.role?.toLowerCase() === 'visitor' ? "Person to Visit" : "Department"}
+                                </p>
+                                <p className="mt-1 font-semibold">
+                                    {activeScanCard.role?.toLowerCase() === 'visitor' 
+                                        ? (activeScanCard.person_to_visit || "---")
+                                        : (activeScanCard.department_name || "---")
+                                    }
+                                </p>
                             </div>
-                            {getProgramYearLabel(activeScanCard) && (
+                            {activeScanCard.role?.toLowerCase() === 'visitor' ? (
                                 <div>
-                                    <p className="text-xs uppercase tracking-widest text-slate-300/80">Program & Year</p>
+                                    <p className="text-xs uppercase tracking-widest text-slate-300/80">Purpose of Visit</p>
                                     <p className="mt-1 font-semibold text-cyan-200">
-                                        {getProgramYearLabel(activeScanCard)}
+                                        {activeScanCard.purpose_of_visit || "---"}
                                     </p>
                                 </div>
-                            )}
-                            {activeScanCard.position_title && (
-                                <div>
-                                    <p className="text-xs uppercase tracking-widest text-slate-300/80">Position Title</p>
-                                    <p className="mt-1 font-semibold text-cyan-200">
-                                        {activeScanCard.position_title}
-                                    </p>
-                                </div>
+                            ) : (
+                                <>
+                                    {getProgramYearLabel(activeScanCard) && (
+                                        <div>
+                                            <p className="text-xs uppercase tracking-widest text-slate-300/80">Program & Year</p>
+                                            <p className="mt-1 font-semibold text-cyan-200">
+                                                {getProgramYearLabel(activeScanCard)}
+                                            </p>
+                                        </div>
+                                    )}
+                                    {activeScanCard.position_title && (
+                                        <div>
+                                            <p className="text-xs uppercase tracking-widest text-slate-300/80">Position Title</p>
+                                            <p className="mt-1 font-semibold text-cyan-200">
+                                                {activeScanCard.position_title}
+                                            </p>
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     </div>
