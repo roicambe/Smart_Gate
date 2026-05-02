@@ -24,7 +24,7 @@ pub fn run() {
             
             // --- Initialize Face Recognition Pipeline ---
             // Graceful: if ONNX models are not present, the app still starts.
-            // Face recognition commands will return errors until models are placed.
+            // Face recognition commadnds will return errors until models are placed.
             let face_config = face_recognition::PipelineConfig::default();
             let pipeline_opt = match face_recognition::pipeline::RecognitionPipeline::new(face_config) {
                 Ok(mut pipeline) => {
