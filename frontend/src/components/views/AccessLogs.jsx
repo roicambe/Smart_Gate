@@ -122,35 +122,11 @@ export const AccessLogs = ({ branding, adminSession }) => {
         setProgramFilter('All');
         setYearFilter('All');
         setEventFilter('All');
-
-        setLoading(true);
-        try {
-            if (activeTab === 'gateLogs') {
-                const data = await invoke('get_access_logs', {
-                    roleFilter: null, actionType: null, locationName: null, searchTerm: null, startDate: null, endDate: null
-                });
-                setLogs(data);
-            } else {
-                const data = await invoke('get_event_attendance_logs', {
-                    startDate: null,
-                    endDate: null,
-                    departmentId: null,
-                    programId: null,
-                    yearLevel: null
-                });
-                setEventLogs(data);
-            }
-        } catch (error) {
-            console.error("Failed to clear filters:", error);
-            showError("Failed to clear filters.");
-        } finally {
-            setLoading(false);
-        }
     };
 
     useEffect(() => {
         fetchLogs();
-    }, [activeTab, searchTerm, roleFilter, actionFilter, startDate, endDate, departmentFilter]);
+    }, [activeTab, searchTerm, roleFilter, actionFilter, startDate, endDate, departmentFilter, programFilter, yearFilter]);
 
     // Filter logic based on active tab
     const currentData = activeTab === 'gateLogs' ? logs : eventLogs;
@@ -740,7 +716,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                     </button>
                 </div>
 
-                <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto flex-wrap lg:justify-end">
+                <div className="flex flex-col sm:flex-row items-center gap-2 w-full lg:w-auto flex-wrap lg:justify-end">
                     {/* Academic filters and other selectors will be here */}
 
                     {/* Role Filter */}
@@ -834,7 +810,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                     )}
 
                     {/* Date Filters */}
-                    <div className="flex items-center gap-2 border border-slate-200 rounded-lg p-1 bg-slate-50 w-full xl:w-auto shrink-0 flex-wrap xl:flex-nowrap justify-center">
+                    <div className="flex items-center gap-2 border border-slate-200 rounded-lg p-1 bg-slate-50 w-full xl:w-auto h-[39px] shrink-0 flex-wrap xl:flex-nowrap justify-center">
                         <div className="flex items-center gap-2 px-2">
                             <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
                             <input
@@ -855,19 +831,13 @@ export const AccessLogs = ({ branding, adminSession }) => {
                         </div>
                     </div>
 
-                    {/* Apply & Clear buttons */}
+                    {/* Clear button */}
                     <div className="flex gap-2 w-full sm:w-auto pt-1 sm:pt-0 shrink-0">
-                        <button
-                            onClick={fetchLogs}
-                            className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors focus:outline-none shadow-sm"
-                        >
-                            APPLY
-                        </button>
                         <button
                             onClick={clearFilters}
                             className="flex-1 sm:flex-none bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-semibold transition-colors focus:outline-none shadow-sm"
                         >
-                            CLEAR
+                            CLEAR ALL
                         </button>
                     </div>
 

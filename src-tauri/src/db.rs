@@ -4729,7 +4729,7 @@ pub fn get_archived_users(pool: &DbPool) -> Result<Vec<serde_json::Value>, Strin
 
     let mut stmt = conn.prepare(
         "SELECT 
-            p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.suffix, p.suffix, p.archived_at,
+            p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.suffix, p.archived_at,
             COALESCE(emp_dept.department_name, stu_dept.department_name) AS department_name,
             prog.program_name,
             stu.year_level,
@@ -4746,23 +4746,41 @@ pub fn get_archived_users(pool: &DbPool) -> Result<Vec<serde_json::Value>, Strin
 
     let rows = stmt.query_map([], |row| {
         let person_id: i64 = row.get(0)?;
+        let first_name: String = row.get(2)?;
+        let middle_name: Option<String> = row.get(3)?;
+        let last_name: String = row.get(4)?;
+        let suffix: Option<String> = row.get(5)?;
+        
         let roles = get_person_roles(&conn, person_id).unwrap_or_default();
         let contacts = get_person_contacts(&conn, person_id).unwrap_or_default();
         
         // Pick primary role for display
         let role = roles.first().cloned().unwrap_or_else(|| "User".to_string());
 
+        // Format: Last, First M., Suffix
+        let mid_init = match middle_name.as_deref() {
+            Some(m) if !m.trim().is_empty() => format!(" {}.", m.chars().next().unwrap_or_default()),
+            _ => String::new(),
+        };
+        let suf_part = match suffix.as_deref() {
+            Some(s) if !s.trim().is_empty() => format!(" {}", s),
+            _ => String::new(),
+        };
+        let full_name = format!("{}, {}{}{}", last_name, first_name, mid_init, suf_part);
+
         Ok(json!({
             "person_id": person_id,
             "id_number": row.get::<_, String>(1)?,
-            "first_name": row.get::<_, String>(2)?,
-            "middle_name": row.get::<_, Option<String>>(3)?,
-            "last_name": row.get::<_, String>(4)?,
-            "archived_at": row.get::<_, Option<String>>(5)?,
-            "department_name": row.get::<_, Option<String>>(6)?,
-            "program_name": row.get::<_, Option<String>>(7)?,
-            "year_level": row.get::<_, Option<i64>>(8)?,
-            "position_title": row.get::<_, Option<String>>(9)?,
+            "first_name": first_name,
+            "middle_name": middle_name,
+            "last_name": last_name,
+            "suffix": suffix,
+            "full_name": full_name,
+            "archived_at": row.get::<_, Option<String>>(6)?,
+            "department_name": row.get::<_, Option<String>>(7)?,
+            "program_name": row.get::<_, Option<String>>(8)?,
+            "year_level": row.get::<_, Option<i64>>(9)?,
+            "position_title": row.get::<_, Option<String>>(10)?,
             "roles": roles,
             "role": role,
             "contacts": contacts
