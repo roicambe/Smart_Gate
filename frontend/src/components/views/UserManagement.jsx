@@ -6,6 +6,9 @@ import { writeFile } from '@tauri-apps/plugin-fs';
 import * as XLSX from 'xlsx';
 import { useToast } from '../toast/ToastProvider';
 import { AdminModal } from '../common/AdminModal';
+import { Pagination } from '../common/Pagination';
+import { SuffixCombobox } from '../common/SuffixCombobox';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 
 const visitorYearCode = new Date().getFullYear().toString().slice(-2);
 
@@ -42,12 +45,44 @@ const trimToNull = (value) => {
     return trimmed ? trimmed : null;
 };
 
+const formatName = (val) => {
+    if (!val) return '';
+    
+    // Only allow letters, spaces, dots, hyphens, and single quotes
+    let cleaned = val.replace(/[^a-zA-Z\s.\-']/g, '');
+
+    // List of suffixes to preserve/handle
+    const suffixes = ['Jr', 'Sr', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+
+    return cleaned.split(' ').map(word => {
+        if (!word) return '';
+        
+        const cleanWord = word.replace(/[.,]/g, '');
+        const upperWord = cleanWord.toUpperCase();
+        
+        // Special handling for suffixes
+        if (suffixes.includes(upperWord)) {
+            const hasDot = word.endsWith('.');
+            return upperWord + (hasDot ? '.' : '');
+        }
+
+        // Handle specific cases like "Jr." if typed manually with dot
+        if (upperWord === 'JR' || upperWord === 'SR') {
+             return upperWord.charAt(0).toUpperCase() + upperWord.slice(1).toLowerCase() + (word.endsWith('.') ? '.' : '');
+        }
+
+        // Standard Title Case
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    }).join(' ');
+};
+
 const buildUserPayload = (role, data) => ({
     role,
     idNumber: (data.id_number || '').trim(),
-    firstName: (data.first_name || '').trim(),
-    middleName: trimToNull(data.middle_name),
-    lastName: (data.last_name || '').trim(),
+    firstName: formatName(data.first_name),
+    middleName: trimToNull(formatName(data.middle_name)),
+    lastName: formatName(data.last_name),
+    suffix: trimToNull(data.suffix),
     email: trimToNull(data.email),
     contactNumber: trimToNull(data.contact_number),
     programId: role === 'student' && data.program_id ? parseInt(data.program_id, 10) : null,
@@ -99,6 +134,7 @@ export const UserManagement = ({ adminSession, branding }) => {
         first_name: '',
         middle_name: '',
         last_name: '',
+        suffix: '',
         program_id: '',
         department_id: '',
         year_level: '',
@@ -256,6 +292,7 @@ export const UserManagement = ({ adminSession, branding }) => {
             first_name: user.first_name || '',
             middle_name: user.middle_name || '',
             last_name: user.last_name || '',
+            suffix: user.suffix || '',
             program_id: user.program_id ? user.program_id.toString() : (programs.length > 0 ? programs[0].program_id.toString() : ''),
             department_id: user.department_id ? user.department_id.toString() : (departments.length > 0 ? departments[0].department_id.toString() : ''),
             year_level: user.year_level ? user.year_level.toString() : '',
@@ -355,6 +392,7 @@ export const UserManagement = ({ adminSession, branding }) => {
             first_name: '',
             middle_name: '',
             last_name: '',
+            suffix: '',
             program_id: programs.length > 0 ? programs[0].program_id.toString() : '',
             department_id: departments.length > 0 ? departments[0].department_id.toString() : '',
             year_level: '',
@@ -509,16 +547,19 @@ export const UserManagement = ({ adminSession, branding }) => {
         return matchesSearch && matchesDepartment;
     });
 
+    // Sorting
+    const { sortConfig, requestSort, sortedData: sortedUsers } = useTableSort(filteredUsers, null, 'asc', 'user_management');
+
     // Pagination
     const ITEMS_PER_PAGE = 15;
     const [currentPage, setCurrentPage] = useState(1);
-    useEffect(() => { setCurrentPage(1); }, [searchQuery, mainTab, subTab, visitorSortOrder, filterProgramId, filterYearLevel, filterStatus, filterDepartmentId]);
-    const totalPages = Math.ceil(filteredUsers.length / ITEMS_PER_PAGE);
+    useEffect(() => { setCurrentPage(1); }, [searchQuery, mainTab, subTab, visitorSortOrder, filterProgramId, filterYearLevel, filterStatus, filterDepartmentId, sortConfig]);
+    const totalPages = Math.ceil(sortedUsers.length / ITEMS_PER_PAGE);
     const paginatedUsers = useMemo(() => {
         const start = (currentPage - 1) * ITEMS_PER_PAGE;
-        return filteredUsers.slice(start, start + ITEMS_PER_PAGE);
-    }, [filteredUsers, currentPage]);
-    const showPagination = filteredUsers.length > ITEMS_PER_PAGE;
+        return sortedUsers.slice(start, start + ITEMS_PER_PAGE);
+    }, [sortedUsers, currentPage]);
+    const showPagination = sortedUsers.length > ITEMS_PER_PAGE;
 
     return (
         <div className="w-full h-full min-h-0 space-y-6 animate-in slide-in-from-bottom-4 duration-500 relative flex flex-col">
@@ -690,22 +731,20 @@ export const UserManagement = ({ adminSession, branding }) => {
                     <table className="w-full text-left border-collapse text-sm text-slate-600">
                         <thead className="text-xs uppercase bg-slate-100 border-b border-slate-200 text-slate-700 sticky top-0 z-10">
                             <tr>
-                                <th className="px-3 py-2 font-semibold tracking-wider">ID Number</th>
-                                <th className="px-3 py-2 font-semibold tracking-wider">Full Name</th>
+                                <SortableHeader label="ID Number" sortKey="id_number" sortConfig={sortConfig} onSort={requestSort} />
+                                <SortableHeader label="Full Name" sortKey="last_name" sortConfig={sortConfig} onSort={requestSort} />
                                 {mainTab === 'visitors' ? (
                                     <>
-                                        <th className="px-3 py-2 font-semibold tracking-wider">Purpose</th>
-                                        <th className="px-3 py-2 font-semibold tracking-wider">Person to Visit</th>
-                                        <th className="px-3 py-2 font-semibold tracking-wider">Registration Date</th>
+                                        <SortableHeader label="Purpose" sortKey="purpose_of_visit" sortConfig={sortConfig} onSort={requestSort} />
+                                        <SortableHeader label="Person to Visit" sortKey="person_to_visit" sortConfig={sortConfig} onSort={requestSort} />
+                                        <SortableHeader label="Registration Date" sortKey="created_at" sortConfig={sortConfig} onSort={requestSort} />
                                         <th className="px-3 py-2 font-semibold tracking-wider">Registration Time</th>
-                                        <th className="px-3 py-2 font-semibold tracking-wider">Status</th>
+                                        <SortableHeader label="Status" sortKey="is_active" sortConfig={sortConfig} onSort={requestSort} />
                                     </>
                                 ) : (
                                     <>
-                                        <th className="px-3 py-2 font-semibold tracking-wider">
-                                            {subTab === 'student' ? 'Program / Year' : 'Department'}
-                                        </th>
-                                        <th className="px-3 py-2 font-semibold tracking-wider">Status</th>
+                                        <SortableHeader label={subTab === 'student' ? 'Program / Year' : 'Department'} sortKey={subTab === 'student' ? 'program_name' : 'department_name'} sortConfig={sortConfig} onSort={requestSort} />
+                                        <SortableHeader label="Status" sortKey="is_active" sortConfig={sortConfig} onSort={requestSort} />
                                     </>
                                 )}
                                 <th className="px-3 py-2 font-semibold tracking-wider text-right">Actions</th>
@@ -714,7 +753,7 @@ export const UserManagement = ({ adminSession, branding }) => {
                         <tbody className="divide-y divide-slate-100">
                             {isLoading ? (
                                 <tr>
-                                    <td colSpan={mainTab === 'visitors' ? 8 : 5} className="text-center py-20 text-slate-500">
+                                    <td colSpan={mainTab === 'visitors' ? 9 : 5} className="text-center py-20 text-slate-500">
                                         <div className="flex flex-col items-center justify-center space-y-3">
                                             <Loader2 className="w-10 h-10 animate-spin text-blue-500" />
                                             <p className="text-slate-500 font-medium">Synchronizing profile data...</p>
@@ -723,7 +762,7 @@ export const UserManagement = ({ adminSession, branding }) => {
                                 </tr>
                             ) : filteredUsers.length === 0 ? (
                                 <tr>
-                                    <td colSpan={mainTab === 'visitors' ? 8 : 5} className="p-12 text-center">
+                                    <td colSpan={mainTab === 'visitors' ? 9 : 5} className="p-12 text-center">
                                         <div className="flex flex-col items-center justify-center space-y-4">
                                             <div className="p-4 bg-slate-50 rounded-full border border-slate-100">
                                                 <Users className="w-10 h-10 text-slate-300" />
@@ -747,7 +786,9 @@ export const UserManagement = ({ adminSession, branding }) => {
                                 paginatedUsers.map((user, index) => (
                                     <tr key={`${user.person_id || 'user'}-${index}`} className="hover:bg-slate-50 even:bg-slate-50/50 transition-colors group">
                                         <td className="px-3 py-1.5 font-mono font-medium text-slate-900">{user.id_number}</td>
-                                        <td className="px-3 py-1.5 font-medium text-slate-900">{user.first_name} {user.last_name || ''}</td>
+                                        <td className="px-3 py-1.5 font-medium text-slate-900">
+                                            {user.last_name || ''}{user.last_name ? ',' : ''} {user.first_name}{user.middle_name ? ' ' + user.middle_name.charAt(0) + '.' : ''}{user.suffix ? ' ' + user.suffix : ''}
+                                        </td>
                                         {mainTab === 'visitors' ? (
                                             <>
                                                 <td className="px-3 py-1.5 text-slate-600">{user.purpose_of_visit}</td>
@@ -817,42 +858,14 @@ export const UserManagement = ({ adminSession, branding }) => {
                     </table>
                 </div>
 
-                {/* Pagination footer (only when records > items per page) */}
-                {showPagination && (
-                    <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 flex flex-wrap items-center justify-between gap-3 shrink-0 rounded-b-xl">
-                        <div>
-                            Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredUsers.length)} of {filteredUsers.length}
-                        </div>
-                        <div className="flex items-center gap-1">
-                            <button
-                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                disabled={currentPage === 1}
-                                className="px-2 py-1 rounded border border-slate-200 bg-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors flex items-center gap-0.5"
-                            >
-                                <ChevronLeft className="w-4 h-4" /> Previous
-                            </button>
-                            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-                                <button
-                                    key={p}
-                                    onClick={() => setCurrentPage(p)}
-                                    className={`min-w-[28px] px-2 py-1 rounded border transition-colors ${currentPage === p
-                                        ? 'bg-slate-800 text-white border-slate-800'
-                                        : 'border-slate-200 bg-white hover:bg-slate-50'
-                                        }`}
-                                >
-                                    {p}
-                                </button>
-                            ))}
-                            <button
-                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                disabled={currentPage === totalPages}
-                                className="px-2 py-1 rounded border border-slate-200 bg-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors flex items-center gap-0.5"
-                            >
-                                Next <ChevronRight className="w-4 h-4" />
-                            </button>
-                        </div>
-                    </div>
-                )}
+                <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={setCurrentPage}
+                    totalItems={filteredUsers.length}
+                    itemsPerPage={ITEMS_PER_PAGE}
+                    currentItemsCount={paginatedUsers.length}
+                />
             </div>
 
             {/* Smart Registration / Edit Form Component */}
@@ -905,18 +918,46 @@ export const UserManagement = ({ adminSession, branding }) => {
                                         </p>
                                     </div>
 
-                                    <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-3">
+                                    <div className="grid grid-cols-2 items-start gap-4 md:grid-cols-4">
                                         <div className="flex min-w-0 w-full flex-col">
                                             <label className="mb-1 flex min-h-[20px] items-end text-xs font-medium text-white/60">First Name <span className="ml-0.5 text-base font-bold text-rose-500">*</span></label>
-                                            <input required type="text" value={formData.first_name} onChange={e => setFormData({ ...formData, first_name: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" />
+                                            <input 
+                                                required 
+                                                type="text" 
+                                                value={formData.first_name} 
+                                                onChange={e => setFormData({ ...formData, first_name: formatName(e.target.value) })} 
+                                                placeholder="e.g. Juan"
+                                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" 
+                                            />
                                         </div>
                                         <div className="flex min-w-0 w-full flex-col">
                                             <label className="mb-1 flex min-h-[24px] items-end text-xs font-medium text-white/60">Middle Name</label>
-                                            <input type="text" value={formData.middle_name} onChange={e => setFormData({ ...formData, middle_name: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" />
+                                            <input 
+                                                type="text" 
+                                                value={formData.middle_name} 
+                                                onChange={e => setFormData({ ...formData, middle_name: formatName(e.target.value) })} 
+                                                placeholder="Optional"
+                                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" 
+                                            />
                                         </div>
                                         <div className="flex min-w-0 w-full flex-col">
                                             <label className="mb-1 flex min-h-[20px] items-end text-xs font-medium text-white/60">Last Name <span className="ml-0.5 text-base font-bold text-rose-500">*</span></label>
-                                            <input required type="text" value={formData.last_name} onChange={e => setFormData({ ...formData, last_name: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" />
+                                            <input 
+                                                required 
+                                                type="text" 
+                                                value={formData.last_name} 
+                                                onChange={e => setFormData({ ...formData, last_name: formatName(e.target.value) })} 
+                                                placeholder="e.g. Dela Cruz"
+                                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none" 
+                                            />
+                                        </div>
+                                        <div className="flex min-w-0 w-full flex-col">
+                                            <label className="mb-1 flex min-h-[24px] items-end text-xs font-medium text-white/60">Suffix</label>
+                                            <SuffixCombobox
+                                                value={formData.suffix}
+                                                onChange={val => setFormData({ ...formData, suffix: val })}
+                                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:ring-2 focus:ring-white/20 focus:outline-none"
+                                            />
                                         </div>
                                     </div>
 

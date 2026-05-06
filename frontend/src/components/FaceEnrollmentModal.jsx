@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Camera, X, Loader2, UserPlus, CheckCircle2, AlertTriangle, ArrowRight } from "lucide-react";
+import { Camera, X, Loader2, UserPlus, CheckCircle2, AlertTriangle, ArrowRight, FlipHorizontal2 } from "lucide-react";
 import { useFaceRecognition } from "../hooks/useFaceRecognition";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -13,6 +13,7 @@ export const FaceEnrollmentModal = ({ onClose }) => {
     // Camera selection
     const [cameras, setCameras] = useState([]);
     const [selectedCamera, setSelectedCamera] = useState(null);
+    const [isMirrored, setIsMirrored] = useState(false);
 
     // Flow state: 'id_entry' -> 'capturing' -> 'enrolling' -> 'done'
     const [step, setStep] = useState('id_entry');
@@ -230,23 +231,40 @@ export const FaceEnrollmentModal = ({ onClose }) => {
                             </div>
                         </div>
 
-                        {/* Camera Selector (Styled like Scanner) */}
-                        {cameras.length > 1 && (
-                            <div className="mb-4 flex items-center bg-black/40 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 w-full max-w-[400px] shadow-lg">
-                                <Camera className="w-4 h-4 text-white/50 mr-3" />
-                                <select
-                                    className="bg-transparent text-white text-sm w-full outline-none focus:ring-0 appearance-none font-medium cursor-pointer"
-                                    value={selectedCamera || ''}
-                                    onChange={(e) => setSelectedCamera(e.target.value)}
-                                >
-                                    {cameras.map(cam => (
-                                        <option key={cam.deviceId} value={cam.deviceId} className="bg-slate-900 text-white">
-                                            {cam.label || `Camera ${cam.deviceId.substring(0, 5)}...`}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-                        )}
+                        {/* Camera Controls Row */}
+                        <div className="mb-4 flex items-center gap-3 w-full max-w-[400px]">
+                            {/* Camera Selector (Styled like Scanner) */}
+                            {cameras.length > 1 && (
+                                <div className="flex items-center bg-black/40 backdrop-blur-md px-4 py-2 rounded-2xl border border-white/10 flex-1 shadow-lg">
+                                    <Camera className="w-4 h-4 text-white/50 mr-3" />
+                                    <select
+                                        className="bg-transparent text-white text-sm w-full outline-none focus:ring-0 appearance-none font-medium cursor-pointer"
+                                        value={selectedCamera || ''}
+                                        onChange={(e) => setSelectedCamera(e.target.value)}
+                                    >
+                                        {cameras.map(cam => (
+                                            <option key={cam.deviceId} value={cam.deviceId} className="bg-slate-900 text-white">
+                                                {cam.label || `Camera ${cam.deviceId.substring(0, 5)}...`}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
+                            {/* Mirror Toggle Button */}
+                            <button
+                                onClick={() => setIsMirrored(prev => !prev)}
+                                className={`flex items-center gap-2 px-4 py-2 rounded-2xl border shadow-lg backdrop-blur-md transition-all duration-200 font-medium text-sm ${
+                                    isMirrored
+                                        ? 'bg-blue-500/30 border-blue-400/40 text-blue-300 hover:bg-blue-500/40'
+                                        : 'bg-black/40 border-white/10 text-white/70 hover:bg-white/10 hover:text-white'
+                                }`}
+                                title={isMirrored ? 'Disable mirror mode' : 'Enable mirror mode'}
+                            >
+                                <FlipHorizontal2 className={`w-5 h-5 transition-transform duration-200 ${isMirrored ? 'scale-x-[-1]' : ''}`} />
+                                <span className="hidden sm:inline">{isMirrored ? 'Mirrored' : 'Mirror'}</span>
+                            </button>
+                        </div>
 
                         {/* Camera Feed */}
                         <div className="w-full max-w-[800px] aspect-[4/3] overflow-hidden rounded-[3rem] bg-black border-[4px] border-white/20 shadow-2xl relative">
@@ -255,7 +273,7 @@ export const FaceEnrollmentModal = ({ onClose }) => {
                                 autoPlay
                                 playsInline
                                 muted
-                                className={`w-full h-full object-cover transition-opacity duration-500 ${isCameraReady ? 'opacity-100' : 'opacity-0'}`}
+                                className={`w-full h-full object-cover transition-all duration-300 ${isCameraReady ? 'opacity-100' : 'opacity-0'} ${isMirrored ? 'scale-x-[-1]' : ''}`}
                             />
 
                             {!isCameraReady && (

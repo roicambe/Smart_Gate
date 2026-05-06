@@ -9,6 +9,8 @@ import * as XLSX from 'xlsx';
 import { useToast } from '../toast/ToastProvider';
 import { drawInstitutionalHeader, prepareInstitutionalHeaderAssets } from '../../utils/pdfInstitutionalHeader';
 import { AdminModal } from '../common/AdminModal';
+import { Pagination } from '../common/Pagination';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 
 // ─── Human-Readable Translator ───────────────────────────────────────────────
 
@@ -189,14 +191,17 @@ export const AuditTrail = ({ branding, adminSession }) => {
         return matchesSearch && matchesAction;
     });
 
+    // Sorting
+    const { sortConfig, requestSort, sortedData: sortedLogs } = useTableSort(filteredLogs, 'created_at', 'desc', 'audit_trail');
+
     // Pagination - reset to page 1 when filters change
-    useEffect(() => { setCurrentPage(1); }, [searchTerm, actionFilter, startDate, endDate]);
-    const totalPages = Math.ceil(filteredLogs.length / ITEMS_PER_PAGE);
+    useEffect(() => { setCurrentPage(1); }, [searchTerm, actionFilter, startDate, endDate, sortConfig]);
+    const totalPages = Math.ceil(sortedLogs.length / ITEMS_PER_PAGE);
     const paginatedLogs = useMemo(() => {
         const start = (currentPage - 1) * ITEMS_PER_PAGE;
-        return filteredLogs.slice(start, start + ITEMS_PER_PAGE);
-    }, [filteredLogs, currentPage]);
-    const showPagination = filteredLogs.length > ITEMS_PER_PAGE;
+        return sortedLogs.slice(start, start + ITEMS_PER_PAGE);
+    }, [sortedLogs, currentPage]);
+    const showPagination = sortedLogs.length > ITEMS_PER_PAGE;
 
     const formatDate = (dateString) => {
         if (!dateString) return "-";
@@ -543,11 +548,11 @@ export const AuditTrail = ({ branding, adminSession }) => {
                     <table className="w-full text-left border-collapse text-sm">
                         <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
                             <tr className="text-slate-600">
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Timestamp</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Admin</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Action</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Category</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Target</th>
+                                <SortableHeader label="Timestamp" sortKey="created_at" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
+                                <SortableHeader label="Admin" sortKey="admin_full_name" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
+                                <SortableHeader label="Action" sortKey="action_type" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
+                                <SortableHeader label="Category" sortKey="target_type" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
+                                <SortableHeader label="Target" sortKey="target_label" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs text-right">Actions</th>
                             </tr>
                         </thead>
@@ -606,41 +611,14 @@ export const AuditTrail = ({ branding, adminSession }) => {
                     </table>
                 </div>
 
-                <div className="px-5 py-3 border-t border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 flex flex-wrap items-center justify-between gap-3 shrink-0 rounded-b-xl">
-                    <div>
-                        Showing {paginatedLogs.length > 0 ? (currentPage - 1) * ITEMS_PER_PAGE + 1 : 0}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredLogs.length)} of {filteredLogs.length} (Total: {logs.length})
-                    </div>
-                    {showPagination && (
-                        <div className="flex items-center gap-1">
-                            <button
-                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                disabled={currentPage === 1}
-                                className="px-2 py-1 rounded border border-slate-200 bg-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors flex items-center gap-0.5"
-                            >
-                                <ChevronLeft className="w-4 h-4" /> Previous
-                            </button>
-                            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-                                <button
-                                    key={p}
-                                    onClick={() => setCurrentPage(p)}
-                                    className={`min-w-[28px] px-2 py-1 rounded border transition-colors ${currentPage === p
-                                        ? 'bg-slate-800 text-white border-slate-800'
-                                        : 'border-slate-200 bg-white hover:bg-slate-50'
-                                        }`}
-                                >
-                                    {p}
-                                </button>
-                            ))}
-                            <button
-                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                disabled={currentPage === totalPages}
-                                className="px-2 py-1 rounded border border-slate-200 bg-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors flex items-center gap-0.5"
-                            >
-                                Next <ChevronRight className="w-4 h-4" />
-                            </button>
-                        </div>
-                    )}
-                </div>
+                <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={setCurrentPage}
+                    totalItems={filteredLogs.length}
+                    itemsPerPage={ITEMS_PER_PAGE}
+                    currentItemsCount={paginatedLogs.length}
+                />
             </div>
 
             {/* View Details Modal */}

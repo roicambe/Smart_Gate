@@ -19,8 +19,38 @@ const formatRoleLabel = (role) => {
 
 const getFullNameLabel = (person) => {
     if (!person) return "---";
-    const middle = person.middle_name ? ` ${person.middle_name} ` : " ";
-    return `${person.first_name}${middle}${person.last_name}`;
+    const middle = person.middle_name ? ` ${person.middle_name.charAt(0)}.` : '';
+    const suffix = person.suffix ? ` ${person.suffix}` : '';
+    return `${person.first_name}${middle} ${person.last_name}${suffix}`;
+};
+
+const formatIdNumber = (val) => {
+    if (!val) return "";
+    
+    // Strip everything but alphanumeric
+    let clean = val.replace(/[^a-zA-Z0-9]/g, "");
+    
+    // Detect Visitor Format (VIS-XXXXXX)
+    if (clean.toUpperCase().startsWith("VIS")) {
+        const digits = clean.slice(3).replace(/\D/g, "").slice(0, 6);
+        return `VIS-${digits}`.toUpperCase();
+    }
+    
+    // Numeric IDs (Student vs Employee)
+    const digits = clean.replace(/\D/g, "");
+    
+    // If it reaches 9 digits, it's an employee ID (No hyphen)
+    if (digits.length >= 9) {
+        return digits.slice(0, 9);
+    }
+    
+    // If it's exactly 7 digits, it's a student ID (XX-XXXXX)
+    if (digits.length === 7) {
+        return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+    }
+    
+    // Otherwise return digits (partial or other)
+    return digits.slice(0, 9);
 };
 
 const getProgramYearLabel = (person) => {
@@ -594,13 +624,17 @@ export const EventActionMenu = ({ setView, branding }) => {
                             <form onSubmit={handleManualSubmit}>
                                 <input
                                     type="text"
-                                    placeholder="e.g. 2026-00123"
+                                    placeholder="e.g. 23-00123"
                                     value={manualId}
-                                    onChange={(e) => setManualId(e.target.value)}
-                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-white/50 mb-8 text-center tracking-widest uppercase transition-all"
+                                    onChange={(e) => setManualId(formatIdNumber(e.target.value))}
+                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-white/50 mb-3 text-center tracking-widest uppercase transition-all"
                                     autoFocus
                                     required
+                                    maxLength={10}
                                 />
+                                <p className="text-white/40 text-sm text-center mb-6">
+                                    Format: <span className="text-white/60 font-semibold">00-00000</span> (Student) &nbsp;|&nbsp; <span className="text-white/60 font-semibold">000000000</span> (Employee)
+                                </p>
                                 <div className="flex gap-3">
                                     <button type="button" onClick={() => setShowManualModal(false)} className="flex-1 px-4 py-3 bg-white/5 border border-white/10 text-white/80 font-medium rounded-xl hover:bg-white/10 hover:text-white transition-all focus:outline-none">Cancel</button>
                                     <button type="submit" className="flex-[2] px-4 py-3 bg-white text-black font-bold rounded-xl hover:bg-slate-200 transition-all focus:outline-none focus:ring-4 focus:ring-white/30 flex items-center justify-center gap-2 text-lg shadow-lg">Submit <ArrowRight className="w-5 h-5" /></button>
@@ -630,6 +664,7 @@ export const EventActionMenu = ({ setView, branding }) => {
                 <FaceScannerModal 
                     scannerFunction="event"
                     onClose={() => setShowFaceScanner(false)}
+                    isPaused={showManualModal || showQrScanner}
                     onIdentify={(scannedId) => {
                         setShowFaceScanner(false);
                         handleQrScan(scannedId, false);

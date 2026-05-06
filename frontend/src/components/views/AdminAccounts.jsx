@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { CheckCircle2, ChevronLeft, ChevronRight, Edit2, KeyRound, Search, ShieldCheck, Trash2, UserPlus, ShieldAlert } from 'lucide-react';
+import { CheckCircle2, ChevronLeft, ChevronRight, Edit2, KeyRound, ShieldCheck, Trash2, UserPlus, ShieldAlert } from 'lucide-react';
 import { AdminModal } from '../common/AdminModal';
 import { SettingsSectionHeader } from '../common/SettingsSectionHeader';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 
 const ROLE_OPTIONS = ['System Administrator', 'Gate Supervisor'];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -26,7 +27,6 @@ const getSuggestedPassword = (fullName, role) => (
 
 export const AdminAccounts = ({ adminSession, branding, showToast }) => {
     const [accounts, setAccounts] = useState([]);
-    const [searchQuery, setSearchQuery] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     const ITEMS_PER_PAGE = 15;
 
@@ -201,21 +201,14 @@ export const AdminAccounts = ({ adminSession, branding, showToast }) => {
         }
     };
 
-    const filteredAccounts = accounts.filter(account => {
-        const query = searchQuery.toLowerCase();
-        return (
-            account.username.toLowerCase().includes(query) ||
-            account.full_name.toLowerCase().includes(query) ||
-            (account.email || '').toLowerCase().includes(query) ||
-            account.role.toLowerCase().includes(query)
-        );
-    });
+    // Sorting
+    const { sortConfig, requestSort, sortedData: sortedAccounts } = useTableSort(accounts, null, 'asc', 'admin_accounts');
 
-    const totalPages = Math.ceil(filteredAccounts.length / ITEMS_PER_PAGE);
-    const paginatedAccounts = filteredAccounts.slice(
-        (currentPage - 1) * ITEMS_PER_PAGE,
-        currentPage * ITEMS_PER_PAGE
-    );
+    const totalPages = Math.ceil(sortedAccounts.length / ITEMS_PER_PAGE);
+    const paginatedAccounts = useMemo(() => {
+        const start = (currentPage - 1) * ITEMS_PER_PAGE;
+        return sortedAccounts.slice(start, start + ITEMS_PER_PAGE);
+    }, [sortedAccounts, currentPage]);
 
     return (
         <div className="relative flex min-h-0 w-full flex-col space-y-6 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
@@ -225,27 +218,12 @@ export const AdminAccounts = ({ adminSession, branding, showToast }) => {
                 description="Oversee platform supervisors and configure role assignments."
                 iconWrapperClassName="border-emerald-200 bg-emerald-50 text-emerald-600"
                 action={(
-                    <div className="flex items-center gap-4">
-                        <div className="relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                            <input
-                                type="text"
-                                placeholder="Search administrators..."
-                                value={searchQuery}
-                                onChange={(e) => {
-                                    setSearchQuery(e.target.value);
-                                    setCurrentPage(1);
-                                }}
-                                className="bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all w-64"
-                            />
-                        </div>
-                        <button
-                            onClick={() => setShowAddModal(true)}
-                            className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-indigo-700 focus:outline-none"
-                        >
-                            <UserPlus className="h-5 w-5" /> New Account
-                        </button>
-                    </div>
+                    <button
+                        onClick={() => setShowAddModal(true)}
+                        className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-indigo-700 focus:outline-none"
+                    >
+                        <UserPlus className="h-5 w-5" /> New Account
+                    </button>
                 )}
             />
 
@@ -253,11 +231,11 @@ export const AdminAccounts = ({ adminSession, branding, showToast }) => {
                 <table className="w-full text-left text-sm text-slate-600">
                     <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-700">
                         <tr>
-                            <th className="px-6 py-4 font-semibold tracking-wider">Username</th>
-                            <th className="px-6 py-4 font-semibold tracking-wider">Name</th>
-                            <th className="px-6 py-4 font-semibold tracking-wider">Contact Email</th>
-                            <th className="px-6 py-4 font-semibold tracking-wider">System Role</th>
-                            <th className="px-6 py-4 font-semibold tracking-wider">Status</th>
+                            <SortableHeader label="Username" sortKey="username" sortConfig={sortConfig} onSort={requestSort} />
+                            <SortableHeader label="Name" sortKey="full_name" sortConfig={sortConfig} onSort={requestSort} />
+                            <SortableHeader label="Contact Email" sortKey="email" sortConfig={sortConfig} onSort={requestSort} />
+                            <SortableHeader label="System Role" sortKey="role" sortConfig={sortConfig} onSort={requestSort} />
+                            <SortableHeader label="Status" sortKey="is_first_login" sortConfig={sortConfig} onSort={requestSort} />
                             <th className="px-6 py-4 text-right font-semibold tracking-wider">Actions</th>
                         </tr>
                     </thead>
@@ -342,15 +320,9 @@ export const AdminAccounts = ({ adminSession, branding, showToast }) => {
                                         <div>
                                             <p className="text-slate-900 font-bold text-lg">No Admins Found</p>
                                             <p className="text-slate-500 text-sm max-w-xs mx-auto">
-                                                We couldn't find any administrative accounts matching your search query.
+                                                No administrative accounts have been registered in the system yet.
                                             </p>
                                         </div>
-                                        <button
-                                            onClick={() => setSearchQuery('')}
-                                            className="text-blue-600 font-semibold text-sm hover:underline"
-                                        >
-                                            Clear search
-                                        </button>
                                     </div>
                                 </td>
                             </tr>
@@ -362,7 +334,7 @@ export const AdminAccounts = ({ adminSession, branding, showToast }) => {
             {totalPages > 1 && (
                 <div className="flex items-center justify-between border-t border-slate-100 pt-6">
                     <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-                        Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredAccounts.length)} of {filteredAccounts.length} accounts
+                        Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, sortedAccounts.length)} of {sortedAccounts.length} accounts
                     </p>
                     <div className="flex items-center gap-2">
                         <button

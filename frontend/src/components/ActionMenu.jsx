@@ -7,6 +7,7 @@ import { FaceScannerModal } from "./FaceScannerModal";
 import { extractScanId } from "../utils/patternHunter";
 import { useGhostScannerListener } from "../hooks/useGhostScannerListener";
 import { useToast } from "./toast/ToastProvider";
+import { SuffixCombobox } from "./common/SuffixCombobox";
 
 const ID_CARD_DURATION_MS = 1000;
 const DETAILED_TOAST_ROLES = new Set(["student", "professor", "staff"]);
@@ -18,10 +19,71 @@ const formatRoleLabel = (role) => {
     return role ? role.charAt(0).toUpperCase() + role.slice(1) : "---";
 };
 
+const formatName = (val) => {
+    if (!val) return '';
+    
+    // Only allow letters, spaces, dots, hyphens, and single quotes
+    let cleaned = val.replace(/[^a-zA-Z\s.\-']/g, '');
+
+    // List of suffixes to preserve/handle
+    const suffixes = ['Jr', 'Sr', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+
+    return cleaned.split(' ').map(word => {
+        if (!word) return '';
+        
+        const cleanWord = word.replace(/[.,]/g, '');
+        const upperWord = cleanWord.toUpperCase();
+        
+        // Special handling for suffixes
+        if (suffixes.includes(upperWord)) {
+            const hasDot = word.endsWith('.');
+            return upperWord + (hasDot ? '.' : '');
+        }
+
+        // Handle specific cases like "Jr." if typed manually with dot
+        if (upperWord === 'JR' || upperWord === 'SR') {
+             return upperWord.charAt(0).toUpperCase() + upperWord.slice(1).toLowerCase() + (word.endsWith('.') ? '.' : '');
+        }
+
+        // Standard Title Case
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    }).join(' ');
+};
+
 const getFullNameLabel = (person) => {
     if (!person) return "---";
-    const middle = person.middle_name ? ` ${person.middle_name} ` : " ";
-    return `${person.first_name}${middle}${person.last_name}`;
+    const middle = person.middle_name ? ` ${person.middle_name.charAt(0)}.` : '';
+    const suffix = person.suffix ? ` ${person.suffix}` : '';
+    return `${person.first_name}${middle} ${person.last_name}${suffix}`;
+};
+
+const formatIdNumber = (val) => {
+    if (!val) return "";
+    
+    // Strip everything but alphanumeric
+    let clean = val.replace(/[^a-zA-Z0-9]/g, "");
+    
+    // Detect Visitor Format (VIS-XXXXXX)
+    if (clean.toUpperCase().startsWith("VIS")) {
+        const digits = clean.slice(3).replace(/\D/g, "").slice(0, 6);
+        return `VIS-${digits}`.toUpperCase();
+    }
+    
+    // Numeric IDs (Student vs Employee)
+    const digits = clean.replace(/\D/g, "");
+    
+    // If it reaches 9 digits, it's an employee ID (No hyphen)
+    if (digits.length >= 9) {
+        return digits.slice(0, 9);
+    }
+    
+    // If it's exactly 7 digits, it's a student ID (XX-XXXXX)
+    if (digits.length === 7) {
+        return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+    }
+    
+    // Otherwise return digits (partial or other)
+    return digits.slice(0, 9);
 };
 
 const getProgramYearLabel = (person) => {
@@ -60,6 +122,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
         firstName: '',
         middleName: '',
         lastName: '',
+        suffix: '',
         email: '',
         contactNumber: '',
         purpose: '',
@@ -140,6 +203,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                 firstName: visitorForm.firstName,
                 middleName: visitorForm.middleName || null,
                 lastName: visitorForm.lastName,
+                suffix: visitorForm.suffix || null,
                 email: visitorForm.email,
                 contactNumber: visitorForm.contactNumber,
                 programId: null,
@@ -186,7 +250,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
             showError(typeof error === 'string' ? error : "Failed to register visitor.");
         } finally {
             setShowVisitorModal(false);
-            setVisitorForm({ firstName: '', middleName: '', lastName: '', email: '', contactNumber: '', purpose: '', personToVisit: '' });
+            setVisitorForm({ firstName: '', middleName: '', lastName: '', suffix: '', email: '', contactNumber: '', purpose: '', personToVisit: '' });
         }
     };
 
@@ -569,13 +633,17 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                             <form onSubmit={handleManualSubmit}>
                                 <input
                                     type="text"
-                                    placeholder="e.g. 2026-00123"
+                                    placeholder="e.g. 23-00123"
                                     value={manualId}
-                                    onChange={(e) => setManualId(e.target.value)}
-                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-white/50 mb-8 text-center tracking-widest uppercase transition-all"
+                                    onChange={(e) => setManualId(formatIdNumber(e.target.value))}
+                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-white/50 mb-3 text-center tracking-widest uppercase transition-all"
                                     autoFocus
                                     required
+                                    maxLength={10}
                                 />
+                                <p className="text-white/40 text-sm text-center mb-6">
+                                    Format: <span className="text-white/60 font-semibold">00-00000</span> (Student) &nbsp;|&nbsp; <span className="text-white/60 font-semibold">000000000</span> (Employee)
+                                </p>
                                 <div className="flex gap-3">
                                     <button
                                         type="button"
@@ -612,18 +680,46 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                                 </div>
                             </div>
                             <form onSubmit={handleVisitorSubmit} className="space-y-5">
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
                                     <div>
                                         <label className="block text-sm font-medium text-white/70 mb-1">First Name <span className="text-rose-500">*</span></label>
-                                        <input required type="text" value={visitorForm.firstName} onChange={e => setVisitorForm({...visitorForm, firstName: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="Juan" />
+                                        <input 
+                                            required 
+                                            type="text" 
+                                            value={visitorForm.firstName} 
+                                            onChange={e => setVisitorForm({...visitorForm, firstName: formatName(e.target.value)})} 
+                                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" 
+                                            placeholder="Juan" 
+                                        />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-white/70 mb-1">Middle Name</label>
-                                        <input type="text" value={visitorForm.middleName} onChange={e => setVisitorForm({...visitorForm, middleName: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="Optional" />
+                                        <input 
+                                            type="text" 
+                                            value={visitorForm.middleName} 
+                                            onChange={e => setVisitorForm({...visitorForm, middleName: formatName(e.target.value)})} 
+                                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" 
+                                            placeholder="Optional" 
+                                        />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-white/70 mb-1">Last Name <span className="text-rose-500">*</span></label>
-                                        <input required type="text" value={visitorForm.lastName} onChange={e => setVisitorForm({...visitorForm, lastName: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="Dela Cruz" />
+                                        <input 
+                                            required 
+                                            type="text" 
+                                            value={visitorForm.lastName} 
+                                            onChange={e => setVisitorForm({...visitorForm, lastName: formatName(e.target.value)})} 
+                                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" 
+                                            placeholder="Dela Cruz" 
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-white/70 mb-1">Suffix</label>
+                                        <SuffixCombobox
+                                            value={visitorForm.suffix}
+                                            onChange={val => setVisitorForm({...visitorForm, suffix: val})}
+                                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50"
+                                        />
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-5">
@@ -697,6 +793,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                 <FaceScannerModal
                     scannerFunction={isEntrance ? 'entrance' : 'exit'}
                     onClose={() => setShowFaceScanner(false)}
+                    isPaused={showManualModal || showVisitorModal || showQRScanner || showPrintModal}
                     onIdentify={async (scannedId) => {
                         setShowFaceScanner(false);
                         try {
