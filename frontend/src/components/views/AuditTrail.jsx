@@ -148,9 +148,6 @@ export const AuditTrail = ({ branding, adminSession }) => {
         setStartDate('');
         setEndDate('');
         setCurrentPage(1);
-        invoke('get_audit_logs', { startDate: null, endDate: null })
-            .then(data => setLogs(data))
-            .catch(err => console.error(err));
     };
 
     const fetchLogs = async () => {
@@ -178,7 +175,7 @@ export const AuditTrail = ({ branding, adminSession }) => {
 
     useEffect(() => {
         fetchLogs();
-    }, []);
+    }, [startDate, endDate]);
 
     const filteredLogs = logs.filter(log => {
         const matchesSearch =
@@ -527,12 +524,6 @@ export const AuditTrail = ({ branding, adminSession }) => {
                         onChange={(e) => setEndDate(e.target.value)}
                         className="px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 sm:text-sm font-medium"
                     />
-                    <button
-                        onClick={fetchLogs}
-                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-semibold text-sm shadow-sm"
-                    >
-                        Apply Date
-                    </button>
                     <button
                         onClick={clearFilters}
                         className="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors"
