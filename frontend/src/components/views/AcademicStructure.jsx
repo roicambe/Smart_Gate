@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Building, Plus, Search, Edit2, Trash2, Check, AlertTriangle, BookOpen, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from '../toast/ToastProvider';
 import { AdminModal } from '../common/AdminModal';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 
 export const AcademicStructure = ({ branding, adminSession }) => {
     const [activeTab, setActiveTab] = useState('department'); // 'department', 'program'
@@ -201,11 +202,14 @@ export const AcademicStructure = ({ branding, adminSession }) => {
         return searchStr.includes(searchQuery.toLowerCase());
     });
 
-    const totalPages = Math.ceil(filteredData.length / ITEMS_PER_PAGE);
-    const paginatedData = filteredData.slice(
-        (currentPage - 1) * ITEMS_PER_PAGE,
-        currentPage * ITEMS_PER_PAGE
-    );
+    // Sorting
+    const { sortConfig, requestSort, sortedData: sortedData } = useTableSort(filteredData, null, 'asc', 'academic_structure');
+
+    const totalPages = Math.ceil(sortedData.length / ITEMS_PER_PAGE);
+    const paginatedData = useMemo(() => {
+        const start = (currentPage - 1) * ITEMS_PER_PAGE;
+        return sortedData.slice(start, start + ITEMS_PER_PAGE);
+    }, [sortedData, currentPage]);
 
     return (
         <div className="w-full h-full min-h-0 space-y-6 animate-in slide-in-from-bottom-4 duration-500 relative flex flex-col">
@@ -285,9 +289,9 @@ export const AcademicStructure = ({ branding, adminSession }) => {
                     <table className="w-full text-left text-sm text-slate-600">
                         <thead className="text-xs uppercase bg-slate-100 border-b border-slate-200 text-slate-700 sticky top-0 z-10">
                             <tr>
-                                <th className="px-6 py-4 font-semibold tracking-wider">Code</th>
-                                <th className="px-6 py-4 font-semibold tracking-wider">Name</th>
-                                {activeTab === 'program' && <th className="px-6 py-4 font-semibold tracking-wider">Department Link</th>}
+                                <SortableHeader label="Code" sortKey={activeTab === 'department' ? 'department_code' : 'program_code'} sortConfig={sortConfig} onSort={requestSort} />
+                                <SortableHeader label="Name" sortKey={activeTab === 'department' ? 'department_name' : 'program_name'} sortConfig={sortConfig} onSort={requestSort} />
+                                {activeTab === 'program' && <SortableHeader label="Department Link" sortKey="department_id" sortConfig={sortConfig} onSort={requestSort} />}
                                 <th className="px-6 py-4 font-semibold tracking-wider text-right">Actions</th>
                             </tr>
                         </thead>
@@ -306,7 +310,7 @@ export const AcademicStructure = ({ branding, adminSession }) => {
                                     </td>
                                 </tr>
                             ) : (
-                                filteredData.map((item, index) => {
+                                paginatedData.map((item, index) => {
                                     const itemId = activeTab === 'department' ? item.department_id : item.program_id;
                                     const code = activeTab === 'department' ? item.department_code : item.program_code;
                                     const name = activeTab === 'department' ? item.department_name : item.program_name;
@@ -342,7 +346,7 @@ export const AcademicStructure = ({ branding, adminSession }) => {
                 {totalPages > 1 && (
                     <div className="px-5 py-3 border-t border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 flex items-center justify-between shrink-0 rounded-b-xl">
                         <div>
-                            Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredData.length)} of {filteredData.length}
+                            Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, sortedData.length)} of {sortedData.length}
                         </div>
                         <div className="flex items-center gap-1">
                             <button

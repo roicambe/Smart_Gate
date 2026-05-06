@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { 
-    Database, HardDrive, RefreshCw, Archive, Search, Filter, 
+    Database, RefreshCw, Archive, 
     AlertTriangle, ShieldAlert, History, ShieldCheck, Check, 
     Trash2, RotateCcw, Users, Building, Calendar, Download
 } from 'lucide-react';
 import { useToast } from '../toast/ToastProvider';
 import { save, open } from '@tauri-apps/plugin-dialog';
 import { AdminModal } from '../common/AdminModal';
+import { Pagination } from '../common/Pagination';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 
 export const DataManagement = ({ adminSession }) => {
     const [activeTab, setActiveTab] = useState('archive_center');
@@ -15,7 +17,6 @@ export const DataManagement = ({ adminSession }) => {
     
     useEffect(() => {
         setCurrentPage(1);
-        setSearchQuery('');
     }, [activeTab, activeSubTab]);
     const { showToast } = useToast();
 
@@ -33,7 +34,6 @@ export const DataManagement = ({ adminSession }) => {
     const [isProcessing, setIsProcessing] = useState(false);
     
     // Search and Pagination
-    const [searchQuery, setSearchQuery] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     const ITEMS_PER_PAGE = 15;
 
@@ -75,7 +75,7 @@ export const DataManagement = ({ adminSession }) => {
             if (!savePath) return;
 
             setIsProcessing(true);
-            const result = await invoke('backup_database', { destinationPath: savePath });
+            const result = await invoke('backup_database', { destinationPath: savePath, activeAdminId });
             showToast({ type: 'success', message: result });
         } catch (error) {
             showToast({ type: 'error', message: error.toString() });
@@ -101,7 +101,7 @@ export const DataManagement = ({ adminSession }) => {
                 targetName: 'SYSTEM DATABASE',
                 requiredText: 'RESTORE',
                 execute: async () => {
-                    const result = await invoke('restore_database', { sourcePath: selectedPath });
+                    const result = await invoke('restore_database', { sourcePath: selectedPath, activeAdminId });
                     showToast({ type: 'success', message: result });
                     setTimeout(() => window.location.reload(), 3000);
                 }
@@ -248,46 +248,31 @@ export const DataManagement = ({ adminSession }) => {
     const getEventDescription = (event = {}) =>
         pickFirstText(event.description, event.event_description, event.eventDescription) || 'No description';
 
-    // Filtering and Pagination Logic
+    // Data Retrieval and Pagination Logic
     const getFilteredData = () => {
-        const query = searchQuery.toLowerCase();
         if (activeSubTab === 'users') {
-            return archivedUsers.filter(u => 
-                `${u.first_name} ${u.last_name}`.toLowerCase().includes(query) ||
-                u.id_number.toLowerCase().includes(query) ||
-                (u.email || '').toLowerCase().includes(query) ||
-                (u.department_name || '').toLowerCase().includes(query) ||
-                (u.program_name || '').toLowerCase().includes(query)
-            );
+            return archivedUsers;
         } else if (activeSubTab === 'academic') {
             return [
                 ...archivedAcademic.departments.map(d => ({ ...d, type: 'Department' })),
                 ...archivedAcademic.programs.map(p => ({ ...p, type: 'Program' }))
-            ].filter(item => 
-                getAcademicName(item).toLowerCase().includes(query) ||
-                getAcademicCode(item).toLowerCase().includes(query)
-            );
+            ];
         } else if (activeSubTab === 'events') {
-            return archivedEvents.filter(e => 
-                e.event_name.toLowerCase().includes(query) ||
-                getEventDescription(e).toLowerCase().includes(query) ||
-                getEventRequiredRole(e).toLowerCase().includes(query)
-            );
+            return archivedEvents;
         }
         return [];
     };
 
     const filteredRecords = getFilteredData();
-    const totalPages = Math.ceil(filteredRecords.length / ITEMS_PER_PAGE);
-    const paginatedRecords = filteredRecords.slice(
-        (currentPage - 1) * ITEMS_PER_PAGE,
-        currentPage * ITEMS_PER_PAGE
-    );
 
-    const clearFilters = () => {
-        setSearchQuery('');
-        setCurrentPage(1);
-    };
+    // Sorting
+    const { sortConfig, requestSort, sortedData: sortedRecords } = useTableSort(filteredRecords, null, 'asc', 'data_management');
+
+    const totalPages = Math.ceil(sortedRecords.length / ITEMS_PER_PAGE);
+    const paginatedRecords = useMemo(() => {
+        const start = (currentPage - 1) * ITEMS_PER_PAGE;
+        return sortedRecords.slice(start, start + ITEMS_PER_PAGE);
+    }, [sortedRecords, currentPage]);
 
     // Rendering Sub-tabs for Archive Center
     const renderArchiveTable = () => {
@@ -297,10 +282,10 @@ export const DataManagement = ({ adminSession }) => {
                     <table className="w-full text-sm text-left border-collapse">
                         <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
                             <tr className="text-slate-600">
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">ID Number</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Full Name</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Department / Details</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Archived Date</th>
+                                <SortableHeader label="ID Number" sortKey="id_number" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
+                                <SortableHeader label="Full Name" sortKey="full_name" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
+                                <SortableHeader label="Department / Details" sortKey="department_name" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
+                                <SortableHeader label="Archived Date" sortKey="archived_at" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs text-right">Actions</th>
                             </tr>
                         </thead>
@@ -315,15 +300,9 @@ export const DataManagement = ({ adminSession }) => {
                                             <div>
                                                 <p className="text-slate-900 font-bold text-lg">No Archived Users</p>
                                                 <p className="text-slate-500 text-sm max-w-xs mx-auto">
-                                                    We couldn't find any archived user profiles matching your search.
+                                                    There are currently no archived user profiles in the system.
                                                 </p>
                                             </div>
-                                            <button
-                                                onClick={() => setSearchQuery('')}
-                                                className="text-blue-600 font-semibold text-sm hover:underline"
-                                            >
-                                                Clear search
-                                            </button>
                                         </div>
                                     </td>
                                 </tr>
@@ -367,10 +346,10 @@ export const DataManagement = ({ adminSession }) => {
                         <table className="w-full text-sm text-left border-collapse">
                             <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
                                 <tr className="text-slate-600">
-                                    <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Code</th>
-                                    <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Name</th>
-                                    <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Type</th>
-                                    <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Archived Date</th>
+                                    <SortableHeader label="Code" sortKey="code" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
+                                    <SortableHeader label="Name" sortKey="name" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
+                                    <SortableHeader label="Type" sortKey="type" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
+                                    <SortableHeader label="Archived Date" sortKey="archived_at" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
                                     <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs text-right">Actions</th>
                                 </tr>
                             </thead>
@@ -385,15 +364,9 @@ export const DataManagement = ({ adminSession }) => {
                                                 <div>
                                                     <p className="text-slate-900 font-bold text-lg">No Archived Structures</p>
                                                     <p className="text-slate-500 text-sm max-w-xs mx-auto">
-                                                        We couldn't find any archived academic structures matching your search.
+                                                        There are currently no archived academic structures.
                                                     </p>
                                                 </div>
-                                                <button
-                                                    onClick={() => setSearchQuery('')}
-                                                    className="text-blue-600 font-semibold text-sm hover:underline"
-                                                >
-                                                    Clear search
-                                                </button>
                                             </div>
                                         </td>
                                     </tr>
@@ -449,11 +422,11 @@ export const DataManagement = ({ adminSession }) => {
                     <table className="w-full text-sm text-left border-collapse">
                         <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
                             <tr className="text-slate-600">
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Event Name</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Description</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Date and Time</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Required Role</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Archived Date</th>
+                                <SortableHeader label="Event Name" sortKey="event_name" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
+                                <SortableHeader label="Description" sortKey="description" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
+                                <SortableHeader label="Date and Time" sortKey="start_time" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
+                                <SortableHeader label="Required Role" sortKey="required_role" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
+                                <SortableHeader label="Archived Date" sortKey="archived_at" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
                                 <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs text-right">Actions</th>
                             </tr>
                         </thead>
@@ -468,15 +441,9 @@ export const DataManagement = ({ adminSession }) => {
                                             <div>
                                                 <p className="text-slate-900 font-bold text-lg">No Archived Events</p>
                                                 <p className="text-slate-500 text-sm max-w-xs mx-auto">
-                                                    We couldn't find any archived events matching your search criteria.
+                                                    There are currently no archived events in the record.
                                                 </p>
                                             </div>
-                                            <button
-                                                onClick={() => setSearchQuery('')}
-                                                className="text-blue-600 font-semibold text-sm hover:underline"
-                                            >
-                                                Clear search
-                                            </button>
                                         </div>
                                     </td>
                                 </tr>
@@ -571,70 +538,19 @@ export const DataManagement = ({ adminSession }) => {
                             ))}
                         </div>
 
-                        {/* Search and Filter Bar */}
-                        <div className="flex flex-col sm:flex-row items-center gap-3 pt-4">
-                            <div className="relative flex-1">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                                <input
-                                    type="text"
-                                    placeholder={`Search archived ${activeSubTab}...`}
-                                    value={searchQuery}
-                                    onChange={(e) => {
-                                        setSearchQuery(e.target.value);
-                                        setCurrentPage(1);
-                                    }}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                                />
-                            </div>
-                            <button
-                                onClick={clearFilters}
-                                className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:text-slate-900 transition-colors"
-                            >
-                                Clear Filters
-                            </button>
-                        </div>
+
 
                         {renderArchiveTable()}
 
                         {/* Pagination */}
-                        {totalPages > 1 && (
-                            <div className="flex items-center justify-between mt-4 px-2">
-                                <p className="text-xs text-slate-500 font-medium">
-                                    Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1} to {Math.min(currentPage * ITEMS_PER_PAGE, filteredRecords.length)} of {filteredRecords.length} records
-                                </p>
-                                <div className="flex items-center gap-1">
-                                    <button
-                                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                        disabled={currentPage === 1}
-                                        className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                    >
-                                        Prev
-                                    </button>
-                                    <div className="flex items-center gap-1 mx-2">
-                                        {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                                            <button
-                                                key={page}
-                                                onClick={() => setCurrentPage(page)}
-                                                className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${
-                                                    currentPage === page
-                                                        ? 'bg-slate-900 text-white shadow-md'
-                                                        : 'text-slate-600 hover:bg-slate-100'
-                                                }`}
-                                            >
-                                                {page}
-                                            </button>
-                                        ))}
-                                    </div>
-                                    <button
-                                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                        disabled={currentPage === totalPages}
-                                        className="p-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                    >
-                                        Next
-                                    </button>
-                                </div>
-                            </div>
-                        )}
+                        <Pagination
+                            currentPage={currentPage}
+                            totalPages={totalPages}
+                            onPageChange={setCurrentPage}
+                            totalItems={filteredRecords.length}
+                            itemsPerPage={ITEMS_PER_PAGE}
+                            currentItemsCount={paginatedRecords.length}
+                        />
                     </div>
                 )}
 

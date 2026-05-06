@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS persons (
     first_name VARCHAR NOT NULL,
     middle_name VARCHAR NULL,
     last_name VARCHAR NOT NULL,
+    suffix VARCHAR NULL,
     face_template_path VARCHAR NULL,
     is_active BOOLEAN NOT NULL DEFAULT 1,
     is_archived BOOLEAN NOT NULL DEFAULT 0,
@@ -150,7 +151,7 @@ CREATE TABLE IF NOT EXISTS activity_logs (
 -- Admin
 CREATE TABLE IF NOT EXISTS audit_events (
     event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    action_type TEXT CHECK(action_type IN ('CREATE', 'UPDATE', 'DELETE', 'ARCHIVE', 'RESTORE')) NOT NULL,
+    action_type TEXT CHECK(action_type IN ('CREATE', 'UPDATE', 'DELETE', 'ARCHIVE', 'RESTORE', 'BACKUP', 'SYSTEM_RESTORE')) NOT NULL,
     entity_type TEXT NOT NULL,
     entity_id INTEGER NOT NULL,
     entity_label TEXT NOT NULL,
