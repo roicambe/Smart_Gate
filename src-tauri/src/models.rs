@@ -39,6 +39,7 @@ pub struct Person {
     pub last_name: String,
     pub face_template_path: Option<String>,
     pub is_active: bool,
+    pub is_archived: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -125,6 +126,7 @@ pub struct StudentDetails {
     pub roles: Vec<String>,
     pub contacts: Vec<PersonContact>,
     pub is_active: bool,
+    pub is_archived: bool,
     pub program_id: i64,
     pub program_name: String,
     pub year_level: Option<i64>,
@@ -142,6 +144,7 @@ pub struct EmployeeDetails {
     pub roles: Vec<String>,
     pub contacts: Vec<PersonContact>,
     pub is_active: bool,
+    pub is_archived: bool,
     pub department_id: i64,
     pub position_title: String,
     pub department_name: String,
@@ -239,6 +242,8 @@ pub struct ScanPersonDetails {
     pub purpose_of_visit: Option<String>,
     pub person_to_visit: Option<String>,
     pub face_image: Option<String>,
+    pub is_active: bool,
+    pub is_archived: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
