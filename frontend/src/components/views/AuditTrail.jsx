@@ -536,15 +536,15 @@ export const AuditTrail = ({ branding, adminSession }) => {
             {/* Table View */}
             <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 shadow-sm rounded-xl relative">
                 <div className="flex-1 min-h-0 overflow-x-auto overflow-y-auto">
-                    <table className="w-full text-left border-collapse text-sm">
+                    <table className="w-full text-left border-collapse text-sm table-fixed">
                         <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
-                            <tr className="text-slate-600">
-                                <SortableHeader label="Timestamp" sortKey="created_at" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                <SortableHeader label="Admin" sortKey="admin_full_name" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                <SortableHeader label="Action" sortKey="action_type" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                <SortableHeader label="Category" sortKey="target_type" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                <SortableHeader label="Target" sortKey="target_label" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs text-right">Actions</th>
+                            <tr>
+                                <SortableHeader label="Timestamp" sortKey="created_at" sortConfig={sortConfig} onSort={requestSort} width="180px" />
+                                <SortableHeader label="Admin" sortKey="admin_full_name" sortConfig={sortConfig} onSort={requestSort} width="200px" />
+                                <SortableHeader label="Action" sortKey="action_type" sortConfig={sortConfig} onSort={requestSort} width="120px" />
+                                <SortableHeader label="Category" sortKey="target_type" sortConfig={sortConfig} onSort={requestSort} width="150px" />
+                                <SortableHeader label="Target" sortKey="target_label" sortConfig={sortConfig} onSort={requestSort} width="250px" />
+                                <th className="px-6 py-4 font-bold text-xs uppercase tracking-wider text-slate-700 text-right" style={{ width: '100px' }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -678,15 +678,15 @@ export const AuditTrail = ({ branding, adminSession }) => {
                                 <div className="rounded-xl border border-white/10 overflow-x-auto bg-black/20">
                                     <table className="w-full text-sm text-left">
                                         <thead className="bg-white/5 border-b border-white/10">
-                                            <tr className="text-xs uppercase text-white/40">
-                                                <th className="px-4 py-2.5 font-semibold tracking-wider">Field</th>
+                                            <tr className="text-xs uppercase text-white/40 font-bold tracking-wider">
+                                                <th className="px-4 py-2.5">Field</th>
                                                 {selectedLog.action_type === 'UPDATE' ? (
                                                     <>
-                                                        <th className="px-4 py-2.5 font-semibold tracking-wider">Old Value</th>
-                                                        <th className="px-4 py-2.5 font-semibold tracking-wider">New Value</th>
+                                                        <th className="px-4 py-2.5">Old Value</th>
+                                                        <th className="px-4 py-2.5">New Value</th>
                                                     </>
                                                 ) : (
-                                                    <th className="px-4 py-2.5 font-semibold tracking-wider">Value</th>
+                                                    <th className="px-4 py-2.5">Value</th>
                                                 )}
                                             </tr>
                                         </thead>

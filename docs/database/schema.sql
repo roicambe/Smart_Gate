@@ -228,7 +228,11 @@ INSERT OR IGNORE INTO settings (setting_key, setting_value) VALUES
     ('report_email', 'info@plpasig.edu.ph'),
     ('system_logo', ''),
     ('strict_email_domain', 'true'),
-    ('enable_face_recognition', 'true');
+    ('enable_face_recognition', 'true'),
+    ('enable_auto_exit', 'true'),
+    ('auto_exit_time', '22:00'),
+    ('last_auto_exit_date', ''),
+    ('enable_entry_exit_validation', 'true');
 
 INSERT OR IGNORE INTO accounts (username, password_hash, full_name, role, is_first_login) VALUES
     ('admin', 'admin123', 'System Administrator', 'System Administrator', 0);

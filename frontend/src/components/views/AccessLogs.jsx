@@ -848,22 +848,22 @@ export const AccessLogs = ({ branding, adminSession }) => {
             {/* Solid Table View - scroll container with sticky headers */}
             <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 shadow-sm rounded-xl relative">
                 <div className="flex-1 min-h-0 overflow-x-auto overflow-y-auto">
-                    <table className="w-full text-left border-collapse text-sm">
+                    <table className="w-full text-left border-collapse text-sm table-fixed">
                         <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
-                            <tr className="text-slate-700">
-                                <SortableHeader label="Timestamp" sortKey="scanned_at" sortConfig={sortConfig} onSort={requestSort} className="text-[11px]" />
-                                <SortableHeader label="User Info" sortKey="person_name" sortConfig={sortConfig} onSort={requestSort} className="text-[11px]" />
-                                <SortableHeader label="Roles" sortKey="roles" sortConfig={sortConfig} onSort={requestSort} className="text-[11px]" />
+                            <tr>
+                                <SortableHeader label="Timestamp" sortKey="scanned_at" sortConfig={sortConfig} onSort={requestSort} width="180px" />
+                                <SortableHeader label="User Info" sortKey="person_name" sortConfig={sortConfig} onSort={requestSort} width="250px" />
+                                <SortableHeader label="Roles" sortKey="roles" sortConfig={sortConfig} onSort={requestSort} width="150px" />
                                 {activeTab === 'gateLogs' ? (
                                     <>
-                                        <SortableHeader label="Department" sortKey="department_name" sortConfig={sortConfig} onSort={requestSort} className="text-[11px]" />
-                                        <SortableHeader label="Action" sortKey="scanner_function" sortConfig={sortConfig} onSort={requestSort} className="text-[11px]" align="center" />
+                                        <SortableHeader label="Department" sortKey="department_name" sortConfig={sortConfig} onSort={requestSort} width="250px" />
+                                        <SortableHeader label="Action" sortKey="scanner_function" sortConfig={sortConfig} onSort={requestSort} align="center" width="120px" />
                                     </>
                                 ) : (
                                     <>
-                                        <SortableHeader label="Academic Info" sortKey="program_name" sortConfig={sortConfig} onSort={requestSort} className="text-[11px]" />
-                                        <SortableHeader label="Event Name" sortKey="event_name" sortConfig={sortConfig} onSort={requestSort} className="text-[11px]" />
-                                        <SortableHeader label="Status" sortKey="status" sortConfig={sortConfig} onSort={requestSort} className="text-[11px]" />
+                                        <SortableHeader label="Academic Info" sortKey="program_name" sortConfig={sortConfig} onSort={requestSort} width="250px" />
+                                        <SortableHeader label="Event Name" sortKey="event_name" sortConfig={sortConfig} onSort={requestSort} width="200px" />
+                                        <SortableHeader label="Status" sortKey="status" sortConfig={sortConfig} onSort={requestSort} width="120px" />
                                     </>
                                 )}
                             </tr>
@@ -903,7 +903,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                 <td className="px-3 py-1.5">
                                                     <div className="flex flex-col">
                                                         <span className="text-slate-900 font-medium text-xs">
-                                                            {log.department_name || (log.roles?.some(r => r.toLowerCase() === 'visitor') ? "N/A" : "-")}
+                                                            {log.roles?.some(r => r.toLowerCase() === 'visitor') ? "VISITOR" : (log.department_name || "-")}
                                                         </span>
                                                         <span className="text-[10px] text-slate-500 tracking-tight">
                                                             {log.roles?.some(r => r.toLowerCase() === 'student')
@@ -911,7 +911,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                                 : log.roles?.some(r => r.toLowerCase() === 'professor' || r.toLowerCase() === 'staff')
                                                                     ? (log.position_title || "Faculty/Staff")
                                                                     : log.roles?.some(r => r.toLowerCase() === 'visitor')
-                                                                        ? "Visitor"
+                                                                        ? "N/A"
                                                                         : "-"
                                                             }
                                                         </span>
@@ -936,7 +936,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                 <td className="px-3 py-1.5">
                                                     <div className="flex flex-col">
                                                         <span className="text-slate-900 font-medium text-xs">
-                                                            {log.department_name || (log.roles?.some(r => r.toLowerCase() === 'visitor') ? "N/A" : "-")}
+                                                            {log.roles?.some(r => r.toLowerCase() === 'visitor') ? "VISITOR" : (log.department_name || "-")}
                                                         </span>
                                                         <span className="text-[10px] text-slate-500 uppercase tracking-tight">
                                                             {log.roles?.some(r => r.toLowerCase() === 'student')
@@ -944,7 +944,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                                 : log.roles?.some(r => r.toLowerCase() === 'professor' || r.toLowerCase() === 'staff')
                                                                     ? (log.position_title || "Faculty/Staff")
                                                                     : log.roles?.some(r => r.toLowerCase() === 'visitor')
-                                                                        ? "Visitor"
+                                                                        ? "N/A"
                                                                         : "-"
                                                             }
                                                         </span>

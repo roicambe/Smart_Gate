@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
-import { X, Camera, FlipHorizontal2 } from 'lucide-react';
+import { X, Camera, FlipHorizontal2, Lock, Unlock } from 'lucide-react';
 import { extractScanId } from '../utils/patternHunter';
 
-export const QRScannerOverlay = ({ onScan, onClose, scannerFunction }) => {
+export const QRScannerOverlay = ({ onScan, onClose, scannerFunction, isLocked = false, onToggleLock }) => {
     const [status, setStatus] = useState("Initializing camera...");
     const [isSuccess, setIsSuccess] = useState(false);
     const [isMirrored, setIsMirrored] = useState(false);
@@ -84,7 +84,17 @@ export const QRScannerOverlay = ({ onScan, onClose, scannerFunction }) => {
                             if (onScanRef.current) {
                                 onScanRef.current(extractedId);
                             }
-                            setIsSuccess(false);
+                            
+                            if (isLocked) {
+                                // If locked, reset for next scan after a delay
+                                setTimeout(() => {
+                                    lockedRef.current = false;
+                                    setIsSuccess(false);
+                                    setStatus("Align QR code within the frame");
+                                }, 2000);
+                            } else {
+                                setIsSuccess(false);
+                            }
                         }, 500);
                     } else {
                         // Invalid match
@@ -183,6 +193,20 @@ export const QRScannerOverlay = ({ onScan, onClose, scannerFunction }) => {
                     >
                         <FlipHorizontal2 className={`w-5 h-5 transition-transform duration-200 ${isMirrored ? 'scale-x-[-1]' : ''}`} />
                         <span className="hidden sm:inline">{isMirrored ? 'Mirrored' : 'Mirror'}</span>
+                    </button>
+
+                    {/* Lock Toggle Button */}
+                    <button
+                        onClick={onToggleLock}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-2xl border shadow-lg backdrop-blur-md transition-all duration-200 font-medium text-sm ${
+                            isLocked
+                                ? 'bg-blue-500/30 border-blue-400/40 text-blue-300 hover:bg-blue-500/40'
+                                : 'bg-black/40 border-white/10 text-white/70 hover:bg-white/10 hover:text-white'
+                        }`}
+                        title={isLocked ? 'Unlock Modal' : 'Lock Modal'}
+                    >
+                        {isLocked ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
+                        <span className="hidden sm:inline">{isLocked ? 'Locked' : 'Lock'}</span>
                     </button>
                 </div>
 

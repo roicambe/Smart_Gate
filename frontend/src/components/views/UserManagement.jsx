@@ -32,9 +32,9 @@ const ID_NUMBER_RULES = {
         maxLength: 9,
     },
     visitor: {
-        placeholder: `VIS-${visitorYearCode}xxxx`,
-        pattern: new RegExp(`^VIS-${visitorYearCode}\\d{4}$`),
-        hint: `Visitor IDs must follow the VIS-${visitorYearCode}xxxx format.`,
+        placeholder: 'VIS-00000',
+        pattern: /^VIS-\d{5,6}$/,
+        hint: 'Visitor IDs must follow the VIS-00000 format.',
         maxLength: 10,
     },
 };
@@ -388,7 +388,7 @@ export const UserManagement = ({ adminSession, branding }) => {
     const handleRegisterClick = () => {
         setFormData({
             role: activeRole,
-            id_number: activeRole === 'visitor' ? `VIS-${visitorYearCode}${Math.floor(1000 + Math.random() * 9000)}` : '',
+            id_number: activeRole === 'visitor' ? `VIS-${Math.floor(10000 + Math.random() * 90000)}` : '',
             first_name: '',
             middle_name: '',
             last_name: '',
@@ -728,26 +728,26 @@ export const UserManagement = ({ adminSession, branding }) => {
             {/* Data Table - scroll container with sticky headers */}
             <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-xl shadow-sm relative">
                 <div className="flex-1 min-h-0 overflow-x-auto overflow-y-auto">
-                    <table className="w-full text-left border-collapse text-sm text-slate-600">
-                        <thead className="text-xs uppercase bg-slate-100 border-b border-slate-200 text-slate-700 sticky top-0 z-10">
+                    <table className="w-full text-left border-collapse text-sm text-slate-600 table-fixed">
+                        <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
                             <tr>
-                                <SortableHeader label="ID Number" sortKey="id_number" sortConfig={sortConfig} onSort={requestSort} />
-                                <SortableHeader label="Full Name" sortKey="last_name" sortConfig={sortConfig} onSort={requestSort} />
+                                <SortableHeader label="ID Number" sortKey="id_number" sortConfig={sortConfig} onSort={requestSort} width="140px" />
+                                <SortableHeader label="Full Name" sortKey="last_name" sortConfig={sortConfig} onSort={requestSort} width={mainTab === 'visitors' ? "200px" : "250px"} />
                                 {mainTab === 'visitors' ? (
                                     <>
-                                        <SortableHeader label="Purpose" sortKey="purpose_of_visit" sortConfig={sortConfig} onSort={requestSort} />
-                                        <SortableHeader label="Person to Visit" sortKey="person_to_visit" sortConfig={sortConfig} onSort={requestSort} />
-                                        <SortableHeader label="Registration Date" sortKey="created_at" sortConfig={sortConfig} onSort={requestSort} />
-                                        <th className="px-3 py-2 font-semibold tracking-wider">Registration Time</th>
-                                        <SortableHeader label="Status" sortKey="is_active" sortConfig={sortConfig} onSort={requestSort} />
+                                        <SortableHeader label="Purpose" sortKey="purpose_of_visit" sortConfig={sortConfig} onSort={requestSort} width="180px" />
+                                        <SortableHeader label="Person to Visit" sortKey="person_to_visit" sortConfig={sortConfig} onSort={requestSort} width="180px" />
+                                        <SortableHeader label="Registration Date" sortKey="created_at" sortConfig={sortConfig} onSort={requestSort} width="140px" />
+                                        <th className="px-6 py-4 font-bold text-xs uppercase tracking-wider text-slate-700" style={{ width: '140px' }}>Registration Time</th>
+                                        <SortableHeader label="Status" sortKey="is_active" sortConfig={sortConfig} onSort={requestSort} width="100px" />
                                     </>
                                 ) : (
                                     <>
-                                        <SortableHeader label={subTab === 'student' ? 'Program / Year' : 'Department'} sortKey={subTab === 'student' ? 'program_name' : 'department_name'} sortConfig={sortConfig} onSort={requestSort} />
-                                        <SortableHeader label="Status" sortKey="is_active" sortConfig={sortConfig} onSort={requestSort} />
+                                        <SortableHeader label={subTab === 'student' ? 'Program / Year' : 'Department'} sortKey={subTab === 'student' ? 'program_name' : 'department_name'} sortConfig={sortConfig} onSort={requestSort} width="300px" />
+                                        <SortableHeader label="Status" sortKey="is_active" sortConfig={sortConfig} onSort={requestSort} width="120px" />
                                     </>
                                 )}
-                                <th className="px-3 py-2 font-semibold tracking-wider text-right">Actions</th>
+                                <th className="px-6 py-4 font-bold text-xs uppercase tracking-wider text-slate-700 text-right" style={{ width: '120px' }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
