@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Keyboard, QrCode, ScanFace, Users, LogIn, LogOut, ChevronLeft, ArrowRight, X } from "lucide-react";
+import { Keyboard, QrCode, ScanFace, Users, LogIn, LogOut, ChevronLeft, ArrowRight, X, Lock, Unlock } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { QRScannerOverlay } from "./QRScannerOverlay";
 import { VisitorPassPrinter } from "./VisitorPassPrinter";
@@ -60,30 +60,49 @@ const getFullNameLabel = (person) => {
 const formatIdNumber = (val) => {
     if (!val) return "";
     
-    // Strip everything but alphanumeric
-    let clean = val.replace(/[^a-zA-Z0-9]/g, "");
+    // 1. Character Filtering: Only allow 0-9, hyphen, and V, I, S (case-insensitive)
+    let filtered = val.replace(/[^0-9VvIiSs\-]/g, "");
+    const upper = filtered.toUpperCase();
     
-    // Detect Visitor Format (VIS-XXXXXX)
-    if (clean.toUpperCase().startsWith("VIS")) {
-        const digits = clean.slice(3).replace(/\D/g, "").slice(0, 6);
-        return `VIS-${digits}`.toUpperCase();
+    // 2. Visitor Logic: Automatically recognize "VIS" (any case)
+    if (upper.includes("VIS")) {
+        // Find the index of "VIS" to handle cases where user types it partially or fully
+        const visIndex = upper.indexOf("VIS");
+        // Extract what follows "VIS"
+        const afterVis = upper.slice(visIndex + 3);
+        // Only keep digits for the visitor numeric part
+        const digits = afterVis.replace(/[^0-9]/g, "").slice(0, 5);
+        return `VIS-${digits}`;
     }
     
-    // Numeric IDs (Student vs Employee)
-    const digits = clean.replace(/\D/g, "");
+    // 3. Numeric Logic (Student/Employee)
+    const digits = filtered.replace(/[^0-9]/g, "");
     
-    // If it reaches 9 digits, it's an employee ID (No hyphen)
-    if (digits.length >= 9) {
+    // If it exceeds 7 digits, recognize as employee ID (remove hyphen)
+    if (digits.length > 7) {
         return digits.slice(0, 9);
     }
     
-    // If it's exactly 7 digits, it's a student ID (XX-XXXXX)
+    // If it has exactly 7 digits, auto-format to student format (XX-XXXXX)
     if (digits.length === 7) {
         return `${digits.slice(0, 2)}-${digits.slice(2)}`;
     }
     
-    // Otherwise return digits (partial or other)
-    return digits.slice(0, 9);
+    // If user typed a hyphen manually at position 2, preserve it
+    if (filtered.indexOf('-') === 2 && digits.length <= 7) {
+        // Re-apply hyphen after 2 digits if we have at least 2 digits
+        if (digits.length >= 2) {
+             return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+        }
+    }
+    
+    // If typing "V" or "VI", allow it (part of VIS)
+    if (upper === 'V' || upper === 'VI') {
+        return upper;
+    }
+    
+    // Default: return digits
+    return digits;
 };
 
 const getProgramYearLabel = (person) => {
@@ -111,6 +130,8 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
     const [showPrintModal, setShowPrintModal] = useState(false);
     const [printPassData, setPrintPassData] = useState(null);
     const [activeScanCard, setActiveScanCard] = useState(null);
+    const [isManualLocked, setIsManualLocked] = useState(false);
+    const [isScannerLocked, setIsScannerLocked] = useState(false);
     const audioContextRef = useRef(null);
     const isBackgroundScanRunningRef = useRef(false);
     const scanCardTimerRef = useRef(null);
@@ -193,9 +214,8 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
     const handleVisitorSubmit = async (e) => {
         e.preventDefault();
         try {
-            const yearPart = new Date().getFullYear().toString().slice(-2);
-            const randomPart = Math.floor(1000 + Math.random() * 9000).toString().padStart(4, '0');
-            const generatedId = `VIS-${yearPart}${randomPart}`;
+            const randomPart = Math.floor(10000 + Math.random() * 90000).toString();
+            const generatedId = `VIS-${randomPart}`;
             
             await invoke('register_user', {
                 role: "visitor",
@@ -249,8 +269,10 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
             console.error(error);
             showError(typeof error === 'string' ? error : "Failed to register visitor.");
         } finally {
-            setShowVisitorModal(false);
-            setVisitorForm({ firstName: '', middleName: '', lastName: '', suffix: '', email: '', contactNumber: '', purpose: '', personToVisit: '' });
+            if (!isManualLocked) {
+                setShowVisitorModal(false);
+                setVisitorForm({ firstName: '', middleName: '', lastName: '', suffix: '', email: '', contactNumber: '', purpose: '', personToVisit: '' });
+            }
         }
     };
 
@@ -266,13 +288,18 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
             });
 
             if (result.success) {
-                setShowManualModal(false);
-                setManualId("");
                 await showScanSuccessFeedback({
                     result,
                     scannedId: submittedId,
-                    modalActive: false
+                    modalActive: true
                 });
+
+                if (!isManualLocked) {
+                    setShowManualModal(false);
+                    setManualId("");
+                } else {
+                    setManualId("");
+                }
             } else {
                 showError(result.message);
             }
@@ -280,8 +307,10 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
             console.error(error);
             showError("System Error. Failed to process ID.");
         } finally {
-            setShowManualModal(false);
-            setManualId("");
+            if (!isManualLocked) {
+                setShowManualModal(false);
+                setManualId("");
+            }
         }
     };
 
@@ -629,6 +658,18 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                                     <h2 className="text-2xl font-bold text-white tracking-wide">Enter ID Number</h2>
                                     <p className="text-white/60 text-sm">{isEntrance ? "Logging Incoming Request" : "Logging Outgoing Request"}</p>
                                 </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsManualLocked(!isManualLocked)}
+                                    className={`ml-auto p-2 rounded-xl border transition-all ${
+                                        isManualLocked 
+                                            ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' 
+                                            : 'bg-white/5 border-white/10 text-white/40 hover:text-white/60'
+                                    }`}
+                                    title={isManualLocked ? "Unlock Modal" : "Lock Modal"}
+                                >
+                                    {isManualLocked ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
+                                </button>
                             </div>
                             <form onSubmit={handleManualSubmit}>
                                 <input
@@ -639,11 +680,22 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                                     className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-white/50 mb-3 text-center tracking-widest uppercase transition-all"
                                     autoFocus
                                     required
-                                    maxLength={10}
+                                    maxLength={9}
                                 />
-                                <p className="text-white/40 text-sm text-center mb-6">
-                                    Format: <span className="text-white/60 font-semibold">00-00000</span> (Student) &nbsp;|&nbsp; <span className="text-white/60 font-semibold">000000000</span> (Employee)
-                                </p>
+                                <div className="text-white/40 text-xs space-y-1.5 mb-6 max-w-[240px] mx-auto font-medium">
+                                    <div className="flex justify-between items-center">
+                                        <span>Student ID</span>
+                                        <span className="text-white/70 font-mono font-bold tracking-wider">00-00000</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                        <span>Employee ID</span>
+                                        <span className="text-white/70 font-mono font-bold tracking-wider">000000000</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                        <span>Visitor ID</span>
+                                        <span className="text-white/70 font-mono font-bold tracking-wider">VIS-00000</span>
+                                    </div>
+                                </div>
                                 <div className="flex gap-3">
                                     <button
                                         type="button"
@@ -678,6 +730,18 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                                     <h2 className="text-2xl font-bold text-white tracking-wide">Visitor Registration</h2>
                                     <p className="text-white/60 text-sm">Logging incoming guest to campus.</p>
                                 </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsManualLocked(!isManualLocked)}
+                                    className={`ml-auto p-2 rounded-xl border transition-all ${
+                                        isManualLocked 
+                                            ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' 
+                                            : 'bg-white/5 border-white/10 text-white/40 hover:text-white/60'
+                                    }`}
+                                    title={isManualLocked ? "Unlock Modal" : "Lock Modal"}
+                                >
+                                    {isManualLocked ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
+                                </button>
                             </div>
                             <form onSubmit={handleVisitorSubmit} className="space-y-5">
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
@@ -756,9 +820,13 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
             {showQRScanner && (
                 <QRScannerOverlay
                     scannerFunction={isEntrance ? 'entrance' : 'exit'}
+                    isLocked={isScannerLocked}
+                    onToggleLock={() => setIsScannerLocked(!isScannerLocked)}
                     onClose={() => setShowQRScanner(false)}
                     onScan={async (scannedId, error) => {
-                        setShowQRScanner(false);
+                        if (!isScannerLocked) {
+                            setShowQRScanner(false);
+                        }
                         
                         if (error || !scannedId) {
                             showError(error || "Invalid scan target.");
@@ -792,10 +860,14 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
             {showFaceScanner && (
                 <FaceScannerModal
                     scannerFunction={isEntrance ? 'entrance' : 'exit'}
+                    isLocked={isScannerLocked}
+                    onToggleLock={() => setIsScannerLocked(!isScannerLocked)}
                     onClose={() => setShowFaceScanner(false)}
                     isPaused={showManualModal || showVisitorModal || showQRScanner || showPrintModal}
                     onIdentify={async (scannedId) => {
-                        setShowFaceScanner(false);
+                        if (!isScannerLocked) {
+                            setShowFaceScanner(false);
+                        }
                         try {
                             const result = await invoke('manual_id_entry', {
                                 idNumber: scannedId,
@@ -806,7 +878,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                                 await showScanSuccessFeedback({
                                     result,
                                     scannedId,
-                                    modalActive: false
+                                    modalActive: true
                                 });
                             } else {
                                 showError(result.message);

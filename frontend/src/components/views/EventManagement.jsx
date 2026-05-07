@@ -501,15 +501,15 @@ export const EventManagement = ({ branding, adminSession }) => {
 
             <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-xl shadow-sm relative">
                 <div className="flex-1 min-h-0 overflow-x-auto overflow-y-auto">
-                    <table className="w-full text-left text-sm text-slate-600">
-                        <thead className="text-xs uppercase bg-slate-100 border-b border-slate-200 text-slate-700 sticky top-0 z-10">
+                    <table className="w-full text-left text-sm text-slate-600 table-fixed">
+                        <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
                             <tr>
-                                <SortableHeader label="Event Name" sortKey="event_name" sortConfig={sortConfig} onSort={requestSort} />
-                                <SortableHeader label="Description" sortKey="description" sortConfig={sortConfig} onSort={requestSort} />
-                                <SortableHeader label="Date & Time" sortKey="start_time" sortConfig={sortConfig} onSort={requestSort} />
-                                <SortableHeader label="Required Role" sortKey="required_role" sortConfig={sortConfig} onSort={requestSort} />
-                                <SortableHeader label="Status" sortKey="is_enabled" sortConfig={sortConfig} onSort={requestSort} />
-                                <th className="px-6 py-4 font-semibold tracking-wider text-right">Actions</th>
+                                <SortableHeader label="Event Name" sortKey="event_name" sortConfig={sortConfig} onSort={requestSort} width="220px" />
+                                <SortableHeader label="Description" sortKey="description" sortConfig={sortConfig} onSort={requestSort} width="300px" />
+                                <SortableHeader label="Date & Time" sortKey="start_time" sortConfig={sortConfig} onSort={requestSort} width="250px" />
+                                <SortableHeader label="Required Role" sortKey="required_role" sortConfig={sortConfig} onSort={requestSort} width="180px" />
+                                <SortableHeader label="Status" sortKey="is_enabled" sortConfig={sortConfig} onSort={requestSort} width="120px" />
+                                <th className="px-6 py-4 font-bold text-xs uppercase tracking-wider text-slate-700 text-right" style={{ width: '150px' }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">

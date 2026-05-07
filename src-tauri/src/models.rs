@@ -311,6 +311,9 @@ pub struct SystemBranding {
     pub secondary_logo_2_enabled: bool,
     pub strict_email_domain: bool,
     pub enable_face_recognition: bool,
+    pub enable_auto_exit: bool,
+    pub auto_exit_time: String,
+    pub enable_entry_exit_validation: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

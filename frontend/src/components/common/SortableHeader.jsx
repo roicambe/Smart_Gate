@@ -12,16 +12,17 @@ import { ChevronUp, ChevronDown, ArrowUpDown } from 'lucide-react';
  *  - className:   Additional CSS classes for the <th>
  *  - align:       'left' | 'center' | 'right' (default: 'left')
  */
-export const SortableHeader = ({ label, sortKey, sortConfig, onSort, className = '', align = 'left' }) => {
+export const SortableHeader = ({ label, sortKey, sortConfig, onSort, className = '', align = 'left', width }) => {
     const isActive = sortConfig?.key === sortKey;
-    const alignClass = align === 'right' ? 'text-right justify-end' : align === 'center' ? 'text-center justify-center' : 'text-left';
+    const alignClass = align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left';
 
     return (
         <th
-            className={`px-3 py-2 font-semibold tracking-wider select-none cursor-pointer group transition-colors hover:bg-slate-200/60 ${alignClass} ${className}`}
+            className={`px-6 py-4 font-bold text-xs uppercase tracking-wider select-none cursor-pointer group transition-colors hover:bg-slate-200/60 text-slate-700 ${alignClass} ${className}`}
             onClick={() => onSort(sortKey)}
+            style={width ? { width } : {}}
         >
-            <span className="inline-flex items-center gap-1">
+            <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'}`}>
                 {label}
                 <span className={`inline-flex transition-opacity ${isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-40'}`}>
                     {isActive ? (

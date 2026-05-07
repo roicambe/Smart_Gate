@@ -2791,6 +2791,12 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
         ).map_err(|e| e.to_string())?;
 
         // 3. Logic check based on activity_logs
+        let enable_validation: bool = conn.query_row(
+            "SELECT setting_value FROM settings WHERE setting_key = 'enable_entry_exit_validation'",
+            [],
+            |row| row.get::<_, String>(0).map(|v| v == "1" || v.to_lowercase() == "true")
+        ).unwrap_or(true);
+
         let last_log: Option<String> = conn.query_row(
             "SELECT activity_type FROM activity_logs WHERE person_id = ?1 AND activity_type IN ('entrance', 'exit') ORDER BY scanned_at DESC LIMIT 1",
             params![person_id],
@@ -2798,7 +2804,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
         ).optional().map_err(|e| e.to_string())?;
 
         if scanner.function == "exit" {
-            if last_log.as_deref() != Some("entrance") {
+            if enable_validation && last_log.as_deref() != Some("entrance") {
                 return Ok(ScanResult {
                     success: false,
                     message: "No entry record found for this ID".to_string(),
@@ -2820,7 +2826,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
                 });
             }
 
-            if last_log.as_deref() == Some("entrance") {
+            if enable_validation && last_log.as_deref() == Some("entrance") {
                 return Ok(ScanResult {
                     success: false,
                     message: "User is already on campus".to_string(),
@@ -2929,6 +2935,12 @@ pub fn manual_id_entry(
         ).unwrap_or(Scanner { scanner_id: 1, location_name: "Manual".to_string(), function: scanner_function.to_string() });
 
         // Logic Check
+        let enable_validation: bool = conn.query_row(
+            "SELECT setting_value FROM settings WHERE setting_key = 'enable_entry_exit_validation'",
+            [],
+            |row| row.get::<_, String>(0).map(|v| v == "1" || v.to_lowercase() == "true")
+        ).unwrap_or(true);
+
         let last_log: Option<String> = conn.query_row(
             "SELECT activity_type FROM activity_logs WHERE person_id = ?1 AND activity_type IN ('entrance', 'exit') ORDER BY scanned_at DESC LIMIT 1",
             params![person_id],
@@ -2936,7 +2948,7 @@ pub fn manual_id_entry(
         ).optional().map_err(|e| e.to_string())?;
 
         if scanner.function == "exit" {
-            if last_log.as_deref() != Some("entrance") {
+            if enable_validation && last_log.as_deref() != Some("entrance") {
                 return Ok(ScanResult {
                     success: false,
                     message: "No entry record found for this ID".to_string(),
@@ -2958,7 +2970,7 @@ pub fn manual_id_entry(
                 });
             }
 
-            if last_log.as_deref() == Some("entrance") {
+            if enable_validation && last_log.as_deref() == Some("entrance") {
                 return Ok(ScanResult {
                     success: false,
                     message: "User is already on campus".to_string(),
@@ -4246,6 +4258,9 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
     let mut secondary_logo_2_enabled: bool = true;
     let mut strict_email_domain: bool = true;
     let mut enable_face_recognition: bool = true;
+    let mut enable_auto_exit: bool = false;
+    let mut auto_exit_time: String = "22:00".to_string();
+    let mut enable_entry_exit_validation: bool = true;
 
     let mut stmt = conn
         .prepare("SELECT setting_key, setting_value FROM settings")
@@ -4279,6 +4294,9 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
                 "secondary_logo_2_enabled" => secondary_logo_2_enabled = value == "1" || value.to_lowercase() == "true",
                 "strict_email_domain" => strict_email_domain = value == "1" || value.to_lowercase() == "true",
                 "enable_face_recognition" => enable_face_recognition = value == "1" || value.to_lowercase() == "true",
+                "enable_auto_exit" => enable_auto_exit = value == "1" || value.to_lowercase() == "true",
+                "auto_exit_time" => auto_exit_time = value,
+                "enable_entry_exit_validation" => enable_entry_exit_validation = value == "1" || value.to_lowercase() == "true",
                 "circle_logo_format" => {
                     // Legacy support: if individual ones aren't set yet, they could inherit this
                     // but we'll prioritize individual ones.
@@ -4306,6 +4324,9 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
         secondary_logo_2_enabled,
         strict_email_domain,
         enable_face_recognition,
+        enable_auto_exit,
+        auto_exit_time,
+        enable_entry_exit_validation,
     })
 }
 
@@ -4444,6 +4465,9 @@ pub fn update_system_configuration(
     admin_id: i64,
     strict_email_domain: bool,
     enable_face_recognition: bool,
+    enable_auto_exit: bool,
+    auto_exit_time: String,
+    enable_entry_exit_validation: bool,
 ) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
     let old = get_system_branding(pool).unwrap_or_default();
@@ -4452,6 +4476,9 @@ pub fn update_system_configuration(
     let settings_to_update = [
         ("strict_email_domain", if strict_email_domain { "1" } else { "0" }.to_string()),
         ("enable_face_recognition", if enable_face_recognition { "1" } else { "0" }.to_string()),
+        ("enable_auto_exit", if enable_auto_exit { "1" } else { "0" }.to_string()),
+        ("auto_exit_time", auto_exit_time.clone()),
+        ("enable_entry_exit_validation", if enable_entry_exit_validation { "1" } else { "0" }.to_string()),
     ];
 
     for (key, value) in settings_to_update {
@@ -4467,11 +4494,17 @@ pub fn update_system_configuration(
     let old_values = json!({
         "strict_email_domain": old.strict_email_domain,
         "enable_face_recognition": old.enable_face_recognition,
+        "enable_auto_exit": old.enable_auto_exit,
+        "auto_exit_time": old.auto_exit_time,
+        "enable_entry_exit_validation": old.enable_entry_exit_validation,
     });
 
     let new_values = json!({
         "strict_email_domain": strict_email_domain,
         "enable_face_recognition": enable_face_recognition,
+        "enable_auto_exit": enable_auto_exit,
+        "auto_exit_time": auto_exit_time,
+        "enable_entry_exit_validation": enable_entry_exit_validation,
     });
 
     let _ = log_audit_action(
@@ -5073,10 +5106,17 @@ pub fn permanent_delete_user(pool: &DbPool, person_id: i64, active_admin_id: i64
     let emails: Vec<String> = contacts.iter().filter(|c| c.contact_type == "email").map(|c| c.contact_value.clone()).collect();
     let phones: Vec<String> = contacts.iter().filter(|c| c.contact_type == "phone").map(|c| c.contact_value.clone()).collect();
 
-    let person_data: (String, String, Option<String>, String, bool) = conn.query_row(
-        "SELECT id_number, first_name, middle_name, last_name, suffix, suffix, is_active FROM persons WHERE person_id = ?1",
+    let person_data: (String, String, Option<String>, String, Option<String>, bool) = conn.query_row(
+        "SELECT id_number, first_name, middle_name, last_name, suffix, is_active FROM persons WHERE person_id = ?1",
         params![person_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get::<_, i32>(4)? == 1))
+        |row| Ok((
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+            row.get::<_, i32>(5)? == 1
+        ))
     ).map_err(|e| e.to_string())?;
 
     let mut old_data = json!({
@@ -5084,10 +5124,11 @@ pub fn permanent_delete_user(pool: &DbPool, person_id: i64, active_admin_id: i64
         "first_name": person_data.1,
         "middle_name": person_data.2,
         "last_name": person_data.3,
+        "suffix": person_data.4,
         "roles": roles,
         "emails": emails,
         "phones": phones,
-        "is_active": person_data.4
+        "is_active": person_data.5
     });
 
     if roles.iter().any(|r| r == "student") {
@@ -5112,6 +5153,18 @@ pub fn permanent_delete_user(pool: &DbPool, person_id: i64, active_admin_id: i64
         if let Some((dept, pos)) = emp_info {
             old_data["department"] = json!(dept);
             old_data["position_title"] = json!(pos);
+        }
+    }
+
+    if roles.iter().any(|r| r == "visitor") {
+        let visitor_info: Option<(String, String)> = conn.query_row(
+            "SELECT purpose_of_visit, person_to_visit FROM visitors WHERE person_id = ?1",
+            params![person_id],
+            |row| Ok((row.get(0)?, row.get(1)?))
+        ).optional().map_err(|e| e.to_string())?;
+        if let Some((purpose, target)) = visitor_info {
+            old_data["purpose_of_visit"] = json!(purpose);
+            old_data["person_to_visit"] = json!(target);
         }
     }
 
@@ -5401,3 +5454,96 @@ pub fn get_database_stats(app_handle: &tauri::AppHandle, pool: &DbPool) -> Resul
         "archived_events": archived_events
     }))
 }
+
+pub fn auto_exit_users(pool: &DbPool) -> Result<i64, String> {
+    let mut conn = pool.get().map_err(|e| e.to_string())?;
+    
+    // Check if already run today
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let last_run: String = conn.query_row(
+        "SELECT setting_value FROM settings WHERE setting_key = 'last_auto_exit_date'",
+        [],
+        |row| row.get(0)
+    ).unwrap_or_default();
+
+    if last_run == today {
+        return Ok(0);
+    }
+
+    // 1. Find all persons who are currently "Inside"
+    let mut stmt = conn.prepare("
+        SELECT p.person_id, p.first_name, p.last_name
+        FROM persons p
+        JOIN (
+            SELECT person_id, activity_type, MAX(scanned_at)
+            FROM activity_logs
+            WHERE activity_type IN ('entrance', 'exit')
+            GROUP BY person_id
+            HAVING activity_type = 'entrance'
+        ) last_gate_log ON p.person_id = last_gate_log.person_id
+        WHERE p.is_active = 1 AND p.is_archived = 0
+    ").map_err(|e| e.to_string())?;
+
+    let persons_to_exit = stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, format!("{} {}", row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+    }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+
+    drop(stmt);
+
+    if persons_to_exit.is_empty() {
+        return Ok(0);
+    }
+
+    // 2. Find an exit scanner to use for the logs
+    let exit_scanner_id: i64 = conn.query_row(
+        "SELECT scanner_id FROM scanners WHERE function = 'exit' LIMIT 1",
+        [],
+        |row| row.get(0)
+    ).unwrap_or(0);
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let mut count = 0;
+
+    for (pid, name) in persons_to_exit {
+        // Log the auto-exit
+        tx.execute(
+            "INSERT INTO activity_logs (person_id, scanner_id, activity_type, scanned_at, status) 
+             VALUES (?1, ?2, 'exit', ?3, 'System Auto-Exit')",
+            params![pid, if exit_scanner_id > 0 { exit_scanner_id } else { 2 }, now],
+        ).map_err(|e| e.to_string())?;
+
+        // Deactivate if visitor
+        let roles = get_person_roles(&tx, pid)?;
+        if roles.iter().any(|r| r == "visitor") {
+            tx.execute("UPDATE persons SET is_active = 0 WHERE person_id = ?1", params![pid]).map_err(|e| e.to_string())?;
+        }
+        
+        count += 1;
+        log::info!("Auto-exited user: {} (ID: {})", name, pid);
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+    
+    // Update last run date
+    let _ = conn.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('last_auto_exit_date', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![today],
+    );
+
+    // Log the event in audit trail
+    let _ = log_audit_action(
+        pool,
+        0, // System
+        "UPDATE",
+        "System",
+        0,
+        &format!("Automatic Logout ({} users)", count),
+        None,
+        Some(json!({ "count": count, "timestamp": now })),
+    );
+
+    Ok(count)
+}
+

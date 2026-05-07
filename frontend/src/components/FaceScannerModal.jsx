@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Camera, X, Loader2, UserCheck, ShieldAlert, UserPlus, FlipHorizontal2 } from "lucide-react";
+import { Camera, X, Loader2, UserCheck, ShieldAlert, UserPlus, FlipHorizontal2, Lock, Unlock } from "lucide-react";
 import { useFaceRecognition } from "../hooks/useFaceRecognition";
 import { FaceEnrollmentModal } from "./FaceEnrollmentModal";
 import { invoke } from "@tauri-apps/api/core";
 
-export const FaceScannerModal = ({ onClose, onIdentify, scannerFunction, isPaused = false }) => {
+export const FaceScannerModal = ({ onClose, onIdentify, scannerFunction, isPaused = false, isLocked = false, onToggleLock }) => {
     const videoRef = useRef(null);
     const canvasRef = useRef(null);
     const [isCameraReady, setIsCameraReady] = useState(false);
@@ -131,7 +131,19 @@ export const FaceScannerModal = ({ onClose, onIdentify, scannerFunction, isPause
                     try {
                         const idNumber = await invoke("get_id_number_from_person_id", { personId: match.person_id });
                         // Small delay for user to see the "Success" state
-                        setTimeout(() => onIdentify(idNumber), 1500);
+                        setTimeout(() => {
+                            onIdentify(idNumber);
+                            
+                            if (isLocked) {
+                                // If locked, resume scanning after a delay
+                                setTimeout(() => {
+                                    if (isCameraReady && !showEnrollment && !isPaused) {
+                                        setStatus("Align your face within the frame");
+                                        scanIntervalRef.current = setInterval(performScan, 2500);
+                                    }
+                                }, 2000);
+                            }
+                        }, 1500);
                     } catch (err) {
                         console.error("Failed to bridge person_id to id_number:", err);
                         setStatus("Error processing recognition result.");
@@ -197,6 +209,20 @@ export const FaceScannerModal = ({ onClose, onIdentify, scannerFunction, isPause
                     >
                         <FlipHorizontal2 className={`w-5 h-5 transition-transform duration-200 ${isMirrored ? 'scale-x-[-1]' : ''}`} />
                         <span className="hidden sm:inline">{isMirrored ? 'Mirrored' : 'Mirror'}</span>
+                    </button>
+
+                    {/* Lock Toggle Button */}
+                    <button
+                        onClick={onToggleLock}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-2xl border shadow-lg backdrop-blur-md transition-all duration-200 font-medium text-sm ${
+                            isLocked
+                                ? 'bg-blue-500/30 border-blue-400/40 text-blue-300 hover:bg-blue-500/40'
+                                : 'bg-black/40 border-white/10 text-white/70 hover:bg-white/10 hover:text-white'
+                        }`}
+                        title={isLocked ? 'Unlock Modal' : 'Lock Modal'}
+                    >
+                        {isLocked ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
+                        <span className="hidden sm:inline">{isLocked ? 'Locked' : 'Lock'}</span>
                     </button>
                 </div>
 

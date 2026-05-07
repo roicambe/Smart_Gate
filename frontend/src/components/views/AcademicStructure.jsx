@@ -286,13 +286,13 @@ export const AcademicStructure = ({ branding, adminSession }) => {
             {/* Data Table - scroll only, no pagination (Academic Structure) */}
             <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-xl shadow-sm relative">
                 <div className="flex-1 min-h-0 overflow-x-auto overflow-y-auto">
-                    <table className="w-full text-left text-sm text-slate-600">
-                        <thead className="text-xs uppercase bg-slate-100 border-b border-slate-200 text-slate-700 sticky top-0 z-10">
+                    <table className="w-full text-left text-sm text-slate-600 table-fixed">
+                        <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
                             <tr>
-                                <SortableHeader label="Code" sortKey={activeTab === 'department' ? 'department_code' : 'program_code'} sortConfig={sortConfig} onSort={requestSort} />
-                                <SortableHeader label="Name" sortKey={activeTab === 'department' ? 'department_name' : 'program_name'} sortConfig={sortConfig} onSort={requestSort} />
-                                {activeTab === 'program' && <SortableHeader label="Department Link" sortKey="department_id" sortConfig={sortConfig} onSort={requestSort} />}
-                                <th className="px-6 py-4 font-semibold tracking-wider text-right">Actions</th>
+                                <SortableHeader label="Code" sortKey={activeTab === 'department' ? 'department_code' : 'program_code'} sortConfig={sortConfig} onSort={requestSort} width="150px" />
+                                <SortableHeader label="Name" sortKey={activeTab === 'department' ? 'department_name' : 'program_name'} sortConfig={sortConfig} onSort={requestSort} width="300px" />
+                                {activeTab === 'program' && <SortableHeader label="Department Link" sortKey="department_id" sortConfig={sortConfig} onSort={requestSort} width="200px" />}
+                                <th className="px-6 py-4 font-bold text-xs uppercase tracking-wider text-slate-700 text-right" style={{ width: '150px' }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">

@@ -279,14 +279,14 @@ export const DataManagement = ({ adminSession }) => {
         if (activeSubTab === 'users') {
             return (
                 <div className="flex-1 min-h-0 overflow-y-auto rounded-xl border border-slate-200 shadow-sm bg-white mt-4">
-                    <table className="w-full text-sm text-left border-collapse">
+                    <table className="w-full text-sm text-left border-collapse table-fixed">
                         <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
-                            <tr className="text-slate-600">
-                                <SortableHeader label="ID Number" sortKey="id_number" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                <SortableHeader label="Full Name" sortKey="full_name" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                <SortableHeader label="Department / Details" sortKey="department_name" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                <SortableHeader label="Archived Date" sortKey="archived_at" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs text-right">Actions</th>
+                            <tr>
+                                <SortableHeader label="ID Number" sortKey="id_number" sortConfig={sortConfig} onSort={requestSort} width="140px" />
+                                <SortableHeader label="Full Name" sortKey="full_name" sortConfig={sortConfig} onSort={requestSort} width="220px" />
+                                <SortableHeader label="Department / Details" sortKey="department_name" sortConfig={sortConfig} onSort={requestSort} width="250px" />
+                                <SortableHeader label="Archived Date" sortKey="archived_at" sortConfig={sortConfig} onSort={requestSort} width="180px" />
+                                <th className="px-6 py-4 font-bold text-xs uppercase tracking-wider text-slate-700 text-right" style={{ width: '120px' }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -307,8 +307,10 @@ export const DataManagement = ({ adminSession }) => {
                                     </td>
                                 </tr>
                             ) : paginatedRecords.map(u => {
-                                const isStudent = (u.role || '').toLowerCase() === 'student';
-                                const departmentLine = u.department_name || 'N/A';
+                                const role = (u.role || '').toLowerCase();
+                                const isStudent = role === 'student';
+                                const isVisitor = role === 'visitor';
+                                const departmentLine = isVisitor ? 'VISITOR' : (u.department_name || 'N/A');
                                 const detailLine = isStudent
                                     ? `${u.program_name || 'N/A'}${u.year_level ? ` - Yr ${u.year_level}` : ''}`
                                     : (u.position_title || 'N/A');
@@ -343,14 +345,14 @@ export const DataManagement = ({ adminSession }) => {
             return (
                 <div className="space-y-6 mt-4">
                     <div className="flex-1 min-h-0 overflow-y-auto rounded-xl border border-slate-200 shadow-sm bg-white">
-                        <table className="w-full text-sm text-left border-collapse">
+                        <table className="w-full text-sm text-left border-collapse table-fixed">
                             <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
-                                <tr className="text-slate-600">
-                                    <SortableHeader label="Code" sortKey="code" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                    <SortableHeader label="Name" sortKey="name" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                    <SortableHeader label="Type" sortKey="type" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                    <SortableHeader label="Archived Date" sortKey="archived_at" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                    <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs text-right">Actions</th>
+                                <tr>
+                                    <SortableHeader label="Code" sortKey="code" sortConfig={sortConfig} onSort={requestSort} width="140px" />
+                                    <SortableHeader label="Name" sortKey="name" sortConfig={sortConfig} onSort={requestSort} width="300px" />
+                                    <SortableHeader label="Type" sortKey="type" sortConfig={sortConfig} onSort={requestSort} width="120px" />
+                                    <SortableHeader label="Archived Date" sortKey="archived_at" sortConfig={sortConfig} onSort={requestSort} width="180px" />
+                                    <th className="px-6 py-4 font-bold text-xs uppercase tracking-wider text-slate-700 text-right" style={{ width: '120px' }}>Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -419,15 +421,15 @@ export const DataManagement = ({ adminSession }) => {
         } else if (activeSubTab === 'events') {
             return (
                 <div className="flex-1 min-h-0 overflow-y-auto rounded-xl border border-slate-200 shadow-sm bg-white mt-4">
-                    <table className="w-full text-sm text-left border-collapse">
+                    <table className="w-full text-sm text-left border-collapse table-fixed">
                         <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
-                            <tr className="text-slate-600">
-                                <SortableHeader label="Event Name" sortKey="event_name" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                <SortableHeader label="Description" sortKey="description" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                <SortableHeader label="Date and Time" sortKey="start_time" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                <SortableHeader label="Required Role" sortKey="required_role" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                <SortableHeader label="Archived Date" sortKey="archived_at" sortConfig={sortConfig} onSort={requestSort} className="text-xs" />
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs text-right">Actions</th>
+                            <tr>
+                                <SortableHeader label="Event Name" sortKey="event_name" sortConfig={sortConfig} onSort={requestSort} width="220px" />
+                                <SortableHeader label="Description" sortKey="description" sortConfig={sortConfig} onSort={requestSort} width="300px" />
+                                <SortableHeader label="Date and Time" sortKey="start_time" sortConfig={sortConfig} onSort={requestSort} width="250px" />
+                                <SortableHeader label="Required Role" sortKey="required_role" sortConfig={sortConfig} onSort={requestSort} width="180px" />
+                                <SortableHeader label="Archived Date" sortKey="archived_at" sortConfig={sortConfig} onSort={requestSort} width="180px" />
+                                <th className="px-6 py-4 font-bold text-xs uppercase tracking-wider text-slate-700 text-right" style={{ width: '120px' }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">

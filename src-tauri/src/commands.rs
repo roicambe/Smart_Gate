@@ -663,12 +663,18 @@ pub fn update_system_configuration(
     admin_id: i64,
     strict_email_domain: bool,
     enable_face_recognition: bool,
+    enable_auto_exit: bool,
+    auto_exit_time: String,
+    enable_entry_exit_validation: bool,
 ) -> Result<(), String> {
     db::update_system_configuration(
         &pool,
         admin_id,
         strict_email_domain,
         enable_face_recognition,
+        enable_auto_exit,
+        auto_exit_time,
+        enable_entry_exit_validation,
     )
 }
 

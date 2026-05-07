@@ -228,15 +228,15 @@ export const AdminAccounts = ({ adminSession, branding, showToast }) => {
             />
 
             <div className="min-h-0 w-full overflow-y-auto rounded-xl border border-slate-200">
-                <table className="w-full text-left text-sm text-slate-600">
-                    <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-xs uppercase text-slate-700">
+                <table className="w-full text-left text-sm text-slate-600 table-fixed">
+                    <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
                         <tr>
-                            <SortableHeader label="Username" sortKey="username" sortConfig={sortConfig} onSort={requestSort} />
-                            <SortableHeader label="Name" sortKey="full_name" sortConfig={sortConfig} onSort={requestSort} />
-                            <SortableHeader label="Contact Email" sortKey="email" sortConfig={sortConfig} onSort={requestSort} />
-                            <SortableHeader label="System Role" sortKey="role" sortConfig={sortConfig} onSort={requestSort} />
-                            <SortableHeader label="Status" sortKey="is_first_login" sortConfig={sortConfig} onSort={requestSort} />
-                            <th className="px-6 py-4 text-right font-semibold tracking-wider">Actions</th>
+                            <SortableHeader label="Username" sortKey="username" sortConfig={sortConfig} onSort={requestSort} width="150px" />
+                            <SortableHeader label="Name" sortKey="full_name" sortConfig={sortConfig} onSort={requestSort} width="220px" />
+                            <SortableHeader label="Contact Email" sortKey="email" sortConfig={sortConfig} onSort={requestSort} width="250px" />
+                            <SortableHeader label="System Role" sortKey="role" sortConfig={sortConfig} onSort={requestSort} width="200px" />
+                            <SortableHeader label="Status" sortKey="is_first_login" sortConfig={sortConfig} onSort={requestSort} width="140px" />
+                            <th className="px-6 py-4 font-bold text-xs uppercase tracking-wider text-slate-700 text-right" style={{ width: '180px' }}>Actions</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">

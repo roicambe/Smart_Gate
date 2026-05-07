@@ -1,4 +1,6 @@
 use tauri::Manager;
+use chrono;
+use log;
 
 pub mod commands;
 pub mod db;
@@ -41,8 +43,29 @@ pub fn run() {
                 }
             };
             
-            app.manage(pool);
+            app.manage(pool.clone());
             app.manage(std::sync::Mutex::new(pipeline_opt));
+
+            // --- Background Auto-Exit Task ---
+            let bg_pool = pool.clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(60));
+                    
+                    let Ok(branding) = db::get_system_branding(&bg_pool) else { continue; };
+                    
+                    if branding.enable_auto_exit {
+                        let now = chrono::Local::now();
+                        let current_time = now.format("%H:%M").to_string();
+                        
+                        if current_time == branding.auto_exit_time {
+                            log::info!("Triggering automatic logout for all users still on campus...");
+                            let _ = db::auto_exit_users(&bg_pool);
+                        }
+                    }
+                }
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
