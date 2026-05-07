@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Keyboard, QrCode, ScanFace, Users, LogIn, LogOut, ChevronLeft, ArrowRight, X } from "lucide-react";
+import { Keyboard, QrCode, ScanFace, Users, LogIn, LogOut, ChevronLeft, ArrowRight, X, Lock, Unlock } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { QRScannerOverlay } from "./QRScannerOverlay";
 import { VisitorPassPrinter } from "./VisitorPassPrinter";
@@ -7,6 +7,7 @@ import { FaceScannerModal } from "./FaceScannerModal";
 import { extractScanId } from "../utils/patternHunter";
 import { useGhostScannerListener } from "../hooks/useGhostScannerListener";
 import { useToast } from "./toast/ToastProvider";
+import { SuffixCombobox } from "./common/SuffixCombobox";
 
 const ID_CARD_DURATION_MS = 1000;
 const DETAILED_TOAST_ROLES = new Set(["student", "professor", "staff"]);
@@ -18,10 +19,90 @@ const formatRoleLabel = (role) => {
     return role ? role.charAt(0).toUpperCase() + role.slice(1) : "---";
 };
 
+const formatName = (val) => {
+    if (!val) return '';
+    
+    // Only allow letters, spaces, dots, hyphens, and single quotes
+    let cleaned = val.replace(/[^a-zA-Z\s.\-']/g, '');
+
+    // List of suffixes to preserve/handle
+    const suffixes = ['Jr', 'Sr', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+
+    return cleaned.split(' ').map(word => {
+        if (!word) return '';
+        
+        const cleanWord = word.replace(/[.,]/g, '');
+        const upperWord = cleanWord.toUpperCase();
+        
+        // Special handling for suffixes
+        if (suffixes.includes(upperWord)) {
+            const hasDot = word.endsWith('.');
+            return upperWord + (hasDot ? '.' : '');
+        }
+
+        // Handle specific cases like "Jr." if typed manually with dot
+        if (upperWord === 'JR' || upperWord === 'SR') {
+             return upperWord.charAt(0).toUpperCase() + upperWord.slice(1).toLowerCase() + (word.endsWith('.') ? '.' : '');
+        }
+
+        // Standard Title Case
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    }).join(' ');
+};
+
 const getFullNameLabel = (person) => {
     if (!person) return "---";
-    const middle = person.middle_name ? ` ${person.middle_name} ` : " ";
-    return `${person.first_name}${middle}${person.last_name}`;
+    const middle = person.middle_name ? ` ${person.middle_name.charAt(0)}.` : '';
+    const suffix = person.suffix ? ` ${person.suffix}` : '';
+    return `${person.first_name}${middle} ${person.last_name}${suffix}`;
+};
+
+const formatIdNumber = (val) => {
+    if (!val) return "";
+    
+    // 1. Character Filtering: Only allow 0-9, hyphen, and V, I, S (case-insensitive)
+    let filtered = val.replace(/[^0-9VvIiSs\-]/g, "");
+    const upper = filtered.toUpperCase();
+    
+    // 2. Visitor Logic: Automatically recognize "VIS" (any case)
+    if (upper.includes("VIS")) {
+        // Find the index of "VIS" to handle cases where user types it partially or fully
+        const visIndex = upper.indexOf("VIS");
+        // Extract what follows "VIS"
+        const afterVis = upper.slice(visIndex + 3);
+        // Only keep digits for the visitor numeric part
+        const digits = afterVis.replace(/[^0-9]/g, "").slice(0, 5);
+        return `VIS-${digits}`;
+    }
+    
+    // 3. Numeric Logic (Student/Employee)
+    const digits = filtered.replace(/[^0-9]/g, "");
+    
+    // If it exceeds 7 digits, recognize as employee ID (remove hyphen)
+    if (digits.length > 7) {
+        return digits.slice(0, 9);
+    }
+    
+    // If it has exactly 7 digits, auto-format to student format (XX-XXXXX)
+    if (digits.length === 7) {
+        return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+    }
+    
+    // If user typed a hyphen manually at position 2, preserve it
+    if (filtered.indexOf('-') === 2 && digits.length <= 7) {
+        // Re-apply hyphen after 2 digits if we have at least 2 digits
+        if (digits.length >= 2) {
+             return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+        }
+    }
+    
+    // If typing "V" or "VI", allow it (part of VIS)
+    if (upper === 'V' || upper === 'VI') {
+        return upper;
+    }
+    
+    // Default: return digits
+    return digits;
 };
 
 const getProgramYearLabel = (person) => {
@@ -49,6 +130,8 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
     const [showPrintModal, setShowPrintModal] = useState(false);
     const [printPassData, setPrintPassData] = useState(null);
     const [activeScanCard, setActiveScanCard] = useState(null);
+    const [isManualLocked, setIsManualLocked] = useState(false);
+    const [isScannerLocked, setIsScannerLocked] = useState(false);
     const audioContextRef = useRef(null);
     const isBackgroundScanRunningRef = useRef(false);
     const scanCardTimerRef = useRef(null);
@@ -60,6 +143,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
         firstName: '',
         middleName: '',
         lastName: '',
+        suffix: '',
         email: '',
         contactNumber: '',
         purpose: '',
@@ -130,9 +214,8 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
     const handleVisitorSubmit = async (e) => {
         e.preventDefault();
         try {
-            const yearPart = new Date().getFullYear().toString().slice(-2);
-            const randomPart = Math.floor(1000 + Math.random() * 9000).toString().padStart(4, '0');
-            const generatedId = `VIS-${yearPart}${randomPart}`;
+            const randomPart = Math.floor(10000 + Math.random() * 90000).toString();
+            const generatedId = `VIS-${randomPart}`;
             
             await invoke('register_user', {
                 role: "visitor",
@@ -140,6 +223,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                 firstName: visitorForm.firstName,
                 middleName: visitorForm.middleName || null,
                 lastName: visitorForm.lastName,
+                suffix: visitorForm.suffix || null,
                 email: visitorForm.email,
                 contactNumber: visitorForm.contactNumber,
                 programId: null,
@@ -185,8 +269,10 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
             console.error(error);
             showError(typeof error === 'string' ? error : "Failed to register visitor.");
         } finally {
-            setShowVisitorModal(false);
-            setVisitorForm({ firstName: '', middleName: '', lastName: '', email: '', contactNumber: '', purpose: '', personToVisit: '' });
+            if (!isManualLocked) {
+                setShowVisitorModal(false);
+                setVisitorForm({ firstName: '', middleName: '', lastName: '', suffix: '', email: '', contactNumber: '', purpose: '', personToVisit: '' });
+            }
         }
     };
 
@@ -202,13 +288,18 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
             });
 
             if (result.success) {
-                setShowManualModal(false);
-                setManualId("");
                 await showScanSuccessFeedback({
                     result,
                     scannedId: submittedId,
-                    modalActive: false
+                    modalActive: true
                 });
+
+                if (!isManualLocked) {
+                    setShowManualModal(false);
+                    setManualId("");
+                } else {
+                    setManualId("");
+                }
             } else {
                 showError(result.message);
             }
@@ -216,8 +307,10 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
             console.error(error);
             showError("System Error. Failed to process ID.");
         } finally {
-            setShowManualModal(false);
-            setManualId("");
+            if (!isManualLocked) {
+                setShowManualModal(false);
+                setManualId("");
+            }
         }
     };
 
@@ -565,17 +658,44 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                                     <h2 className="text-2xl font-bold text-white tracking-wide">Enter ID Number</h2>
                                     <p className="text-white/60 text-sm">{isEntrance ? "Logging Incoming Request" : "Logging Outgoing Request"}</p>
                                 </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsManualLocked(!isManualLocked)}
+                                    className={`ml-auto p-2 rounded-xl border transition-all ${
+                                        isManualLocked 
+                                            ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' 
+                                            : 'bg-white/5 border-white/10 text-white/40 hover:text-white/60'
+                                    }`}
+                                    title={isManualLocked ? "Unlock Modal" : "Lock Modal"}
+                                >
+                                    {isManualLocked ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
+                                </button>
                             </div>
                             <form onSubmit={handleManualSubmit}>
                                 <input
                                     type="text"
-                                    placeholder="e.g. 2026-00123"
+                                    placeholder="e.g. 23-00123"
                                     value={manualId}
-                                    onChange={(e) => setManualId(e.target.value)}
-                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-white/50 mb-8 text-center tracking-widest uppercase transition-all"
+                                    onChange={(e) => setManualId(formatIdNumber(e.target.value))}
+                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-white/50 mb-3 text-center tracking-widest uppercase transition-all"
                                     autoFocus
                                     required
+                                    maxLength={9}
                                 />
+                                <div className="text-white/40 text-xs space-y-1.5 mb-6 max-w-[240px] mx-auto font-medium">
+                                    <div className="flex justify-between items-center">
+                                        <span>Student ID</span>
+                                        <span className="text-white/70 font-mono font-bold tracking-wider">00-00000</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                        <span>Employee ID</span>
+                                        <span className="text-white/70 font-mono font-bold tracking-wider">000000000</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                        <span>Visitor ID</span>
+                                        <span className="text-white/70 font-mono font-bold tracking-wider">VIS-00000</span>
+                                    </div>
+                                </div>
                                 <div className="flex gap-3">
                                     <button
                                         type="button"
@@ -610,20 +730,60 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                                     <h2 className="text-2xl font-bold text-white tracking-wide">Visitor Registration</h2>
                                     <p className="text-white/60 text-sm">Logging incoming guest to campus.</p>
                                 </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsManualLocked(!isManualLocked)}
+                                    className={`ml-auto p-2 rounded-xl border transition-all ${
+                                        isManualLocked 
+                                            ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' 
+                                            : 'bg-white/5 border-white/10 text-white/40 hover:text-white/60'
+                                    }`}
+                                    title={isManualLocked ? "Unlock Modal" : "Lock Modal"}
+                                >
+                                    {isManualLocked ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
+                                </button>
                             </div>
                             <form onSubmit={handleVisitorSubmit} className="space-y-5">
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
                                     <div>
                                         <label className="block text-sm font-medium text-white/70 mb-1">First Name <span className="text-rose-500">*</span></label>
-                                        <input required type="text" value={visitorForm.firstName} onChange={e => setVisitorForm({...visitorForm, firstName: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="Juan" />
+                                        <input 
+                                            required 
+                                            type="text" 
+                                            value={visitorForm.firstName} 
+                                            onChange={e => setVisitorForm({...visitorForm, firstName: formatName(e.target.value)})} 
+                                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" 
+                                            placeholder="Juan" 
+                                        />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-white/70 mb-1">Middle Name</label>
-                                        <input type="text" value={visitorForm.middleName} onChange={e => setVisitorForm({...visitorForm, middleName: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="Optional" />
+                                        <input 
+                                            type="text" 
+                                            value={visitorForm.middleName} 
+                                            onChange={e => setVisitorForm({...visitorForm, middleName: formatName(e.target.value)})} 
+                                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" 
+                                            placeholder="Optional" 
+                                        />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-white/70 mb-1">Last Name <span className="text-rose-500">*</span></label>
-                                        <input required type="text" value={visitorForm.lastName} onChange={e => setVisitorForm({...visitorForm, lastName: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="Dela Cruz" />
+                                        <input 
+                                            required 
+                                            type="text" 
+                                            value={visitorForm.lastName} 
+                                            onChange={e => setVisitorForm({...visitorForm, lastName: formatName(e.target.value)})} 
+                                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" 
+                                            placeholder="Dela Cruz" 
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-white/70 mb-1">Suffix</label>
+                                        <SuffixCombobox
+                                            value={visitorForm.suffix}
+                                            onChange={val => setVisitorForm({...visitorForm, suffix: val})}
+                                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50"
+                                        />
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-5">
@@ -660,9 +820,13 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
             {showQRScanner && (
                 <QRScannerOverlay
                     scannerFunction={isEntrance ? 'entrance' : 'exit'}
+                    isLocked={isScannerLocked}
+                    onToggleLock={() => setIsScannerLocked(!isScannerLocked)}
                     onClose={() => setShowQRScanner(false)}
                     onScan={async (scannedId, error) => {
-                        setShowQRScanner(false);
+                        if (!isScannerLocked) {
+                            setShowQRScanner(false);
+                        }
                         
                         if (error || !scannedId) {
                             showError(error || "Invalid scan target.");
@@ -696,9 +860,14 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
             {showFaceScanner && (
                 <FaceScannerModal
                     scannerFunction={isEntrance ? 'entrance' : 'exit'}
+                    isLocked={isScannerLocked}
+                    onToggleLock={() => setIsScannerLocked(!isScannerLocked)}
                     onClose={() => setShowFaceScanner(false)}
+                    isPaused={showManualModal || showVisitorModal || showQRScanner || showPrintModal}
                     onIdentify={async (scannedId) => {
-                        setShowFaceScanner(false);
+                        if (!isScannerLocked) {
+                            setShowFaceScanner(false);
+                        }
                         try {
                             const result = await invoke('manual_id_entry', {
                                 idNumber: scannedId,
@@ -709,7 +878,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                                 await showScanSuccessFeedback({
                                     result,
                                     scannedId,
-                                    modalActive: false
+                                    modalActive: true
                                 });
                             } else {
                                 showError(result.message);

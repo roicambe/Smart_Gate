@@ -3,6 +3,8 @@ import { ScanFace, Search, Eye, RotateCcw, Trash2, ChevronLeft, ChevronRight, Fi
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from '../toast/ToastProvider';
 import { AdminModal } from '../common/AdminModal';
+import { Pagination } from '../common/Pagination';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 
 const formatRoleLabel = (role) =>
     role ? role.charAt(0).toUpperCase() + role.slice(1) : 'N/A';
@@ -85,16 +87,19 @@ export const FaceRecognitionManagement = ({ adminSession, branding }) => {
         });
     }, [users, searchQuery, filterRole, filterStatus]);
 
+    // Sorting
+    const { sortConfig, requestSort, sortedData: sortedUsers } = useTableSort(filteredUsers, null, 'asc', 'face_recognition');
+
     // Pagination
     const ITEMS_PER_PAGE = 15;
     const [currentPage, setCurrentPage] = useState(1);
-    useEffect(() => { setCurrentPage(1); }, [searchQuery, filterRole, filterStatus]);
-    const totalPages = Math.ceil(filteredUsers.length / ITEMS_PER_PAGE);
+    useEffect(() => { setCurrentPage(1); }, [searchQuery, filterRole, filterStatus, sortConfig]);
+    const totalPages = Math.ceil(sortedUsers.length / ITEMS_PER_PAGE);
     const paginatedUsers = useMemo(() => {
         const start = (currentPage - 1) * ITEMS_PER_PAGE;
-        return filteredUsers.slice(start, start + ITEMS_PER_PAGE);
-    }, [filteredUsers, currentPage]);
-    const showPagination = filteredUsers.length > ITEMS_PER_PAGE;
+        return sortedUsers.slice(start, start + ITEMS_PER_PAGE);
+    }, [sortedUsers, currentPage]);
+    const showPagination = sortedUsers.length > ITEMS_PER_PAGE;
 
     // Stats
     const totalRegistered = users.filter(u => u.face_registered).length;
@@ -200,15 +205,15 @@ export const FaceRecognitionManagement = ({ adminSession, branding }) => {
             {/* Data Table */}
             <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-xl shadow-sm relative">
                 <div className="flex-1 min-h-0 overflow-x-auto overflow-y-auto">
-                    <table className="w-full text-left border-collapse text-sm text-slate-600">
-                        <thead className="text-xs uppercase bg-slate-100 border-b border-slate-200 text-slate-700 sticky top-0 z-10">
+                    <table className="w-full text-left border-collapse text-sm text-slate-600 table-fixed">
+                        <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
                             <tr>
-                                <th className="px-4 py-3 font-semibold tracking-wider">ID Number</th>
-                                <th className="px-4 py-3 font-semibold tracking-wider">Full Name</th>
-                                <th className="px-4 py-3 font-semibold tracking-wider">Role</th>
-                                <th className="px-4 py-3 font-semibold tracking-wider">Face Status</th>
-                                <th className="px-4 py-3 font-semibold tracking-wider">Last Updated</th>
-                                <th className="px-4 py-3 font-semibold tracking-wider text-right">Actions</th>
+                                <SortableHeader label="ID Number" sortKey="id_number" sortConfig={sortConfig} onSort={requestSort} width="140px" />
+                                <SortableHeader label="Full Name" sortKey="full_name" sortConfig={sortConfig} onSort={requestSort} width="250px" />
+                                <SortableHeader label="Role" sortKey="roles" sortConfig={sortConfig} onSort={requestSort} width="180px" />
+                                <SortableHeader label="Face Status" sortKey="face_registered" sortConfig={sortConfig} onSort={requestSort} width="150px" />
+                                <SortableHeader label="Last Updated" sortKey="enrolled_at" sortConfig={sortConfig} onSort={requestSort} width="200px" />
+                                <th className="px-6 py-4 font-bold text-xs uppercase tracking-wider text-slate-700 text-right" style={{ width: '120px' }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -278,41 +283,14 @@ export const FaceRecognitionManagement = ({ adminSession, branding }) => {
                     </table>
                 </div>
 
-                {/* Pagination */}
-                {showPagination && (
-                    <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 flex flex-wrap items-center justify-between gap-3 shrink-0 rounded-b-xl">
-                        <div>
-                            Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredUsers.length)} of {filteredUsers.length}
-                        </div>
-                        <div className="flex items-center gap-1">
-                            <button
-                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                disabled={currentPage === 1}
-                                className="px-2 py-1 rounded border border-slate-200 bg-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors flex items-center gap-0.5"
-                            >
-                                <ChevronLeft className="w-4 h-4" /> Previous
-                            </button>
-                            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-                                <button
-                                    key={p}
-                                    onClick={() => setCurrentPage(p)}
-                                    className={`min-w-[28px] px-2 py-1 rounded border transition-colors ${currentPage === p
-                                        ? 'border-blue-500 bg-blue-600 text-white'
-                                        : 'border-slate-200 bg-white hover:bg-slate-50'}`}
-                                >
-                                    {p}
-                                </button>
-                            ))}
-                            <button
-                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                disabled={currentPage === totalPages}
-                                className="px-2 py-1 rounded border border-slate-200 bg-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors flex items-center gap-0.5"
-                            >
-                                Next <ChevronRight className="w-4 h-4" />
-                            </button>
-                        </div>
-                    </div>
-                )}
+                <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={setCurrentPage}
+                    totalItems={filteredUsers.length}
+                    itemsPerPage={ITEMS_PER_PAGE}
+                    currentItemsCount={paginatedUsers.length}
+                />
             </div>
 
             {/* View Details Modal */}
@@ -379,7 +357,7 @@ export const FaceRecognitionManagement = ({ adminSession, branding }) => {
                                 </>
                             )}
 
-                            {selectedUser.roles?.some(r => ['professor', 'staff', 'dean'].includes(r.toLowerCase())) && (
+                            {selectedUser.roles?.some(r => ['professor', 'staff'].includes(r.toLowerCase())) && (
                                 <>
                                     <div className="col-span-2">
                                         <p className="text-white/40 mb-1 text-xs uppercase tracking-wider font-semibold">Department</p>

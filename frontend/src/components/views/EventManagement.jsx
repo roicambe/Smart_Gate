@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Calendar, Plus, Search, Edit2, Trash2, Check, AlertTriangle, Eye, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from '../toast/ToastProvider';
 import { AdminModal } from '../common/AdminModal';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 
 const EVENT_ROLE_OPTIONS = [
     { value: 'all', label: 'All Roles' },
@@ -26,6 +27,11 @@ const parseRequiredRoles = (requiredRole) => {
         .map((role) => role.trim().toLowerCase())
         .filter(Boolean);
     if (normalized.length === 0 || normalized.includes('all')) {
+        return ['all'];
+    }
+    // If all individual roles are selected, treat as 'all'
+    const allIndividualRoles = EVENT_ROLE_OPTIONS.filter(o => o.value !== 'all').map(o => o.value);
+    if (allIndividualRoles.length > 0 && allIndividualRoles.every(r => normalized.includes(r))) {
         return ['all'];
     }
     return Array.from(new Set(normalized));
@@ -385,11 +391,14 @@ export const EventManagement = ({ branding, adminSession }) => {
         return matchSearch && matchStatus && matchType;
     });
 
-    const totalPages = Math.ceil(filteredEvents.length / ITEMS_PER_PAGE);
-    const paginatedEvents = filteredEvents.slice(
-        (currentPage - 1) * ITEMS_PER_PAGE,
-        currentPage * ITEMS_PER_PAGE
-    );
+    // Sorting
+    const { sortConfig, requestSort, sortedData: sortedEvents } = useTableSort(filteredEvents, null, 'asc', 'event_management');
+
+    const totalPages = Math.ceil(sortedEvents.length / ITEMS_PER_PAGE);
+    const paginatedEvents = useMemo(() => {
+        const start = (currentPage - 1) * ITEMS_PER_PAGE;
+        return sortedEvents.slice(start, start + ITEMS_PER_PAGE);
+    }, [sortedEvents, currentPage]);
 
     const clearFilters = () => {
         setSearchQuery('');
@@ -492,15 +501,15 @@ export const EventManagement = ({ branding, adminSession }) => {
 
             <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 rounded-xl shadow-sm relative">
                 <div className="flex-1 min-h-0 overflow-x-auto overflow-y-auto">
-                    <table className="w-full text-left text-sm text-slate-600">
-                        <thead className="text-xs uppercase bg-slate-100 border-b border-slate-200 text-slate-700 sticky top-0 z-10">
+                    <table className="w-full text-left text-sm text-slate-600 table-fixed">
+                        <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
                             <tr>
-                                <th className="px-6 py-4 font-semibold tracking-wider">Event Name</th>
-                                <th className="px-6 py-4 font-semibold tracking-wider">Description</th>
-                                <th className="px-6 py-4 font-semibold tracking-wider">Date & Time</th>
-                                <th className="px-6 py-4 font-semibold tracking-wider">Required Role</th>
-                                <th className="px-6 py-4 font-semibold tracking-wider">Status</th>
-                                <th className="px-6 py-4 font-semibold tracking-wider text-right">Actions</th>
+                                <SortableHeader label="Event Name" sortKey="event_name" sortConfig={sortConfig} onSort={requestSort} width="220px" />
+                                <SortableHeader label="Description" sortKey="description" sortConfig={sortConfig} onSort={requestSort} width="300px" />
+                                <SortableHeader label="Date & Time" sortKey="start_time" sortConfig={sortConfig} onSort={requestSort} width="250px" />
+                                <SortableHeader label="Required Role" sortKey="required_role" sortConfig={sortConfig} onSort={requestSort} width="180px" />
+                                <SortableHeader label="Status" sortKey="is_enabled" sortConfig={sortConfig} onSort={requestSort} width="120px" />
+                                <th className="px-6 py-4 font-bold text-xs uppercase tracking-wider text-slate-700 text-right" style={{ width: '150px' }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -555,7 +564,7 @@ export const EventManagement = ({ branding, adminSession }) => {
                 {totalPages > 1 && (
                     <div className="px-5 py-3 border-t border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 flex items-center justify-between shrink-0 rounded-b-xl">
                         <div>
-                            Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredEvents.length)} of {filteredEvents.length}
+                            Showing {(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, sortedEvents.length)} of {sortedEvents.length}
                         </div>
                         <div className="flex items-center gap-1">
                             <button

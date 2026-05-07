@@ -5,8 +5,8 @@ export const extractScanId = (inputString) => {
     const studentMatch = inputString.match(/\d{2}-\d{5}/);
     if (studentMatch) return studentMatch[0];
 
-    // 2. Visitor Pattern: VIS-\d{6} (e.g. VIS-260001)
-    const visitorMatch = inputString.match(/VIS-\d{6}/);
+    // 2. Visitor Pattern: VIS-\d{5,6} (Supports 9-char and legacy 10-char formats)
+    const visitorMatch = inputString.match(/VIS-\d{5,6}/);
     if (visitorMatch) return visitorMatch[0];
 
     // 3. Employee Pattern: \b\d{7}\b (e.g. 1234567, exact 7 digits)

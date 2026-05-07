@@ -192,21 +192,27 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
     let schema = include_str!("../../docs/database/schema.sql");
     conn.execute_batch(schema).map_err(|e| format!("Failed to execute schema: {}", e))?;
 
-    // Fix audit_events check constraint for existing databases if they lack ARCHIVE/RESTORE
+    // Add suffix column if missing
+    if !table_has_column(&conn, "persons", "suffix").unwrap_or(true) {
+        log::info!("Adding suffix column to persons table...");
+        conn.execute("ALTER TABLE persons ADD COLUMN suffix VARCHAR NULL;", []).map_err(|e| e.to_string())?;
+    }
+
+    // Fix audit_events check constraint for existing databases if they lack BACKUP/SYSTEM_RESTORE
     let audit_sql: String = conn.query_row(
         "SELECT sql FROM sqlite_master WHERE name='audit_events'",
         [],
         |row| row.get(0)
     ).unwrap_or_default();
     
-    if !audit_sql.is_empty() && !audit_sql.contains("ARCHIVE") {
-        log::info!("Updating audit_events check constraint to support ARCHIVE/RESTORE...");
+    if !audit_sql.is_empty() && !audit_sql.contains("BACKUP") {
+        log::info!("Updating audit_events check constraint to support BACKUP/SYSTEM_RESTORE...");
         conn.execute("PRAGMA foreign_keys = OFF;", []).map_err(|e| e.to_string())?;
         conn.execute_batch("
             BEGIN TRANSACTION;
             CREATE TABLE audit_events_new (
                 event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                action_type TEXT CHECK(action_type IN ('CREATE', 'UPDATE', 'DELETE', 'ARCHIVE', 'RESTORE')) NOT NULL,
+                action_type TEXT CHECK(action_type IN ('CREATE', 'UPDATE', 'DELETE', 'ARCHIVE', 'RESTORE', 'BACKUP', 'SYSTEM_RESTORE')) NOT NULL,
                 entity_type TEXT NOT NULL,
                 entity_id INTEGER NOT NULL,
                 entity_label TEXT NOT NULL,
@@ -349,7 +355,7 @@ fn run_normalization_migration(conn: &rusqlite::Connection) -> Result<(), String
 
         // 2. Seed default roles
         conn.execute_batch("
-            INSERT OR IGNORE INTO roles (role_name) VALUES ('student'), ('professor'), ('staff'), ('visitor'), ('dean');
+            INSERT OR IGNORE INTO roles (role_name) VALUES ('student'), ('professor'), ('staff'), ('visitor');
         ").map_err(|e| e.to_string())?;
 
         // 3. Migrate Persons data (Roles and Contacts)
@@ -469,14 +475,15 @@ fn run_normalization_migration(conn: &rusqlite::Connection) -> Result<(), String
                 first_name VARCHAR NOT NULL,
                 middle_name VARCHAR NULL,
                 last_name VARCHAR NOT NULL,
+                suffix VARCHAR NULL,
                 face_template_path VARCHAR NULL,
                 is_active BOOLEAN NOT NULL DEFAULT 1,
                 is_archived BOOLEAN NOT NULL DEFAULT 0,
                 archived_at DATETIME NULL,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
-            INSERT INTO persons_new (person_id, id_number, first_name, middle_name, last_name, face_template_path, is_active, is_archived, archived_at, created_at)
-            SELECT person_id, id_number, first_name, middle_name, last_name, face_template_path, is_active, is_archived, archived_at, created_at FROM persons;
+            INSERT INTO persons_new (person_id, id_number, first_name, middle_name, last_name, suffix, face_template_path, is_active, is_archived, archived_at, created_at)
+            SELECT person_id, id_number, first_name, middle_name, last_name, suffix, face_template_path, is_active, is_archived, archived_at, created_at FROM persons;
             DROP TABLE persons;
             ALTER TABLE persons_new RENAME TO persons;
 
@@ -612,6 +619,7 @@ pub fn get_persons_face_status(pool: &DbPool) -> Result<Vec<serde_json::Value>, 
                 p.first_name,
                 COALESCE(p.middle_name, '') AS middle_name,
                 p.last_name,
+                p.suffix,
                 p.is_active,
                 CASE WHEN fe.embedding_id IS NOT NULL THEN 1 ELSE 0 END AS face_registered,
                 fe.enrolled_at,
@@ -639,25 +647,32 @@ pub fn get_persons_face_status(pool: &DbPool) -> Result<Vec<serde_json::Value>, 
             let first_name: String = row.get(2)?;
             let middle_name: String = row.get(3)?;
             let last_name: String = row.get(4)?;
-            let is_active: bool = row.get(5)?;
-            let face_registered: bool = row.get(6)?;
-            let enrolled_at: Option<String> = row.get(7)?;
-            let department_name: Option<String> = row.get(8)?;
-            let program_name: Option<String> = row.get(9)?;
-            let year_level: Option<i32> = row.get(10)?;
-            let position_title: Option<String> = row.get(11)?;
-            let is_irregular: Option<bool> = row.get(12)?;
+            let suffix: Option<String> = row.get(5)?;
+            let is_active: bool = row.get(6)?;
+            let face_registered: bool = row.get(7)?;
+            let enrolled_at: Option<String> = row.get(8)?;
+            let department_name: Option<String> = row.get(9)?;
+            let program_name: Option<String> = row.get(10)?;
+            let year_level: Option<i32> = row.get(11)?;
+            let position_title: Option<String> = row.get(12)?;
+            let is_irregular: Option<bool> = row.get(13)?;
 
-            // Table format: First Last only (as requested)
-            let full_name = format!("{} {}", first_name, last_name);
+            // Format: Last, First M., Suffix
+            let mid_init = if middle_name.is_empty() { String::new() } else {
+                middle_name.chars().next().map(|c| format!(" {}.", c)).unwrap_or_default()
+            };
+            let suf_part = if suffix.as_deref().unwrap_or("").is_empty() { String::new() } else {
+                format!(" {}", suffix.as_deref().unwrap_or(""))
+            };
+            let full_name = format!("{}, {}{}{}", last_name, first_name, mid_init, suf_part);
 
-            Ok((person_id, id_number, first_name, middle_name, last_name, full_name, is_active, face_registered, enrolled_at, department_name, program_name, year_level, position_title, is_irregular))
+            Ok((person_id, id_number, first_name, middle_name, last_name, suffix, full_name, is_active, face_registered, enrolled_at, department_name, program_name, year_level, position_title, is_irregular))
         })
         .map_err(|e| e.to_string())?;
 
     let mut results = Vec::new();
     for row in rows {
-        let (person_id, id_number, first_name, middle_name, last_name, full_name, is_active, face_registered, enrolled_at, department_name, program_name, year_level, position_title, is_irregular) = row.map_err(|e| e.to_string())?;
+        let (person_id, id_number, first_name, middle_name, last_name, suffix, full_name, is_active, face_registered, enrolled_at, department_name, program_name, year_level, position_title, is_irregular) = row.map_err(|e| e.to_string())?;
         
         let roles = get_person_roles(&conn, person_id)?;
         let contacts = get_person_contacts(&conn, person_id)?;
@@ -668,6 +683,7 @@ pub fn get_persons_face_status(pool: &DbPool) -> Result<Vec<serde_json::Value>, 
             "first_name": first_name,
             "middle_name": middle_name,
             "last_name": last_name,
+            "suffix": suffix,
             "full_name": full_name,
             "roles": roles,
             "is_active": is_active,
@@ -1001,13 +1017,14 @@ pub fn add_person(pool: &DbPool, person: Person) -> Result<i64, String> {
 
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     conn.execute(
-        "INSERT INTO persons (id_number, first_name, middle_name, last_name, face_template_path, is_active, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO persons (id_number, first_name, middle_name, last_name, suffix, face_template_path, is_active, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             person.id_number,
             person.first_name,
             person.middle_name,
             person.last_name,
+            person.suffix,
             person.face_template_path,
             is_active,
             now
@@ -1020,7 +1037,7 @@ pub fn add_person(pool: &DbPool, person: Person) -> Result<i64, String> {
 pub fn get_persons(pool: &DbPool) -> Result<Vec<Person>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT person_id, id_number, first_name, middle_name, last_name, face_template_path, is_active, is_archived FROM persons WHERE is_archived = 0")
+    let mut stmt = conn.prepare("SELECT person_id, id_number, first_name, middle_name, last_name, suffix, face_template_path, is_active, is_archived FROM persons WHERE is_archived = 0")
         .map_err(|e| e.to_string())?;
 
     let person_iter = stmt
@@ -1031,9 +1048,10 @@ pub fn get_persons(pool: &DbPool) -> Result<Vec<Person>, String> {
                 first_name: row.get(2)?,
                 middle_name: row.get(3).unwrap_or(None),
                 last_name: row.get(4)?,
-                face_template_path: row.get(5)?,
-                is_active: row.get::<_, i32>(6)? == 1,
-                is_archived: row.get::<_, i32>(7)? == 1,
+                suffix: row.get(5).unwrap_or(None),
+                face_template_path: row.get(6)?,
+                is_active: row.get::<_, i32>(7)? == 1,
+                is_archived: row.get::<_, i32>(8)? == 1,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -1097,7 +1115,7 @@ pub fn add_student(pool: &DbPool, student: Student) -> Result<(), String> {
 pub fn get_students(pool: &DbPool) -> Result<Vec<StudentDetails>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.is_active, p.is_archived,
+        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.suffix, p.is_active, p.is_archived,
                 s.program_id, pr.program_name, s.year_level, s.is_irregular, d.department_name
          FROM persons p
          JOIN students s ON p.person_id = s.person_id
@@ -1114,20 +1132,21 @@ pub fn get_students(pool: &DbPool) -> Result<Vec<StudentDetails>, String> {
                 row.get::<_, String>(2)?,
                 row.get::<_, Option<String>>(3)?,
                 row.get::<_, String>(4)?,
-                row.get::<_, i32>(5)? == 1,
+                row.get::<_, Option<String>>(5)?,
                 row.get::<_, i32>(6)? == 1,
-                row.get::<_, i64>(7)?,
-                row.get::<_, String>(8)?,
-                row.get::<_, Option<i64>>(9)?,
-                row.get::<_, Option<bool>>(10)?,
-                row.get::<_, String>(11)?,
+                row.get::<_, i32>(7)? == 1,
+                row.get::<_, i64>(8)?,
+                row.get::<_, String>(9)?,
+                row.get::<_, Option<i64>>(10)?,
+                row.get::<_, Option<bool>>(11)?,
+                row.get::<_, String>(12)?,
             ))
         })
         .map_err(|e| e.to_string())?;
 
     let mut list = Vec::new();
     for row in rows {
-        let (person_id, id_number, first_name, middle_name, last_name, is_active, is_archived, program_id, program_name, year_level, is_irregular, department_name) = row.map_err(|e| e.to_string())?;
+        let (person_id, id_number, first_name, middle_name, last_name, suffix, is_active, is_archived, program_id, program_name, year_level, is_irregular, department_name) = row.map_err(|e| e.to_string())?;
         
         let roles = get_person_roles(&conn, person_id)?;
         let contacts = get_person_contacts(&conn, person_id)?;
@@ -1138,6 +1157,7 @@ pub fn get_students(pool: &DbPool) -> Result<Vec<StudentDetails>, String> {
             first_name,
             middle_name,
             last_name,
+            suffix,
             roles,
             contacts,
             is_active,
@@ -1245,6 +1265,7 @@ pub fn register_user(
     first_name: &str,
     middle_name: Option<String>,
     last_name: &str,
+    suffix: Option<String>,
     emails: Vec<String>, // Changed from Option<String> to Vec<String>
     contact_numbers: Vec<String>, // Changed from Option<String> to Vec<String>
     program_id: Option<i64>,
@@ -1280,13 +1301,26 @@ pub fn register_user(
         }
     }
 
+    // Check for duplicate ID
+    let duplicate_id: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM persons WHERE id_number = ?1)",
+            params![id_number],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+
+    if duplicate_id {
+        return Err(format!("ID Number '{}' already exists.", id_number));
+    }
+
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     tx.execute(
-        "INSERT INTO persons (id_number, first_name, middle_name, last_name, is_active, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![id_number, first_name, middle_name, last_name, is_active, now],
+        "INSERT INTO persons (id_number, first_name, middle_name, last_name, suffix, is_active, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![id_number, first_name, middle_name, last_name, suffix, is_active, now],
     ).map_err(|e| e.to_string())?;
 
     let person_id = tx.last_insert_rowid();
@@ -1444,7 +1478,12 @@ pub fn bulk_import_users_from_excel(
         None
     };
 
-    let idx_id_number = require_col(&["id_number", "id number", "id", "student id", "employee id", "identification", "id_no"])?;
+    let id_headers = if role == "student" {
+        vec!["id_number", "id number", "id", "student id", "student number", "identification", "id_no"]
+    } else {
+        vec!["id_number", "id number", "id", "employee id", "employee number", "identification", "id_no"]
+    };
+    let idx_id_number = require_col(&id_headers)?;
     let idx_first_name = require_col(&["first_name", "first name", "given name", "fname", "name"])?;
     let idx_last_name = require_col(&["last_name", "last name", "surname", "lname", "family name"])?;
     let idx_middle_name = optional_col(&["middle_name", "middle name", "mname", "middle"]);
@@ -1545,9 +1584,14 @@ pub fn bulk_import_users_from_excel(
         let email = get_col(idx_email);
         let contact_number = get_col(idx_contact);
 
-        if id_number.is_empty() || first_name.is_empty() || last_name.is_empty() {
+        // Silently skip if ID number is missing (e.g., empty rows at the end of the file)
+        if id_number.is_empty() {
+            continue;
+        }
+
+        if first_name.is_empty() || last_name.is_empty() {
             failed_count += 1;
-            error_logs.push(format!("Row {line_number}: Missing required fields (ID, First Name, or Last Name)."));
+            error_logs.push(format!("Row {line_number}: Missing required fields (First Name or Last Name) for ID '{}'.", id_number));
             continue;
         }
 
@@ -1594,14 +1638,16 @@ pub fn bulk_import_users_from_excel(
             }
         }
 
-        let duplicate_count: i64 = conn
+        // --- Duplicate Detection (ID) ---
+        let duplicate_id: bool = conn
             .query_row(
-                "SELECT COUNT(*) FROM persons WHERE id_number = ?1",
+                "SELECT EXISTS(SELECT 1 FROM persons WHERE id_number = ?1)",
                 params![id_number],
                 |r| r.get(0),
             )
-            .unwrap_or(0);
-        if duplicate_count > 0 {
+            .unwrap_or(false);
+
+        if duplicate_id {
             failed_count += 1;
             error_logs.push(format!("Row {line_number}: Duplicate ID Number '{}' already exists.", id_number));
             continue;
@@ -1611,8 +1657,8 @@ pub fn bulk_import_users_from_excel(
             let tx = conn.transaction().map_err(|e| e.to_string())?;
             let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
             tx.execute(
-                "INSERT INTO persons (id_number, first_name, middle_name, last_name, is_active, created_at)
-                 VALUES (?1, ?2, ?3, ?4, 1, ?5)",
+                "INSERT INTO persons (id_number, first_name, middle_name, last_name, suffix, is_active, created_at)
+                 VALUES (?1, ?2, ?3, ?4, NULL, 1, ?5)",
                 params![
                     id_number,
                     first_name,
@@ -1761,6 +1807,7 @@ pub fn update_user(
     first_name: &str,
     middle_name: Option<String>,
     last_name: &str,
+    suffix: Option<String>,
     emails: Vec<String>,
     contact_numbers: Vec<String>,
     program_id: Option<i64>,
@@ -1798,13 +1845,26 @@ pub fn update_user(
 
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
+    // Check for duplicate ID (excluding the current person)
+    let duplicate_id: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM persons WHERE id_number = ?1 AND person_id != ?2)",
+            params![id_number, person_id],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+
+    if duplicate_id {
+        return Err(format!("ID Number '{}' already exists for another user.", id_number));
+    }
+
     // Fetch old data for audit log
     let old_roles = get_person_roles(&tx, person_id)?;
     let old_contacts = get_person_contacts(&tx, person_id)?;
-    let old_person_data: (String, String, Option<String>, String, bool) = tx.query_row(
-        "SELECT id_number, first_name, middle_name, last_name, is_active FROM persons WHERE person_id = ?1",
+    let old_person_data: (String, String, Option<String>, String, Option<String>, bool) = tx.query_row(
+        "SELECT id_number, first_name, middle_name, last_name, suffix, is_active FROM persons WHERE person_id = ?1",
         params![person_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))
     ).map_err(|e| e.to_string())?;
 
     let old_emails: Vec<String> = old_contacts.iter().filter(|c| c.contact_type == "email").map(|c| c.contact_value.clone()).collect();
@@ -1827,20 +1887,21 @@ pub fn update_user(
         "first_name": old_person_data.1,
         "middle_name": old_person_data.2,
         "last_name": old_person_data.3,
+        "suffix": old_person_data.4,
         "roles": old_roles,
         "emails": old_emails,
         "phones": old_phones,
         "program": old_program_code,
         "department": old_dept_code,
-        "is_active": old_person_data.4
+        "is_active": old_person_data.5
     });
 
     // Update core person data
     tx.execute(
         "UPDATE persons
-         SET id_number = ?1, first_name = ?2, middle_name = ?3, last_name = ?4, is_active = ?5
-         WHERE person_id = ?6",
-        params![id_number, first_name, middle_name, last_name, is_active, person_id],
+         SET id_number = ?1, first_name = ?2, middle_name = ?3, last_name = ?4, suffix = ?5, is_active = ?6
+         WHERE person_id = ?7",
+        params![id_number, first_name, middle_name, last_name, suffix, is_active, person_id],
     ).map_err(|e| e.to_string())?;
 
     // Update roles (replace)
@@ -1946,10 +2007,10 @@ pub fn delete_user(pool: &DbPool, person_id: i64, _role: &str, active_admin_id: 
     let emails: Vec<String> = contacts.iter().filter(|c| c.contact_type == "email").map(|c| c.contact_value.clone()).collect();
     let phones: Vec<String> = contacts.iter().filter(|c| c.contact_type == "phone").map(|c| c.contact_value.clone()).collect();
 
-    let person_data: (String, String, Option<String>, String, bool) = conn.query_row(
-        "SELECT id_number, first_name, middle_name, last_name, is_active FROM persons WHERE person_id = ?1",
+    let person_data: (String, String, Option<String>, String, Option<String>, bool) = conn.query_row(
+        "SELECT id_number, first_name, middle_name, last_name, suffix, is_active FROM persons WHERE person_id = ?1",
         params![person_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get::<_, i32>(4)? == 1))
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get::<_, i32>(5)? == 1))
     ).map_err(|e| e.to_string())?;
 
     let mut old_data = json!({
@@ -1957,10 +2018,11 @@ pub fn delete_user(pool: &DbPool, person_id: i64, _role: &str, active_admin_id: 
         "first_name": person_data.1,
         "middle_name": person_data.2,
         "last_name": person_data.3,
+        "suffix": person_data.4,
         "roles": roles,
         "emails": emails,
         "phones": phones,
-        "is_active": person_data.4
+        "is_active": person_data.5
     });
 
     if roles.iter().any(|r| r == "student") {
@@ -2012,7 +2074,7 @@ pub fn delete_user(pool: &DbPool, person_id: i64, _role: &str, active_admin_id: 
 pub fn get_employees(pool: &DbPool) -> Result<Vec<EmployeeDetails>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
-        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.is_active, p.is_archived,
+        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.suffix, p.is_active, p.is_archived,
                 e.department_id, e.position_title, d.department_name
          FROM persons p
          JOIN employees e ON p.person_id = e.person_id
@@ -2028,18 +2090,19 @@ pub fn get_employees(pool: &DbPool) -> Result<Vec<EmployeeDetails>, String> {
                 row.get::<_, String>(2)?,
                 row.get::<_, Option<String>>(3)?,
                 row.get::<_, String>(4)?,
-                row.get::<_, i32>(5)? == 1,
+                row.get::<_, Option<String>>(5)?,
                 row.get::<_, i32>(6)? == 1,
-                row.get::<_, i64>(7)?,
-                row.get::<_, String>(8)?,
+                row.get::<_, i32>(7)? == 1,
+                row.get::<_, i64>(8)?,
                 row.get::<_, String>(9)?,
+                row.get::<_, String>(10)?,
             ))
         })
         .map_err(|e| e.to_string())?;
 
     let mut list = Vec::new();
     for row in rows {
-        let (person_id, id_number, first_name, middle_name, last_name, is_active, is_archived, department_id, position_title, department_name) = row.map_err(|e| e.to_string())?;
+        let (person_id, id_number, first_name, middle_name, last_name, suffix, is_active, is_archived, department_id, position_title, department_name) = row.map_err(|e| e.to_string())?;
         
         let roles = get_person_roles(&conn, person_id)?;
         let contacts = get_person_contacts(&conn, person_id)?;
@@ -2050,6 +2113,7 @@ pub fn get_employees(pool: &DbPool) -> Result<Vec<EmployeeDetails>, String> {
             first_name,
             middle_name,
             last_name,
+            suffix,
             roles,
             contacts,
             is_active,
@@ -2074,7 +2138,7 @@ pub fn get_visitors(pool: &DbPool, sort_order: Option<String>) -> Result<Vec<Vis
     };
 
     let query = format!(
-        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, v.purpose_of_visit, v.person_to_visit, p.created_at,
+        "SELECT p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.suffix, v.purpose_of_visit, v.person_to_visit, p.created_at,
             (SELECT MIN(scanned_at) FROM activity_logs WHERE person_id = p.person_id AND activity_type = 'entrance') as time_in,
             (SELECT MAX(scanned_at) FROM activity_logs WHERE person_id = p.person_id AND activity_type = 'exit') as time_out
          FROM persons p
@@ -2093,18 +2157,19 @@ pub fn get_visitors(pool: &DbPool, sort_order: Option<String>) -> Result<Vec<Vis
                 row.get::<_, String>(2)?,
                 row.get::<_, Option<String>>(3)?,
                 row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(5)?,
                 row.get::<_, String>(6)?,
-                row.get::<_, Option<String>>(7)?,
+                row.get::<_, String>(7)?,
                 row.get::<_, Option<String>>(8)?,
                 row.get::<_, Option<String>>(9)?,
+                row.get::<_, Option<String>>(10)?,
             ))
         })
         .map_err(|e| e.to_string())?;
 
     let mut list = Vec::new();
     for row in rows {
-        let (person_id, id_number, first_name, middle_name, last_name, purpose, person_to_visit, created_at, time_in, time_out) = row.map_err(|e| e.to_string())?;
+        let (person_id, id_number, first_name, middle_name, last_name, suffix, purpose, person_to_visit, created_at, time_in, time_out) = row.map_err(|e| e.to_string())?;
         
         let contacts = get_person_contacts(&conn, person_id)?;
 
@@ -2114,6 +2179,7 @@ pub fn get_visitors(pool: &DbPool, sort_order: Option<String>) -> Result<Vec<Vis
             first_name,
             middle_name,
             last_name,
+            suffix,
             contacts,
             purpose_of_visit: purpose,
             person_to_visit,
@@ -2195,7 +2261,7 @@ pub fn get_access_logs(
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let base_query = "
-        SELECT DISTINCT l.log_id, l.scanned_at, p.first_name, p.last_name, p.id_number, 
+        SELECT DISTINCT l.log_id, l.scanned_at, p.first_name, p.middle_name, p.last_name, p.suffix, p.id_number, 
                COALESCE(d_s.department_name, d_e.department_name, 'N/A') as department_name, 
                s.location_name, l.activity_type, e.event_name, l.status, p.person_id,
                prog.program_name, stu.year_level, emp.position_title
@@ -2239,17 +2305,19 @@ pub fn get_access_logs(
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(3)?,
                     row.get::<_, String>(4)?,
-                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(5)?,
                     row.get::<_, String>(6)?,
                     row.get::<_, String>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, Option<String>>(9)?,
-                    row.get::<_, i64>(10)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, Option<String>>(10)?,
                     row.get::<_, Option<String>>(11)?,
-                    row.get::<_, Option<i64>>(12)?,
+                    row.get::<_, i64>(12)?,
                     row.get::<_, Option<String>>(13)?,
+                    row.get::<_, Option<i64>>(14)?,
+                    row.get::<_, Option<String>>(15)?,
                 ))
             },
         )
@@ -2257,14 +2325,26 @@ pub fn get_access_logs(
 
     let mut list = Vec::new();
     for row in rows {
-        let (log_id, scanned_at, first_name, last_name, id_number, dept_name, scanner_loc, activity_type, event_name, status, person_id, prog_name, year, pos_title) = row.map_err(|e| e.to_string())?;
+        let (log_id, scanned_at, first_name, middle_name, last_name, suffix, id_number, dept_name, scanner_loc, activity_type, event_name, status, person_id, prog_name, year, pos_title) = row.map_err(|e| e.to_string())?;
         
         let roles = get_person_roles(&conn, person_id)?;
+
+        // Format: Last, First M., Suffix
+        let middle_initial = middle_name.as_deref()
+            .and_then(|m| m.chars().next())
+            .map(|c| format!("{}." , c))
+            .unwrap_or_default();
+        let formatted_name = format!("{}, {}{}{}",
+            last_name,
+            first_name,
+            if middle_initial.is_empty() { "".to_string() } else { format!(" {}", middle_initial) },
+            suffix.as_deref().map(|s| format!(" {}", s)).unwrap_or_default()
+        );
 
         list.push(ActivityLogDetails {
             log_id,
             scanned_at,
-            person_name: format!("{} {}", first_name, last_name),
+            person_name: formatted_name,
             id_number,
             roles,
             department_name: Some(dept_name),
@@ -2363,19 +2443,27 @@ pub fn add_event(
     let event_id = tx.last_insert_rowid();
 
     // Insert weekly schedules
+    let mut unique_weekly = std::collections::HashSet::new();
     for s in &event_details.weekly_schedules {
-        tx.execute(
-            "INSERT INTO event_weekly (event_id, day_of_week, start_time, end_time) VALUES (?1, ?2, ?3, ?4)",
-            params![event_id, s.day_of_week, s.start_time, s.end_time],
-        ).map_err(|e| e.to_string())?;
+        let key = format!("{}-{}-{}", s.day_of_week, s.start_time, s.end_time);
+        if unique_weekly.insert(key) {
+            tx.execute(
+                "INSERT INTO event_weekly (event_id, day_of_week, start_time, end_time) VALUES (?1, ?2, ?3, ?4)",
+                params![event_id, s.day_of_week, s.start_time, s.end_time],
+            ).map_err(|e| e.to_string())?;
+        }
     }
 
     // Insert date range schedules
+    let mut unique_date_range = std::collections::HashSet::new();
     for s in &event_details.date_range_schedules {
-        tx.execute(
-            "INSERT INTO event_date_range (event_id, start_date, end_date, start_time, end_time) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![event_id, s.start_date, s.end_date, s.start_time, s.end_time],
-        ).map_err(|e| e.to_string())?;
+        let key = format!("{}-{}-{}-{}", s.start_date, s.end_date, s.start_time, s.end_time);
+        if unique_date_range.insert(key) {
+            tx.execute(
+                "INSERT INTO event_date_range (event_id, start_date, end_date, start_time, end_time) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![event_id, s.start_date, s.end_date, s.start_time, s.end_time],
+            ).map_err(|e| e.to_string())?;
+        }
     }
 
     // Insert required roles
@@ -2514,19 +2602,31 @@ pub fn update_event(
 
     // Update schedules (replace)
     tx.execute("DELETE FROM event_weekly WHERE event_id = ?1", params![event_id]).map_err(|e| e.to_string())?;
+    
+    // Deduplicate weekly schedules to prevent UNIQUE constraint failures
+    let mut unique_weekly = std::collections::HashSet::new();
     for s in &event_details.weekly_schedules {
-        tx.execute(
-            "INSERT INTO event_weekly (event_id, day_of_week, start_time, end_time) VALUES (?1, ?2, ?3, ?4)",
-            params![event_id, s.day_of_week, s.start_time, s.end_time],
-        ).map_err(|e| e.to_string())?;
+        let key = format!("{}-{}-{}", s.day_of_week, s.start_time, s.end_time);
+        if unique_weekly.insert(key) {
+            tx.execute(
+                "INSERT INTO event_weekly (event_id, day_of_week, start_time, end_time) VALUES (?1, ?2, ?3, ?4)",
+                params![event_id, s.day_of_week, s.start_time, s.end_time],
+            ).map_err(|e| e.to_string())?;
+        }
     }
 
     tx.execute("DELETE FROM event_date_range WHERE event_id = ?1", params![event_id]).map_err(|e| e.to_string())?;
+    
+    // Deduplicate date range schedules
+    let mut unique_date_range = std::collections::HashSet::new();
     for s in &event_details.date_range_schedules {
-        tx.execute(
-            "INSERT INTO event_date_range (event_id, start_date, end_date, start_time, end_time) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![event_id, s.start_date, s.end_date, s.start_time, s.end_time],
-        ).map_err(|e| e.to_string())?;
+        let key = format!("{}-{}-{}-{}", s.start_date, s.end_date, s.start_time, s.end_time);
+        if unique_date_range.insert(key) {
+            tx.execute(
+                "INSERT INTO event_date_range (event_id, start_date, end_date, start_time, end_time) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![event_id, s.start_date, s.end_date, s.start_time, s.end_time],
+            ).map_err(|e| e.to_string())?;
+        }
     }
 
     // Update roles
@@ -2691,6 +2791,12 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
         ).map_err(|e| e.to_string())?;
 
         // 3. Logic check based on activity_logs
+        let enable_validation: bool = conn.query_row(
+            "SELECT setting_value FROM settings WHERE setting_key = 'enable_entry_exit_validation'",
+            [],
+            |row| row.get::<_, String>(0).map(|v| v == "1" || v.to_lowercase() == "true")
+        ).unwrap_or(true);
+
         let last_log: Option<String> = conn.query_row(
             "SELECT activity_type FROM activity_logs WHERE person_id = ?1 AND activity_type IN ('entrance', 'exit') ORDER BY scanned_at DESC LIMIT 1",
             params![person_id],
@@ -2698,7 +2804,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
         ).optional().map_err(|e| e.to_string())?;
 
         if scanner.function == "exit" {
-            if last_log.as_deref() != Some("entrance") {
+            if enable_validation && last_log.as_deref() != Some("entrance") {
                 return Ok(ScanResult {
                     success: false,
                     message: "No entry record found for this ID".to_string(),
@@ -2720,7 +2826,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
                 });
             }
 
-            if last_log.as_deref() == Some("entrance") {
+            if enable_validation && last_log.as_deref() == Some("entrance") {
                 return Ok(ScanResult {
                     success: false,
                     message: "User is already on campus".to_string(),
@@ -2829,6 +2935,12 @@ pub fn manual_id_entry(
         ).unwrap_or(Scanner { scanner_id: 1, location_name: "Manual".to_string(), function: scanner_function.to_string() });
 
         // Logic Check
+        let enable_validation: bool = conn.query_row(
+            "SELECT setting_value FROM settings WHERE setting_key = 'enable_entry_exit_validation'",
+            [],
+            |row| row.get::<_, String>(0).map(|v| v == "1" || v.to_lowercase() == "true")
+        ).unwrap_or(true);
+
         let last_log: Option<String> = conn.query_row(
             "SELECT activity_type FROM activity_logs WHERE person_id = ?1 AND activity_type IN ('entrance', 'exit') ORDER BY scanned_at DESC LIMIT 1",
             params![person_id],
@@ -2836,7 +2948,7 @@ pub fn manual_id_entry(
         ).optional().map_err(|e| e.to_string())?;
 
         if scanner.function == "exit" {
-            if last_log.as_deref() != Some("entrance") {
+            if enable_validation && last_log.as_deref() != Some("entrance") {
                 return Ok(ScanResult {
                     success: false,
                     message: "No entry record found for this ID".to_string(),
@@ -2858,7 +2970,7 @@ pub fn manual_id_entry(
                 });
             }
 
-            if last_log.as_deref() == Some("entrance") {
+            if enable_validation && last_log.as_deref() == Some("entrance") {
                 return Ok(ScanResult {
                     success: false,
                     message: "User is already on campus".to_string(),
@@ -2905,7 +3017,7 @@ pub fn get_scan_person_details(
     let conn = pool.get().map_err(|e| e.to_string())?;
 
     let person_basic = conn.query_row(
-        "SELECT person_id, id_number, first_name, middle_name, last_name, is_active, is_archived FROM persons WHERE id_number = ?1",
+        "SELECT person_id, id_number, first_name, middle_name, last_name, suffix, is_active, is_archived FROM persons WHERE id_number = ?1",
         params![id_number],
         |row| Ok((
             row.get::<_, i64>(0)?,
@@ -2913,12 +3025,13 @@ pub fn get_scan_person_details(
             row.get::<_, String>(2)?,
             row.get::<_, Option<String>>(3)?,
             row.get::<_, String>(4)?,
-            row.get::<_, bool>(5)?,
+            row.get::<_, Option<String>>(5)?,
             row.get::<_, bool>(6)?,
+            row.get::<_, bool>(7)?,
         ))
     ).optional().map_err(|e| e.to_string())?;
 
-    if let Some((person_id, id_num, first, middle, last, is_active, is_archived)) = person_basic {
+    if let Some((person_id, id_num, first, middle, last, suffix, is_active, is_archived)) = person_basic {
         let roles = get_person_roles(&conn, person_id)?;
         
         let mut dept_name = None;
@@ -2986,6 +3099,7 @@ pub fn get_scan_person_details(
             first_name: first,
             middle_name: middle,
             last_name: last,
+            suffix,
             department_name: dept_name,
             program_name: prog_name,
             year_level: y_lvl,
@@ -3104,6 +3218,24 @@ pub fn log_audit_action(
                                 params![event_id, field, val_str, None::<String>],
                             ).map_err(|e| e.to_string())?;
                         }
+                    }
+                }
+            }
+        },
+        "BACKUP" | "SYSTEM_RESTORE" => {
+            // Record metadata about the backup/restore operation as audit changes
+            if let Some(new_val) = new_values {
+                if let Some(obj) = new_val.as_object() {
+                    for (field, val) in obj {
+                        let val_str = if val.is_string() {
+                            val.as_str().unwrap().to_string()
+                        } else {
+                            val.to_string()
+                        };
+                        tx.execute(
+                            "INSERT INTO audit_changes (event_id, field_name, old_value, new_value) VALUES (?1, ?2, ?3, ?4)",
+                            params![event_id, field, None::<String>, val_str],
+                        ).map_err(|e| e.to_string())?;
                     }
                 }
             }
@@ -3814,7 +3946,7 @@ pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
             "SELECT COUNT(*) FROM persons p 
              JOIN person_roles pr ON p.person_id = pr.person_id 
              JOIN roles r ON pr.role_id = r.role_id 
-             WHERE r.role_name IN ('professor', 'staff', 'dean') AND p.is_archived = 0",
+             WHERE r.role_name IN ('professor', 'staff') AND p.is_archived = 0",
             [],
             |row| row.get(0),
         )
@@ -4126,6 +4258,9 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
     let mut secondary_logo_2_enabled: bool = true;
     let mut strict_email_domain: bool = true;
     let mut enable_face_recognition: bool = true;
+    let mut enable_auto_exit: bool = false;
+    let mut auto_exit_time: String = "22:00".to_string();
+    let mut enable_entry_exit_validation: bool = true;
 
     let mut stmt = conn
         .prepare("SELECT setting_key, setting_value FROM settings")
@@ -4159,6 +4294,9 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
                 "secondary_logo_2_enabled" => secondary_logo_2_enabled = value == "1" || value.to_lowercase() == "true",
                 "strict_email_domain" => strict_email_domain = value == "1" || value.to_lowercase() == "true",
                 "enable_face_recognition" => enable_face_recognition = value == "1" || value.to_lowercase() == "true",
+                "enable_auto_exit" => enable_auto_exit = value == "1" || value.to_lowercase() == "true",
+                "auto_exit_time" => auto_exit_time = value,
+                "enable_entry_exit_validation" => enable_entry_exit_validation = value == "1" || value.to_lowercase() == "true",
                 "circle_logo_format" => {
                     // Legacy support: if individual ones aren't set yet, they could inherit this
                     // but we'll prioritize individual ones.
@@ -4186,6 +4324,9 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
         secondary_logo_2_enabled,
         strict_email_domain,
         enable_face_recognition,
+        enable_auto_exit,
+        auto_exit_time,
+        enable_entry_exit_validation,
     })
 }
 
@@ -4324,6 +4465,9 @@ pub fn update_system_configuration(
     admin_id: i64,
     strict_email_domain: bool,
     enable_face_recognition: bool,
+    enable_auto_exit: bool,
+    auto_exit_time: String,
+    enable_entry_exit_validation: bool,
 ) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
     let old = get_system_branding(pool).unwrap_or_default();
@@ -4332,6 +4476,9 @@ pub fn update_system_configuration(
     let settings_to_update = [
         ("strict_email_domain", if strict_email_domain { "1" } else { "0" }.to_string()),
         ("enable_face_recognition", if enable_face_recognition { "1" } else { "0" }.to_string()),
+        ("enable_auto_exit", if enable_auto_exit { "1" } else { "0" }.to_string()),
+        ("auto_exit_time", auto_exit_time.clone()),
+        ("enable_entry_exit_validation", if enable_entry_exit_validation { "1" } else { "0" }.to_string()),
     ];
 
     for (key, value) in settings_to_update {
@@ -4347,11 +4494,17 @@ pub fn update_system_configuration(
     let old_values = json!({
         "strict_email_domain": old.strict_email_domain,
         "enable_face_recognition": old.enable_face_recognition,
+        "enable_auto_exit": old.enable_auto_exit,
+        "auto_exit_time": old.auto_exit_time,
+        "enable_entry_exit_validation": old.enable_entry_exit_validation,
     });
 
     let new_values = json!({
         "strict_email_domain": strict_email_domain,
         "enable_face_recognition": enable_face_recognition,
+        "enable_auto_exit": enable_auto_exit,
+        "auto_exit_time": auto_exit_time,
+        "enable_entry_exit_validation": enable_entry_exit_validation,
     });
 
     let _ = log_audit_action(
@@ -4609,7 +4762,7 @@ pub fn get_archived_users(pool: &DbPool) -> Result<Vec<serde_json::Value>, Strin
 
     let mut stmt = conn.prepare(
         "SELECT 
-            p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.archived_at,
+            p.person_id, p.id_number, p.first_name, p.middle_name, p.last_name, p.suffix, p.archived_at,
             COALESCE(emp_dept.department_name, stu_dept.department_name) AS department_name,
             prog.program_name,
             stu.year_level,
@@ -4626,23 +4779,41 @@ pub fn get_archived_users(pool: &DbPool) -> Result<Vec<serde_json::Value>, Strin
 
     let rows = stmt.query_map([], |row| {
         let person_id: i64 = row.get(0)?;
+        let first_name: String = row.get(2)?;
+        let middle_name: Option<String> = row.get(3)?;
+        let last_name: String = row.get(4)?;
+        let suffix: Option<String> = row.get(5)?;
+        
         let roles = get_person_roles(&conn, person_id).unwrap_or_default();
         let contacts = get_person_contacts(&conn, person_id).unwrap_or_default();
         
         // Pick primary role for display
         let role = roles.first().cloned().unwrap_or_else(|| "User".to_string());
 
+        // Format: Last, First M., Suffix
+        let mid_init = match middle_name.as_deref() {
+            Some(m) if !m.trim().is_empty() => format!(" {}.", m.chars().next().unwrap_or_default()),
+            _ => String::new(),
+        };
+        let suf_part = match suffix.as_deref() {
+            Some(s) if !s.trim().is_empty() => format!(" {}", s),
+            _ => String::new(),
+        };
+        let full_name = format!("{}, {}{}{}", last_name, first_name, mid_init, suf_part);
+
         Ok(json!({
             "person_id": person_id,
             "id_number": row.get::<_, String>(1)?,
-            "first_name": row.get::<_, String>(2)?,
-            "middle_name": row.get::<_, Option<String>>(3)?,
-            "last_name": row.get::<_, String>(4)?,
-            "archived_at": row.get::<_, Option<String>>(5)?,
-            "department_name": row.get::<_, Option<String>>(6)?,
-            "program_name": row.get::<_, Option<String>>(7)?,
-            "year_level": row.get::<_, Option<i64>>(8)?,
-            "position_title": row.get::<_, Option<String>>(9)?,
+            "first_name": first_name,
+            "middle_name": middle_name,
+            "last_name": last_name,
+            "suffix": suffix,
+            "full_name": full_name,
+            "archived_at": row.get::<_, Option<String>>(6)?,
+            "department_name": row.get::<_, Option<String>>(7)?,
+            "program_name": row.get::<_, Option<String>>(8)?,
+            "year_level": row.get::<_, Option<i64>>(9)?,
+            "position_title": row.get::<_, Option<String>>(10)?,
             "roles": roles,
             "role": role,
             "contacts": contacts
@@ -4935,10 +5106,17 @@ pub fn permanent_delete_user(pool: &DbPool, person_id: i64, active_admin_id: i64
     let emails: Vec<String> = contacts.iter().filter(|c| c.contact_type == "email").map(|c| c.contact_value.clone()).collect();
     let phones: Vec<String> = contacts.iter().filter(|c| c.contact_type == "phone").map(|c| c.contact_value.clone()).collect();
 
-    let person_data: (String, String, Option<String>, String, bool) = conn.query_row(
-        "SELECT id_number, first_name, middle_name, last_name, is_active FROM persons WHERE person_id = ?1",
+    let person_data: (String, String, Option<String>, String, Option<String>, bool) = conn.query_row(
+        "SELECT id_number, first_name, middle_name, last_name, suffix, is_active FROM persons WHERE person_id = ?1",
         params![person_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get::<_, i32>(4)? == 1))
+        |row| Ok((
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+            row.get::<_, i32>(5)? == 1
+        ))
     ).map_err(|e| e.to_string())?;
 
     let mut old_data = json!({
@@ -4946,10 +5124,11 @@ pub fn permanent_delete_user(pool: &DbPool, person_id: i64, active_admin_id: i64
         "first_name": person_data.1,
         "middle_name": person_data.2,
         "last_name": person_data.3,
+        "suffix": person_data.4,
         "roles": roles,
         "emails": emails,
         "phones": phones,
-        "is_active": person_data.4
+        "is_active": person_data.5
     });
 
     if roles.iter().any(|r| r == "student") {
@@ -4974,6 +5153,18 @@ pub fn permanent_delete_user(pool: &DbPool, person_id: i64, active_admin_id: i64
         if let Some((dept, pos)) = emp_info {
             old_data["department"] = json!(dept);
             old_data["position_title"] = json!(pos);
+        }
+    }
+
+    if roles.iter().any(|r| r == "visitor") {
+        let visitor_info: Option<(String, String)> = conn.query_row(
+            "SELECT purpose_of_visit, person_to_visit FROM visitors WHERE person_id = ?1",
+            params![person_id],
+            |row| Ok((row.get(0)?, row.get(1)?))
+        ).optional().map_err(|e| e.to_string())?;
+        if let Some((purpose, target)) = visitor_info {
+            old_data["purpose_of_visit"] = json!(purpose);
+            old_data["person_to_visit"] = json!(target);
         }
     }
 
@@ -5124,7 +5315,7 @@ pub fn permanent_delete_program(pool: &DbPool, program_id: i64, active_admin_id:
 
 // ------ Database Backup & Recovery ------
 
-pub fn backup_database(app_handle: &tauri::AppHandle, destination_path: &str) -> Result<String, String> {
+pub fn backup_database(app_handle: &tauri::AppHandle, pool: &DbPool, destination_path: &str, active_admin_id: i64) -> Result<String, String> {
     let app_dir = app_handle
         .path()
         .app_data_dir()
@@ -5135,13 +5326,42 @@ pub fn backup_database(app_handle: &tauri::AppHandle, destination_path: &str) ->
         return Err("Database file not found.".to_string());
     }
 
-    fs::copy(&db_path, destination_path)
-        .map_err(|e| format!("Failed to create backup: {}", e))?;
+    // Use SQLite VACUUM INTO for a consistent, corruption-safe backup.
+    // This captures the complete schema and all data as an atomic snapshot.
+    {
+        let conn = pool.get().map_err(|e| format!("Failed to get connection: {}", e))?;
+        conn.execute("VACUUM INTO ?1", params![destination_path])
+            .map_err(|e| format!("Failed to create backup: {}", e))?;
+    }
 
-    Ok(format!("Backup saved to: {}", destination_path))
+    // Determine file size for the audit log
+    let backup_size = fs::metadata(destination_path).map(|m| m.len()).unwrap_or(0);
+    let backup_filename = std::path::Path::new(destination_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    // Record the backup action in the audit trail
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "BACKUP",
+        "Database",
+        0, // system-level action, no specific entity
+        "System Database",
+        None,
+        Some(json!({
+            "action": "Database Backup",
+            "destination": backup_filename,
+            "backup_size_bytes": backup_size
+        })),
+    );
+
+    Ok(format!("Backup saved successfully."))
 }
 
-pub fn restore_database(app_handle: &tauri::AppHandle, source_path: &str) -> Result<String, String> {
+pub fn restore_database(app_handle: &tauri::AppHandle, pool: &DbPool, source_path: &str, active_admin_id: i64) -> Result<String, String> {
     let app_dir = app_handle
         .path()
         .app_data_dir()
@@ -5152,6 +5372,42 @@ pub fn restore_database(app_handle: &tauri::AppHandle, source_path: &str) -> Res
     if !source.exists() {
         return Err("Backup file not found.".to_string());
     }
+
+    // Validate the backup file is a valid SQLite database before proceeding
+    {
+        let test_manager = SqliteConnectionManager::file(source_path);
+        let test_pool = r2d2::Pool::builder()
+            .max_size(1)
+            .build(test_manager)
+            .map_err(|_| "The selected file is not a valid database.".to_string())?;
+        let test_conn = test_pool.get()
+            .map_err(|_| "The selected file could not be opened as a database.".to_string())?;
+        test_conn.query_row("SELECT COUNT(*) FROM sqlite_master", [], |_| Ok(()))
+            .map_err(|_| "The selected file does not contain a valid database schema.".to_string())?;
+    }
+
+    let source_filename = source
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let source_size = fs::metadata(source_path).map(|m| m.len()).unwrap_or(0);
+
+    // Record the restore action in the audit trail BEFORE overwriting the database
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "SYSTEM_RESTORE",
+        "Database",
+        0, // system-level action, no specific entity
+        "System Database",
+        None,
+        Some(json!({
+            "action": "Database Restore",
+            "source": source_filename,
+            "source_size_bytes": source_size
+        })),
+    );
 
     // Create a safety backup before overwriting
     let safety_backup = app_dir.join("smart_gate_pre_restore_backup.sqlite");
@@ -5198,3 +5454,96 @@ pub fn get_database_stats(app_handle: &tauri::AppHandle, pool: &DbPool) -> Resul
         "archived_events": archived_events
     }))
 }
+
+pub fn auto_exit_users(pool: &DbPool) -> Result<i64, String> {
+    let mut conn = pool.get().map_err(|e| e.to_string())?;
+    
+    // Check if already run today
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let last_run: String = conn.query_row(
+        "SELECT setting_value FROM settings WHERE setting_key = 'last_auto_exit_date'",
+        [],
+        |row| row.get(0)
+    ).unwrap_or_default();
+
+    if last_run == today {
+        return Ok(0);
+    }
+
+    // 1. Find all persons who are currently "Inside"
+    let mut stmt = conn.prepare("
+        SELECT p.person_id, p.first_name, p.last_name
+        FROM persons p
+        JOIN (
+            SELECT person_id, activity_type, MAX(scanned_at)
+            FROM activity_logs
+            WHERE activity_type IN ('entrance', 'exit')
+            GROUP BY person_id
+            HAVING activity_type = 'entrance'
+        ) last_gate_log ON p.person_id = last_gate_log.person_id
+        WHERE p.is_active = 1 AND p.is_archived = 0
+    ").map_err(|e| e.to_string())?;
+
+    let persons_to_exit = stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, format!("{} {}", row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+    }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+
+    drop(stmt);
+
+    if persons_to_exit.is_empty() {
+        return Ok(0);
+    }
+
+    // 2. Find an exit scanner to use for the logs
+    let exit_scanner_id: i64 = conn.query_row(
+        "SELECT scanner_id FROM scanners WHERE function = 'exit' LIMIT 1",
+        [],
+        |row| row.get(0)
+    ).unwrap_or(0);
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let mut count = 0;
+
+    for (pid, name) in persons_to_exit {
+        // Log the auto-exit
+        tx.execute(
+            "INSERT INTO activity_logs (person_id, scanner_id, activity_type, scanned_at, status) 
+             VALUES (?1, ?2, 'exit', ?3, 'System Auto-Exit')",
+            params![pid, if exit_scanner_id > 0 { exit_scanner_id } else { 2 }, now],
+        ).map_err(|e| e.to_string())?;
+
+        // Deactivate if visitor
+        let roles = get_person_roles(&tx, pid)?;
+        if roles.iter().any(|r| r == "visitor") {
+            tx.execute("UPDATE persons SET is_active = 0 WHERE person_id = ?1", params![pid]).map_err(|e| e.to_string())?;
+        }
+        
+        count += 1;
+        log::info!("Auto-exited user: {} (ID: {})", name, pid);
+    }
+
+    tx.commit().map_err(|e| e.to_string())?;
+    
+    // Update last run date
+    let _ = conn.execute(
+        "INSERT INTO settings (setting_key, setting_value) VALUES ('last_auto_exit_date', ?1)
+         ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+        params![today],
+    );
+
+    // Log the event in audit trail
+    let _ = log_audit_action(
+        pool,
+        0, // System
+        "UPDATE",
+        "System",
+        0,
+        &format!("Automatic Logout ({} users)", count),
+        None,
+        Some(json!({ "count": count, "timestamp": now })),
+    );
+
+    Ok(count)
+}
+

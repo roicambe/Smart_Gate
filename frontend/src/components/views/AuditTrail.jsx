@@ -9,6 +9,8 @@ import * as XLSX from 'xlsx';
 import { useToast } from '../toast/ToastProvider';
 import { drawInstitutionalHeader, prepareInstitutionalHeaderAssets } from '../../utils/pdfInstitutionalHeader';
 import { AdminModal } from '../common/AdminModal';
+import { Pagination } from '../common/Pagination';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 
 // ─── Human-Readable Translator ───────────────────────────────────────────────
 
@@ -146,9 +148,6 @@ export const AuditTrail = ({ branding, adminSession }) => {
         setStartDate('');
         setEndDate('');
         setCurrentPage(1);
-        invoke('get_audit_logs', { startDate: null, endDate: null })
-            .then(data => setLogs(data))
-            .catch(err => console.error(err));
     };
 
     const fetchLogs = async () => {
@@ -176,7 +175,7 @@ export const AuditTrail = ({ branding, adminSession }) => {
 
     useEffect(() => {
         fetchLogs();
-    }, []);
+    }, [startDate, endDate]);
 
     const filteredLogs = logs.filter(log => {
         const matchesSearch =
@@ -189,14 +188,17 @@ export const AuditTrail = ({ branding, adminSession }) => {
         return matchesSearch && matchesAction;
     });
 
+    // Sorting
+    const { sortConfig, requestSort, sortedData: sortedLogs } = useTableSort(filteredLogs, 'created_at', 'desc', 'audit_trail');
+
     // Pagination - reset to page 1 when filters change
-    useEffect(() => { setCurrentPage(1); }, [searchTerm, actionFilter, startDate, endDate]);
-    const totalPages = Math.ceil(filteredLogs.length / ITEMS_PER_PAGE);
+    useEffect(() => { setCurrentPage(1); }, [searchTerm, actionFilter, startDate, endDate, sortConfig]);
+    const totalPages = Math.ceil(sortedLogs.length / ITEMS_PER_PAGE);
     const paginatedLogs = useMemo(() => {
         const start = (currentPage - 1) * ITEMS_PER_PAGE;
-        return filteredLogs.slice(start, start + ITEMS_PER_PAGE);
-    }, [filteredLogs, currentPage]);
-    const showPagination = filteredLogs.length > ITEMS_PER_PAGE;
+        return sortedLogs.slice(start, start + ITEMS_PER_PAGE);
+    }, [sortedLogs, currentPage]);
+    const showPagination = sortedLogs.length > ITEMS_PER_PAGE;
 
     const formatDate = (dateString) => {
         if (!dateString) return "-";
@@ -523,12 +525,6 @@ export const AuditTrail = ({ branding, adminSession }) => {
                         className="px-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 sm:text-sm font-medium"
                     />
                     <button
-                        onClick={fetchLogs}
-                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-semibold text-sm shadow-sm"
-                    >
-                        Apply Date
-                    </button>
-                    <button
                         onClick={clearFilters}
                         className="px-4 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors"
                     >
@@ -540,15 +536,15 @@ export const AuditTrail = ({ branding, adminSession }) => {
             {/* Table View */}
             <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 shadow-sm rounded-xl relative">
                 <div className="flex-1 min-h-0 overflow-x-auto overflow-y-auto">
-                    <table className="w-full text-left border-collapse text-sm">
+                    <table className="w-full text-left border-collapse text-sm table-fixed">
                         <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
-                            <tr className="text-slate-600">
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Timestamp</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Admin</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Action</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Category</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs">Target</th>
-                                <th className="px-5 py-4 font-semibold uppercase tracking-wider text-xs text-right">Actions</th>
+                            <tr>
+                                <SortableHeader label="Timestamp" sortKey="created_at" sortConfig={sortConfig} onSort={requestSort} width="180px" />
+                                <SortableHeader label="Admin" sortKey="admin_full_name" sortConfig={sortConfig} onSort={requestSort} width="200px" />
+                                <SortableHeader label="Action" sortKey="action_type" sortConfig={sortConfig} onSort={requestSort} width="120px" />
+                                <SortableHeader label="Category" sortKey="target_type" sortConfig={sortConfig} onSort={requestSort} width="150px" />
+                                <SortableHeader label="Target" sortKey="target_label" sortConfig={sortConfig} onSort={requestSort} width="250px" />
+                                <th className="px-6 py-4 font-bold text-xs uppercase tracking-wider text-slate-700 text-right" style={{ width: '100px' }}>Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -606,41 +602,14 @@ export const AuditTrail = ({ branding, adminSession }) => {
                     </table>
                 </div>
 
-                <div className="px-5 py-3 border-t border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 flex flex-wrap items-center justify-between gap-3 shrink-0 rounded-b-xl">
-                    <div>
-                        Showing {paginatedLogs.length > 0 ? (currentPage - 1) * ITEMS_PER_PAGE + 1 : 0}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredLogs.length)} of {filteredLogs.length} (Total: {logs.length})
-                    </div>
-                    {showPagination && (
-                        <div className="flex items-center gap-1">
-                            <button
-                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                disabled={currentPage === 1}
-                                className="px-2 py-1 rounded border border-slate-200 bg-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors flex items-center gap-0.5"
-                            >
-                                <ChevronLeft className="w-4 h-4" /> Previous
-                            </button>
-                            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-                                <button
-                                    key={p}
-                                    onClick={() => setCurrentPage(p)}
-                                    className={`min-w-[28px] px-2 py-1 rounded border transition-colors ${currentPage === p
-                                        ? 'bg-slate-800 text-white border-slate-800'
-                                        : 'border-slate-200 bg-white hover:bg-slate-50'
-                                        }`}
-                                >
-                                    {p}
-                                </button>
-                            ))}
-                            <button
-                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                disabled={currentPage === totalPages}
-                                className="px-2 py-1 rounded border border-slate-200 bg-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors flex items-center gap-0.5"
-                            >
-                                Next <ChevronRight className="w-4 h-4" />
-                            </button>
-                        </div>
-                    )}
-                </div>
+                <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={setCurrentPage}
+                    totalItems={filteredLogs.length}
+                    itemsPerPage={ITEMS_PER_PAGE}
+                    currentItemsCount={paginatedLogs.length}
+                />
             </div>
 
             {/* View Details Modal */}
@@ -709,15 +678,15 @@ export const AuditTrail = ({ branding, adminSession }) => {
                                 <div className="rounded-xl border border-white/10 overflow-x-auto bg-black/20">
                                     <table className="w-full text-sm text-left">
                                         <thead className="bg-white/5 border-b border-white/10">
-                                            <tr className="text-xs uppercase text-white/40">
-                                                <th className="px-4 py-2.5 font-semibold tracking-wider">Field</th>
+                                            <tr className="text-xs uppercase text-white/40 font-bold tracking-wider">
+                                                <th className="px-4 py-2.5">Field</th>
                                                 {selectedLog.action_type === 'UPDATE' ? (
                                                     <>
-                                                        <th className="px-4 py-2.5 font-semibold tracking-wider">Old Value</th>
-                                                        <th className="px-4 py-2.5 font-semibold tracking-wider">New Value</th>
+                                                        <th className="px-4 py-2.5">Old Value</th>
+                                                        <th className="px-4 py-2.5">New Value</th>
                                                     </>
                                                 ) : (
-                                                    <th className="px-4 py-2.5 font-semibold tracking-wider">Value</th>
+                                                    <th className="px-4 py-2.5">Value</th>
                                                 )}
                                             </tr>
                                         </thead>

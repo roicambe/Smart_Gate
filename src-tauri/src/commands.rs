@@ -28,6 +28,7 @@ pub fn add_person(
         first_name,
         middle_name,
         last_name,
+        suffix: None,
         face_template_path,
         is_active,
         is_archived: false,
@@ -475,6 +476,7 @@ pub fn register_user(
     first_name: String,
     middle_name: Option<String>,
     last_name: String,
+    suffix: Option<String>,
     email: Option<String>,
     contact_number: Option<String>,
     program_id: Option<i64>,
@@ -494,6 +496,7 @@ pub fn register_user(
         &first_name,
         middle_name,
         &last_name,
+        suffix,
         email.into_iter().collect(),
         contact_number.into_iter().collect(),
         program_id,
@@ -542,6 +545,7 @@ pub fn update_user(
     first_name: String,
     middle_name: Option<String>,
     last_name: String,
+    suffix: Option<String>,
     email: Option<String>,
     contact_number: Option<String>,
     program_id: Option<i64>,
@@ -562,6 +566,7 @@ pub fn update_user(
         &first_name,
         middle_name,
         &last_name,
+        suffix,
         email.into_iter().collect(),
         contact_number.into_iter().collect(),
         program_id,
@@ -658,12 +663,18 @@ pub fn update_system_configuration(
     admin_id: i64,
     strict_email_domain: bool,
     enable_face_recognition: bool,
+    enable_auto_exit: bool,
+    auto_exit_time: String,
+    enable_entry_exit_validation: bool,
 ) -> Result<(), String> {
     db::update_system_configuration(
         &pool,
         admin_id,
         strict_email_domain,
         enable_face_recognition,
+        enable_auto_exit,
+        auto_exit_time,
+        enable_entry_exit_validation,
     )
 }
 
@@ -1009,13 +1020,13 @@ pub fn permanent_delete_program(pool: State<'_, DbPool>, program_id: i64, active
 // ------ Backup & Recovery Commands ------
 
 #[tauri::command]
-pub fn backup_database(app_handle: tauri::AppHandle, destination_path: String) -> Result<String, String> {
-    db::backup_database(&app_handle, &destination_path)
+pub fn backup_database(app_handle: tauri::AppHandle, pool: State<'_, DbPool>, destination_path: String, active_admin_id: i64) -> Result<String, String> {
+    db::backup_database(&app_handle, &pool, &destination_path, active_admin_id)
 }
 
 #[tauri::command]
-pub fn restore_database(app_handle: tauri::AppHandle, source_path: String) -> Result<String, String> {
-    db::restore_database(&app_handle, &source_path)
+pub fn restore_database(app_handle: tauri::AppHandle, pool: State<'_, DbPool>, source_path: String, active_admin_id: i64) -> Result<String, String> {
+    db::restore_database(&app_handle, &pool, &source_path, active_admin_id)
 }
 
 #[tauri::command]

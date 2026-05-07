@@ -17,7 +17,7 @@ const UNIVERSITY_HIGHLIGHT_PADDING_X = 5.5;
 const UNIVERSITY_HIGHLIGHT_LEFT_RADIUS = 2.5;
 
 const FALLBACKS = {
-  universityName: 'PAMANTASAN NG LUNGSOD NG PASIG',
+  universityName: 'Pamantasan ng Lungsod ng Pasig',
   systemName: 'SMART GATE',
   address: 'Alkalde Jose St. Kapasigan Pasig City, Philippines 1600',
   phone: '(106) 628-1014',
@@ -51,7 +51,27 @@ const toPdfSafeAscii = (value) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-const loadImage = (src) =>
+const clipImageToCircle = (img) => {
+  const canvas = document.createElement('canvas');
+  const size = Math.min(img.width, img.height);
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+  ctx.clip();
+
+  // Center-crop to square
+  const sourceSize = Math.min(img.width, img.height);
+  const sourceX = (img.width - sourceSize) / 2;
+  const sourceY = (img.height - sourceSize) / 2;
+
+  ctx.drawImage(img, sourceX, sourceY, sourceSize, sourceSize, 0, 0, size, size);
+  return canvas.toDataURL('image/png');
+};
+
+const loadImage = (src, isCircle = false) =>
   new Promise((resolve) => {
     if (!src) {
       resolve(null);
@@ -60,26 +80,50 @@ const loadImage = (src) =>
     const img = new Image();
     img.crossOrigin = 'Anonymous';
     img.src = src;
-    img.onload = () => {
-      resolve({ src: img, ratio: img.width / img.height });
+    img.onload = async () => {
+      if (isCircle) {
+        const clippedSrc = clipImageToCircle(img);
+        const clippedImg = new Image();
+        clippedImg.src = clippedSrc;
+        clippedImg.onload = () => {
+          resolve({ src: clippedImg, ratio: 1, isCircle: true });
+        };
+      } else {
+        resolve({ src: img, ratio: img.width / img.height, isCircle: false });
+      }
     };
     img.onerror = () => resolve(null);
   });
 
 export const prepareInstitutionalHeaderAssets = async (branding) => {
-  const logoSources = [];
+  const logoConfigs = [];
+
+  // Secondary Logo 1 (Leftmost)
   if (branding?.secondary_logo_1_enabled !== false) {
-    logoSources.push(branding?.secondary_logo_1 || pasigSeal);
+    logoConfigs.push({
+      src: branding?.secondary_logo_1 || pasigSeal,
+      isCircle: branding?.secondary1_circle ?? false
+    });
   }
+
+  // Secondary Logo 2 (Middle)
   if (branding?.secondary_logo_2_enabled !== false) {
-    logoSources.push(branding?.secondary_logo_2 || pasigUmaagos);
+    logoConfigs.push({
+      src: branding?.secondary_logo_2 || pasigUmaagos,
+      isCircle: branding?.secondary2_circle ?? false
+    });
   }
+
+  // Primary Logo (Rightmost)
   if (branding?.primary_logo_enabled !== false) {
-    logoSources.push(branding?.primary_logo || branding?.system_logo || plpLogo);
+    logoConfigs.push({
+      src: branding?.primary_logo || branding?.system_logo || plpLogo,
+      isCircle: branding?.primary_circle ?? false
+    });
   }
 
   const [logoResults, contactIconResults] = await Promise.all([
-    Promise.all(logoSources.map((src) => loadImage(src))),
+    Promise.all(logoConfigs.map((config) => loadImage(config.src, config.isCircle))),
     Promise.all([loadImage(pinIcon), loadImage(phoneCallIcon), loadImage(mailIcon)]),
   ]);
 
@@ -125,12 +169,13 @@ export const drawInstitutionalHeader = (doc, options) => {
 
   const logoHeight = 15;
   const logoGap = 2.2;
-  const logoWidths = logos.map((item) => clamp(logoHeight * item.ratio, 12, 25));
-  const totalLogosWidth =
-    logoWidths.reduce((sum, width) => sum + width, 0) +
-    Math.max(0, logos.length - 1) * logoGap;
+  const logoWidths = logos.map((item) => {
+    if (item.isCircle) return logoHeight;
+    return clamp(logoHeight * item.ratio, 12, 25);
+  });
   let logoX = leftStartX;
   const logoY = headerTop + 5;
+
   logos.forEach((logo, index) => {
     const width = logoWidths[index];
     if (logoX + width > leftStartX + leftWidth) {

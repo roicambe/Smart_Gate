@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Keyboard, QrCode, ScanFace, ChevronLeft, ArrowRight, Calendar, X } from "lucide-react";
+import { Keyboard, QrCode, ScanFace, ChevronLeft, ArrowRight, Calendar, X, Lock, Unlock } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { QRScannerOverlay } from "./QRScannerOverlay";
 import { extractScanId } from "../utils/patternHunter";
@@ -19,8 +19,57 @@ const formatRoleLabel = (role) => {
 
 const getFullNameLabel = (person) => {
     if (!person) return "---";
-    const middle = person.middle_name ? ` ${person.middle_name} ` : " ";
-    return `${person.first_name}${middle}${person.last_name}`;
+    const middle = person.middle_name ? ` ${person.middle_name.charAt(0)}.` : '';
+    const suffix = person.suffix ? ` ${person.suffix}` : '';
+    return `${person.first_name}${middle} ${person.last_name}${suffix}`;
+};
+
+const formatIdNumber = (val) => {
+    if (!val) return "";
+    
+    // 1. Character Filtering: Only allow 0-9, hyphen, and V, I, S (case-insensitive)
+    let filtered = val.replace(/[^0-9VvIiSs\-]/g, "");
+    const upper = filtered.toUpperCase();
+    
+    // 2. Visitor Logic: Automatically recognize "VIS" (any case)
+    if (upper.includes("VIS")) {
+        // Find the index of "VIS" to handle cases where user types it partially or fully
+        const visIndex = upper.indexOf("VIS");
+        // Extract what follows "VIS"
+        const afterVis = upper.slice(visIndex + 3);
+        // Only keep digits for the visitor numeric part
+        const digits = afterVis.replace(/[^0-9]/g, "").slice(0, 5);
+        return `VIS-${digits}`;
+    }
+    
+    // 3. Numeric Logic (Student/Employee)
+    const digits = filtered.replace(/[^0-9]/g, "");
+    
+    // If it exceeds 7 digits, recognize as employee ID (remove hyphen)
+    if (digits.length > 7) {
+        return digits.slice(0, 9);
+    }
+    
+    // If it has exactly 7 digits, auto-format to student format (XX-XXXXX)
+    if (digits.length === 7) {
+        return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+    }
+    
+    // If user typed a hyphen manually at position 2, preserve it
+    if (filtered.indexOf('-') === 2 && digits.length <= 7) {
+        // Re-apply hyphen after 2 digits if we have at least 2 digits
+        if (digits.length >= 2) {
+             return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+        }
+    }
+    
+    // If typing "V" or "VI", allow it (part of VIS)
+    if (upper === 'V' || upper === 'VI') {
+        return upper;
+    }
+    
+    // Default: return digits
+    return digits;
 };
 
 const getProgramYearLabel = (person) => {
@@ -49,6 +98,8 @@ export const EventActionMenu = ({ setView, branding }) => {
     const [showFaceScanner, setShowFaceScanner] = useState(false);
     const [flashGreen, setFlashGreen] = useState(false);
     const [activeScanCard, setActiveScanCard] = useState(null);
+    const [isManualLocked, setIsManualLocked] = useState(false);
+    const [isScannerLocked, setIsScannerLocked] = useState(false);
     const scanCardTimerRef = useRef(null);
     const scanCardRequestIdRef = useRef(0);
     const { showSuccess, showError, showWarning, showProcessing } = useToast();
@@ -263,13 +314,18 @@ export const EventActionMenu = ({ setView, branding }) => {
             });
 
             if (result.success) {
-                setShowManualModal(false);
-                setManualId("");
                 await showScanSuccessFeedback({
                     result,
                     scannedId: manualId,
-                    modalActive: false
+                    modalActive: true
                 });
+
+                if (!isManualLocked) {
+                    setShowManualModal(false);
+                    setManualId("");
+                } else {
+                    setManualId("");
+                }
             } else {
                 showError(result.message);
             }
@@ -277,8 +333,10 @@ export const EventActionMenu = ({ setView, branding }) => {
             console.error(error);
             showError("System Error. Failed to process ID.");
         } finally {
-            setShowManualModal(false);
-            setManualId("");
+            if (!isManualLocked) {
+                setShowManualModal(false);
+                setManualId("");
+            }
         }
     };
 
@@ -469,8 +527,9 @@ export const EventActionMenu = ({ setView, branding }) => {
             )}
 
             {/* Actions Grid */}
-            <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-8 flex-1 place-content-center items-center ${events.length === 0 ? 'opacity-50 pointer-events-none' : ''}`}>
+            <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-8 flex-1 place-content-center items-center ${(!selectedEventId || events.length === 0) ? 'opacity-50 pointer-events-none grayscale-[0.5]' : ''}`}>
                 <button
+                    disabled={!selectedEventId || events.length === 0}
                     onClick={() => { setShowManualModal(true); }}
                     className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]"
                 >
@@ -481,7 +540,10 @@ export const EventActionMenu = ({ setView, branding }) => {
                     <p className="text-white/70 text-base">Type in ID</p>
                 </button>
 
-                <button onClick={() => { setShowQrScanner(true); }} className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]">
+                <button 
+                    disabled={!selectedEventId || events.length === 0}
+                    onClick={() => { setShowQrScanner(true); }} 
+                    className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]">
                     <div className="h-20 w-20 bg-white/10 text-white rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:bg-white/20 transition-all duration-300 shadow-lg border border-white/20">
                         <QrCode className="w-10 h-10 drop-shadow-md" />
                     </div>
@@ -490,6 +552,7 @@ export const EventActionMenu = ({ setView, branding }) => {
                 </button>
 
                 <button 
+                    disabled={!selectedEventId || events.length === 0}
                     onClick={() => {
                         if (branding?.enable_face_recognition) {
                             setShowFaceScanner(true);
@@ -590,17 +653,44 @@ export const EventActionMenu = ({ setView, branding }) => {
                                     <h2 className="text-2xl font-bold text-white tracking-wide">Enter ID Number</h2>
                                     <p className="text-white/60 text-sm">Logging Check-in to Event</p>
                                 </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsManualLocked(!isManualLocked)}
+                                    className={`ml-auto p-2 rounded-xl border transition-all ${
+                                        isManualLocked 
+                                            ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' 
+                                            : 'bg-white/5 border-white/10 text-white/40 hover:text-white/60'
+                                    }`}
+                                    title={isManualLocked ? "Unlock Modal" : "Lock Modal"}
+                                >
+                                    {isManualLocked ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
+                                </button>
                             </div>
                             <form onSubmit={handleManualSubmit}>
                                 <input
                                     type="text"
-                                    placeholder="e.g. 2026-00123"
+                                    placeholder="e.g. 23-00123"
                                     value={manualId}
-                                    onChange={(e) => setManualId(e.target.value)}
-                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-white/50 mb-8 text-center tracking-widest uppercase transition-all"
+                                    onChange={(e) => setManualId(formatIdNumber(e.target.value))}
+                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-white/50 mb-3 text-center tracking-widest uppercase transition-all"
                                     autoFocus
                                     required
+                                    maxLength={9}
                                 />
+                                <div className="text-white/40 text-xs space-y-1.5 mb-6 max-w-[240px] mx-auto font-medium">
+                                    <div className="flex justify-between items-center">
+                                        <span>Student ID</span>
+                                        <span className="text-white/70 font-mono font-bold tracking-wider">00-00000</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                        <span>Employee ID</span>
+                                        <span className="text-white/70 font-mono font-bold tracking-wider">000000000</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                        <span>Visitor ID</span>
+                                        <span className="text-white/70 font-mono font-bold tracking-wider">VIS-00000</span>
+                                    </div>
+                                </div>
                                 <div className="flex gap-3">
                                     <button type="button" onClick={() => setShowManualModal(false)} className="flex-1 px-4 py-3 bg-white/5 border border-white/10 text-white/80 font-medium rounded-xl hover:bg-white/10 hover:text-white transition-all focus:outline-none">Cancel</button>
                                     <button type="submit" className="flex-[2] px-4 py-3 bg-white text-black font-bold rounded-xl hover:bg-slate-200 transition-all focus:outline-none focus:ring-4 focus:ring-white/30 flex items-center justify-center gap-2 text-lg shadow-lg">Submit <ArrowRight className="w-5 h-5" /></button>
@@ -614,14 +704,18 @@ export const EventActionMenu = ({ setView, branding }) => {
             {showQrScanner && (
                 <QRScannerOverlay 
                     onScan={(scannedId, error) => {
-                        setShowQrScanner(false);
+                        if (!isScannerLocked) {
+                            setShowQrScanner(false);
+                        }
                         if (error || !scannedId) {
                             showError(error || "Invalid scan target.");
                             return;
                         }
-                        handleQrScan(scannedId, false);
+                        handleQrScan(scannedId, true);
                     }} 
                     onClose={() => setShowQrScanner(false)} 
+                    isLocked={isScannerLocked}
+                    onToggleLock={() => setIsScannerLocked(!isScannerLocked)}
                     scannerFunction="event" 
                 />
             )}
@@ -629,10 +723,15 @@ export const EventActionMenu = ({ setView, branding }) => {
             {showFaceScanner && (
                 <FaceScannerModal 
                     scannerFunction="event"
+                    isLocked={isScannerLocked}
+                    onToggleLock={() => setIsScannerLocked(!isScannerLocked)}
                     onClose={() => setShowFaceScanner(false)}
+                    isPaused={showManualModal || showQrScanner}
                     onIdentify={(scannedId) => {
-                        setShowFaceScanner(false);
-                        handleQrScan(scannedId, false);
+                        if (!isScannerLocked) {
+                            setShowFaceScanner(false);
+                        }
+                        handleQrScan(scannedId, true);
                     }}
                 />
             )}

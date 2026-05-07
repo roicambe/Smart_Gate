@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Save, ShieldCheck, Fingerprint, Mail, Info, GraduationCap, AlertTriangle, Check, RefreshCw } from 'lucide-react';
+import { Save, ShieldCheck, Fingerprint, Mail, Info, GraduationCap, AlertTriangle, Check, RefreshCw, Clock, ArrowLeftRight } from 'lucide-react';
 import { SettingsSectionHeader } from '../common/SettingsSectionHeader';
 import { AdminModal } from '../common/AdminModal';
 
@@ -8,6 +8,9 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
     const isSystemAdministrator = adminSession?.role === 'System Administrator';
     const [strictEmailDomain, setStrictEmailDomain] = useState(true);
     const [enableFaceRecognition, setEnableFaceRecognition] = useState(true);
+    const [enableAutoExit, setEnableAutoExit] = useState(true);
+    const [autoExitTime, setAutoExitTime] = useState('22:00');
+    const [enableEntryExitValidation, setEnableEntryExitValidation] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
 
     // Promotion Modal state
@@ -19,6 +22,9 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
         if (branding) {
             setStrictEmailDomain(branding.strict_email_domain ?? true);
             setEnableFaceRecognition(branding.enable_face_recognition ?? true);
+            setEnableAutoExit(branding.enable_auto_exit ?? false);
+            setAutoExitTime(branding.auto_exit_time ?? '22:00');
+            setEnableEntryExitValidation(branding.enable_entry_exit_validation ?? true);
         }
     }, [branding]);
 
@@ -30,7 +36,10 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
             await invoke('update_system_configuration', {
                 adminId: adminSession.account_id,
                 strictEmailDomain: strictEmailDomain,
-                enableFaceRecognition: enableFaceRecognition
+                enableFaceRecognition: enableFaceRecognition,
+                enableAutoExit: enableAutoExit,
+                autoExitTime: autoExitTime,
+                enableEntryExitValidation: enableEntryExitValidation
             });
 
             await fetchBranding();
@@ -155,6 +164,93 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
                             />
                             <label
                                 htmlFor="face-recog-toggle"
+                                className="h-full w-full cursor-pointer rounded-full bg-slate-300 transition-all duration-300 ease-in-out peer-checked:bg-blue-600 peer-disabled:opacity-50"
+                            />
+                            <div className="absolute left-1 top-1 h-5 w-5 rounded-full bg-white transition-all duration-300 ease-in-out peer-checked:translate-x-5 shadow-sm pointer-events-none" />
+                        </div>
+                    </div>
+                </div>
+
+                {/* Automatic Campus Exit */}
+                <div className="flex flex-col justify-between gap-4 p-6 rounded-2xl bg-slate-50/60 border border-slate-200 transition-all hover:shadow-md">
+                    <div className="flex gap-4">
+                        <div className="mt-1 p-3 bg-purple-100 text-purple-600 rounded-xl flex-shrink-0 h-fit">
+                            <Clock className="w-6 h-6" />
+                        </div>
+                        <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                                <h3 className="text-lg font-semibold text-slate-900 leading-tight">Automatic Campus Exit</h3>
+                                <div className="relative inline-flex h-7 w-12 items-center">
+                                    <input
+                                        type="checkbox"
+                                        className="peer sr-only"
+                                        checked={enableAutoExit}
+                                        onChange={(e) => setEnableAutoExit(e.target.checked)}
+                                        disabled={!isSystemAdministrator || isSaving}
+                                        id="auto-exit-toggle"
+                                    />
+                                    <label
+                                        htmlFor="auto-exit-toggle"
+                                        className="h-full w-full cursor-pointer rounded-full bg-slate-300 transition-all duration-300 ease-in-out peer-checked:bg-blue-600 peer-disabled:opacity-50"
+                                    />
+                                    <div className="absolute left-1 top-1 h-5 w-5 rounded-full bg-white transition-all duration-300 ease-in-out peer-checked:translate-x-5 shadow-sm pointer-events-none" />
+                                </div>
+                            </div>
+                            <p className="text-slate-500 mt-2 text-sm leading-relaxed">
+                                Automatically records an 'Exit' log for all users still marked as 'Inside' once the closing time is reached.
+                            </p>
+                            
+                            {enableAutoExit && (
+                                <div className="mt-4 p-4 rounded-xl bg-white border border-slate-200 flex items-center justify-between animate-in slide-in-from-top-2 duration-300">
+                                    <span className="text-sm font-medium text-slate-600 uppercase tracking-wider">Closing Time</span>
+                                    <input
+                                        type="time"
+                                        value={autoExitTime}
+                                        onChange={(e) => setAutoExitTime(e.target.value)}
+                                        disabled={!isSystemAdministrator || isSaving}
+                                        className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    <div className="flex items-center justify-between pt-4 border-t border-slate-200/60">
+                        <div className="flex items-center gap-2 text-xs text-slate-400 italic">
+                            <Info className="w-3.5 h-3.5" />
+                            <span>Prevents overnight "Inside" status.</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Entry-Exit Validation */}
+                <div className="flex flex-col justify-between gap-4 p-6 rounded-2xl bg-slate-50/60 border border-slate-200 transition-all hover:shadow-md">
+                    <div className="flex gap-4">
+                        <div className="mt-1 p-3 bg-rose-100 text-rose-600 rounded-xl flex-shrink-0 h-fit">
+                            <ArrowLeftRight className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <h3 className="text-lg font-semibold text-slate-900 leading-tight">Entry-Exit Validation</h3>
+                            <p className="text-slate-500 mt-2 text-sm leading-relaxed">
+                                Enforce logical flow by requiring an 'Entry' log before allowing an 'Exit'. Useful for single-computer setups.
+                            </p>
+                        </div>
+                    </div>
+                    <div className="flex items-center justify-between pt-4 border-t border-slate-200/60">
+                        <div className="flex items-center gap-2 text-xs text-slate-400 italic">
+                            <Info className="w-3.5 h-3.5" />
+                            <span>Disable for offline/distributed gate nodes.</span>
+                        </div>
+                        <div className="relative inline-flex h-7 w-12 items-center">
+                            <input
+                                type="checkbox"
+                                className="peer sr-only"
+                                checked={enableEntryExitValidation}
+                                onChange={(e) => setEnableEntryExitValidation(e.target.checked)}
+                                disabled={!isSystemAdministrator || isSaving}
+                                id="entry-exit-toggle"
+                            />
+                            <label
+                                htmlFor="entry-exit-toggle"
                                 className="h-full w-full cursor-pointer rounded-full bg-slate-300 transition-all duration-300 ease-in-out peer-checked:bg-blue-600 peer-disabled:opacity-50"
                             />
                             <div className="absolute left-1 top-1 h-5 w-5 rounded-full bg-white transition-all duration-300 ease-in-out peer-checked:translate-x-5 shadow-sm pointer-events-none" />

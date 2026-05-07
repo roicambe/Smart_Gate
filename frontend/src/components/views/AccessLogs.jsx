@@ -10,6 +10,8 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { useToast } from '../toast/ToastProvider';
 import { drawInstitutionalHeader, prepareInstitutionalHeaderAssets } from '../../utils/pdfInstitutionalHeader';
+import { Pagination } from '../common/Pagination';
+import { SortableHeader, useTableSort } from '../common/SortableHeader';
 
 export const AccessLogs = ({ branding, adminSession }) => {
     const [activeTab, setActiveTab] = useState('gateLogs'); // 'gateLogs' | 'eventLogs'
@@ -120,35 +122,11 @@ export const AccessLogs = ({ branding, adminSession }) => {
         setProgramFilter('All');
         setYearFilter('All');
         setEventFilter('All');
-
-        setLoading(true);
-        try {
-            if (activeTab === 'gateLogs') {
-                const data = await invoke('get_access_logs', {
-                    roleFilter: null, actionType: null, locationName: null, searchTerm: null, startDate: null, endDate: null
-                });
-                setLogs(data);
-            } else {
-                const data = await invoke('get_event_attendance_logs', {
-                    startDate: null,
-                    endDate: null,
-                    departmentId: null,
-                    programId: null,
-                    yearLevel: null
-                });
-                setEventLogs(data);
-            }
-        } catch (error) {
-            console.error("Failed to clear filters:", error);
-            showError("Failed to clear filters.");
-        } finally {
-            setLoading(false);
-        }
     };
 
     useEffect(() => {
         fetchLogs();
-    }, [activeTab, searchTerm, roleFilter, actionFilter, startDate, endDate, departmentFilter]);
+    }, [activeTab, searchTerm, roleFilter, actionFilter, startDate, endDate, departmentFilter, programFilter, yearFilter]);
 
     // Filter logic based on active tab
     const currentData = activeTab === 'gateLogs' ? logs : eventLogs;
@@ -156,7 +134,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
     // Gate logs are already filtered on backend. Event logs still rely on simple frontend filters for now.
     const filteredLogs = activeTab === 'gateLogs' ? currentData : currentData.filter(log => {
         const roleStr = log.roles?.join(', ') || '';
-        const matchesSearch = 
+        const matchesSearch =
             log.person_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             log.id_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
             log.event_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -175,8 +153,11 @@ export const AccessLogs = ({ branding, adminSession }) => {
         return events.sort();
     }, [eventLogs]);
 
+    // Sorting
+    const { sortConfig, requestSort, sortedData: sortedLogs } = useTableSort(filteredLogs, 'scanned_at', 'desc', 'access_logs');
+
     // Pagination - reset to page 1 when filters change
-    useEffect(() => { setCurrentPage(1); }, [searchTerm, roleFilter, actionFilter, startDate, endDate, departmentFilter, programFilter, yearFilter, eventFilter, activeTab]);
+    useEffect(() => { setCurrentPage(1); }, [searchTerm, roleFilter, actionFilter, startDate, endDate, departmentFilter, programFilter, yearFilter, eventFilter, activeTab, sortConfig]);
 
     // Filter programs based on selected department
     const filteredPrograms = useMemo(() => {
@@ -184,12 +165,12 @@ export const AccessLogs = ({ branding, adminSession }) => {
         return allPrograms.filter(p => p.department_id === parseInt(departmentFilter));
     }, [departmentFilter, allPrograms]);
 
-    const totalPages = Math.ceil(filteredLogs.length / ITEMS_PER_PAGE);
+    const totalPages = Math.ceil(sortedLogs.length / ITEMS_PER_PAGE);
     const paginatedLogs = useMemo(() => {
         const start = (currentPage - 1) * ITEMS_PER_PAGE;
-        return filteredLogs.slice(start, start + ITEMS_PER_PAGE);
-    }, [filteredLogs, currentPage]);
-    const showPagination = filteredLogs.length > ITEMS_PER_PAGE;
+        return sortedLogs.slice(start, start + ITEMS_PER_PAGE);
+    }, [sortedLogs, currentPage]);
+    const showPagination = sortedLogs.length > ITEMS_PER_PAGE;
 
     const formatDate = (dateString) => {
         if (!dateString) return "-";
@@ -248,7 +229,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
 
             stats.hourlyActivity[hour] = (stats.hourlyActivity[hour] || 0) + 1;
             stats.dailyActivity[dateStr] = (stats.dailyActivity[dateStr] || 0) + 1;
-            
+
             const dept = log.department_name && log.department_name !== 'N/A' && log.department_name !== '-' ? log.department_name : 'No Department';
             stats.departmentActivity[dept] = (stats.departmentActivity[dept] || 0) + 1;
         });
@@ -295,7 +276,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
         try {
             const uniName = (branding && branding.system_name) ? branding.system_name : "Pamantasan ng Lungsod ng Pasig";
             const sysName = activeTab === 'gateLogs' ? "Smart Gate - General Gate Logs" : "Smart Gate - Event Attendance";
-            
+
             let dateRangeStr = "All Time";
             if (startDate && endDate) dateRangeStr = `${startDate} To ${endDate}`;
             else if (startDate) dateRangeStr = `From ${startDate}`;
@@ -349,7 +330,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                     statsWsData.push([` - ${dept}`, count]);
                 }
             }
-            
+
             const statsWs = XLSX.utils.aoa_to_sheet(statsWsData);
 
             // 2. Sheet: Access Logs
@@ -389,7 +370,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
             });
 
             const ws = XLSX.utils.aoa_to_sheet(wsData);
-            
+
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, statsWs, "Statistics");
             XLSX.utils.book_append_sheet(wb, ws, "Access Logs");
@@ -717,7 +698,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
             </div>
 
             {/* Filter Bar (Action Bar) Cleanup */}
-            <div className="p-4 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col lg:flex-row items-center justify-between mb-6">
+            <div className="p-3 bg-white border border-slate-200 rounded-2xl shadow- flex flex-col lg:flex-row items-center justify-between mb-6">
 
                 {/* Sub-Tab Navigation inside Filter Bar */}
                 <div className="flex gap-2 p-1 bg-slate-100 rounded-xl w-full lg:w-auto overflow-x-auto shrink-0">
@@ -735,7 +716,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                     </button>
                 </div>
 
-                <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto flex-wrap lg:justify-end">
+                <div className="flex flex-col sm:flex-row items-center gap-2 w-full lg:w-auto flex-wrap lg:justify-end">
                     {/* Academic filters and other selectors will be here */}
 
                     {/* Role Filter */}
@@ -829,7 +810,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                     )}
 
                     {/* Date Filters */}
-                    <div className="flex items-center gap-2 border border-slate-200 rounded-lg p-1 bg-slate-50 w-full xl:w-auto shrink-0 flex-wrap xl:flex-nowrap justify-center">
+                    <div className="flex items-center gap-2 border border-slate-200 rounded-lg p-1 bg-slate-50 w-full xl:w-auto h-[39px] shrink-0 flex-wrap xl:flex-nowrap justify-center">
                         <div className="flex items-center gap-2 px-2">
                             <Calendar className="w-4 h-4 text-slate-400 shrink-0" />
                             <input
@@ -850,19 +831,13 @@ export const AccessLogs = ({ branding, adminSession }) => {
                         </div>
                     </div>
 
-                    {/* Apply & Clear buttons */}
+                    {/* Clear button */}
                     <div className="flex gap-2 w-full sm:w-auto pt-1 sm:pt-0 shrink-0">
-                        <button
-                            onClick={fetchLogs}
-                            className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors focus:outline-none shadow-sm"
-                        >
-                            APPLY
-                        </button>
                         <button
                             onClick={clearFilters}
                             className="flex-1 sm:flex-none bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-semibold transition-colors focus:outline-none shadow-sm"
                         >
-                            CLEAR
+                            CLEAR ALL
                         </button>
                     </div>
 
@@ -873,22 +848,22 @@ export const AccessLogs = ({ branding, adminSession }) => {
             {/* Solid Table View - scroll container with sticky headers */}
             <div className="flex-1 min-h-0 flex flex-col bg-white border border-slate-200 shadow-sm rounded-xl relative">
                 <div className="flex-1 min-h-0 overflow-x-auto overflow-y-auto">
-                    <table className="w-full text-left border-collapse text-sm">
+                    <table className="w-full text-left border-collapse text-sm table-fixed">
                         <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
-                            <tr className="text-slate-700">
-                                <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Timestamp</th>
-                                <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">User Info</th>
-                                <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Roles</th>
+                            <tr>
+                                <SortableHeader label="Timestamp" sortKey="scanned_at" sortConfig={sortConfig} onSort={requestSort} width="180px" />
+                                <SortableHeader label="User Info" sortKey="person_name" sortConfig={sortConfig} onSort={requestSort} width="250px" />
+                                <SortableHeader label="Roles" sortKey="roles" sortConfig={sortConfig} onSort={requestSort} width="150px" />
                                 {activeTab === 'gateLogs' ? (
                                     <>
-                                        <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Department</th>
-                                        <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px] text-center">Action</th>
+                                        <SortableHeader label="Department" sortKey="department_name" sortConfig={sortConfig} onSort={requestSort} width="250px" />
+                                        <SortableHeader label="Action" sortKey="scanner_function" sortConfig={sortConfig} onSort={requestSort} align="center" width="120px" />
                                     </>
                                 ) : (
                                     <>
-                                        <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Academic Info</th>
-                                        <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Event Name</th>
-                                        <th className="px-3 py-2 font-semibold uppercase tracking-wider text-[11px]">Status</th>
+                                        <SortableHeader label="Academic Info" sortKey="program_name" sortConfig={sortConfig} onSort={requestSort} width="250px" />
+                                        <SortableHeader label="Event Name" sortKey="event_name" sortConfig={sortConfig} onSort={requestSort} width="200px" />
+                                        <SortableHeader label="Status" sortKey="status" sortConfig={sortConfig} onSort={requestSort} width="120px" />
                                     </>
                                 )}
                             </tr>
@@ -928,7 +903,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                 <td className="px-3 py-1.5">
                                                     <div className="flex flex-col">
                                                         <span className="text-slate-900 font-medium text-xs">
-                                                            {log.department_name || (log.roles?.some(r => r.toLowerCase() === 'visitor') ? "N/A" : "-")}
+                                                            {log.roles?.some(r => r.toLowerCase() === 'visitor') ? "VISITOR" : (log.department_name || "-")}
                                                         </span>
                                                         <span className="text-[10px] text-slate-500 tracking-tight">
                                                             {log.roles?.some(r => r.toLowerCase() === 'student')
@@ -936,7 +911,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                                 : log.roles?.some(r => r.toLowerCase() === 'professor' || r.toLowerCase() === 'staff')
                                                                     ? (log.position_title || "Faculty/Staff")
                                                                     : log.roles?.some(r => r.toLowerCase() === 'visitor')
-                                                                        ? "Visitor"
+                                                                        ? "N/A"
                                                                         : "-"
                                                             }
                                                         </span>
@@ -961,7 +936,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                 <td className="px-3 py-1.5">
                                                     <div className="flex flex-col">
                                                         <span className="text-slate-900 font-medium text-xs">
-                                                            {log.department_name || (log.roles?.some(r => r.toLowerCase() === 'visitor') ? "N/A" : "-")}
+                                                            {log.roles?.some(r => r.toLowerCase() === 'visitor') ? "VISITOR" : (log.department_name || "-")}
                                                         </span>
                                                         <span className="text-[10px] text-slate-500 uppercase tracking-tight">
                                                             {log.roles?.some(r => r.toLowerCase() === 'student')
@@ -969,7 +944,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                                 : log.roles?.some(r => r.toLowerCase() === 'professor' || r.toLowerCase() === 'staff')
                                                                     ? (log.position_title || "Faculty/Staff")
                                                                     : log.roles?.some(r => r.toLowerCase() === 'visitor')
-                                                                        ? "Visitor"
+                                                                        ? "N/A"
                                                                         : "-"
                                                             }
                                                         </span>
@@ -1002,8 +977,8 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                     {loading ? "Searching Logs..." : "No Logs Found"}
                                                 </p>
                                                 <p className="text-slate-500 text-sm max-w-xs mx-auto">
-                                                    {loading 
-                                                        ? "We are retrieving the access records from the database." 
+                                                    {loading
+                                                        ? "We are retrieving the access records from the database."
                                                         : "We couldn't find any records matching your current filter criteria."}
                                                 </p>
                                             </div>
@@ -1023,42 +998,14 @@ export const AccessLogs = ({ branding, adminSession }) => {
                     </table>
                 </div>
 
-                {/* Footer: counts + pagination (only when records > items per page) */}
-                <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 flex flex-wrap items-center justify-between gap-3 shrink-0">
-                    <div>
-                        Showing {paginatedLogs.length > 0 ? (currentPage - 1) * ITEMS_PER_PAGE + 1 : 0}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredLogs.length)} of {filteredLogs.length} (Total: {currentData.length})
-                    </div>
-                    {showPagination && (
-                        <div className="flex items-center gap-1">
-                            <button
-                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                disabled={currentPage === 1}
-                                className="px-2 py-1 rounded border border-slate-200 bg-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors flex items-center gap-0.5"
-                            >
-                                <ChevronLeft className="w-4 h-4" /> Previous
-                            </button>
-                            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-                                <button
-                                    key={p}
-                                    onClick={() => setCurrentPage(p)}
-                                    className={`min-w-[28px] px-2 py-1 rounded border transition-colors ${currentPage === p
-                                        ? 'bg-slate-800 text-white border-slate-800'
-                                        : 'border-slate-200 bg-white hover:bg-slate-50'
-                                        }`}
-                                >
-                                    {p}
-                                </button>
-                            ))}
-                            <button
-                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                disabled={currentPage === totalPages}
-                                className="px-2 py-1 rounded border border-slate-200 bg-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 transition-colors flex items-center gap-0.5"
-                            >
-                                Next <ChevronRight className="w-4 h-4" />
-                            </button>
-                        </div>
-                    )}
-                </div>
+                <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={setCurrentPage}
+                    totalItems={filteredLogs.length}
+                    itemsPerPage={ITEMS_PER_PAGE}
+                    currentItemsCount={paginatedLogs.length}
+                />
             </div>
         </div>
     );
