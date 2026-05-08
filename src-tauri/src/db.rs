@@ -198,6 +198,42 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
         conn.execute("ALTER TABLE persons ADD COLUMN suffix VARCHAR NULL;", []).map_err(|e| e.to_string())?;
     }
 
+    // Add description column to roles if missing
+    if !table_has_column(&conn, "roles", "description").unwrap_or(true) {
+        log::info!("Adding description column to roles table...");
+        conn.execute("ALTER TABLE roles ADD COLUMN description TEXT NULL;", []).map_err(|e| e.to_string())?;
+    }
+
+    // Add is_main_role column to roles if missing
+    if !table_has_column(&conn, "roles", "is_main_role").unwrap_or(true) {
+        log::info!("Adding is_main_role column to roles table...");
+        conn.execute("ALTER TABLE roles ADD COLUMN is_main_role BOOLEAN NOT NULL DEFAULT 0;", []).map_err(|e| e.to_string())?;
+    }
+
+    // Add parent_role_id column to roles if missing
+    if !table_has_column(&conn, "roles", "parent_role_id").unwrap_or(true) {
+        log::info!("Adding parent_role_id column to roles table...");
+        conn.execute("ALTER TABLE roles ADD COLUMN parent_role_id INTEGER NULL REFERENCES roles(role_id);", []).map_err(|e| e.to_string())?;
+    }
+
+    // Ensure main roles exist and are correctly flagged
+    conn.execute_batch("
+        INSERT OR IGNORE INTO roles (role_name, is_main_role, description) VALUES ('student', 1, 'Enrolled students of the university.');
+        INSERT OR IGNORE INTO roles (role_name, is_main_role, description) VALUES ('employee', 1, 'All academic and non-academic personnel.');
+        INSERT OR IGNORE INTO roles (role_name, is_main_role, description) VALUES ('visitor', 1, 'External guests and temporary visitors.');
+        
+        UPDATE roles SET is_main_role = 1, parent_role_id = NULL WHERE LOWER(role_name) IN ('student', 'employee', 'visitor');
+        UPDATE roles SET is_main_role = 0, parent_role_id = (SELECT role_id FROM roles WHERE LOWER(role_name) = 'employee') 
+        WHERE LOWER(role_name) IN ('professor', 'staff');
+
+        -- Update descriptions if null
+        UPDATE roles SET description = 'Enrolled students of the university.' WHERE LOWER(role_name) = 'student' AND description IS NULL;
+        UPDATE roles SET description = 'All academic and non-academic personnel.' WHERE LOWER(role_name) = 'employee' AND description IS NULL;
+        UPDATE roles SET description = 'External guests and temporary visitors.' WHERE LOWER(role_name) = 'visitor' AND description IS NULL;
+        UPDATE roles SET description = 'Academic faculty members and instructors.' WHERE LOWER(role_name) = 'professor' AND description IS NULL;
+        UPDATE roles SET description = 'Administrative and support personnel.' WHERE LOWER(role_name) = 'staff' AND description IS NULL;
+    ").map_err(|e| e.to_string())?;
+
     // Fix audit_events check constraint for existing databases if they lack BACKUP/SYSTEM_RESTORE
     let audit_sql: String = conn.query_row(
         "SELECT sql FROM sqlite_master WHERE name='audit_events'",
@@ -290,7 +326,8 @@ fn run_normalization_migration(conn: &rusqlite::Connection) -> Result<(), String
         conn.execute_batch("
             CREATE TABLE IF NOT EXISTS roles (
                 role_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                role_name TEXT UNIQUE NOT NULL
+                role_name TEXT UNIQUE NOT NULL,
+                description TEXT NULL
             );
             CREATE TABLE IF NOT EXISTS person_roles (
                 person_id INTEGER NOT NULL,
@@ -994,12 +1031,15 @@ pub fn delete_program(pool: &DbPool, program_id: i64, active_admin_id: i64) -> R
 
 pub fn get_roles(pool: &DbPool) -> Result<Vec<Role>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT role_id, role_name FROM roles ORDER BY role_id ASC")
+    let mut stmt = conn.prepare("SELECT role_id, role_name, description, is_main_role, parent_role_id FROM roles ORDER BY role_id ASC")
         .map_err(|e| e.to_string())?;
     let rows = stmt.query_map([], |row| {
         Ok(Role {
             role_id: row.get(0)?,
             role_name: row.get(1)?,
+            description: row.get(2)?,
+            is_main_role: row.get(3)?,
+            parent_role_id: row.get(4)?,
         })
     }).map_err(|e| e.to_string())?;
 
@@ -1008,6 +1048,137 @@ pub fn get_roles(pool: &DbPool) -> Result<Vec<Role>, String> {
         roles.push(row.map_err(|e| e.to_string())?);
     }
     Ok(roles)
+}
+
+pub fn add_role(
+    pool: &DbPool, 
+    role_name: &str, 
+    description: Option<String>, 
+    is_main_role: bool,
+    parent_role_id: Option<i64>,
+    active_admin_id: i64
+) -> Result<i64, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "INSERT INTO roles (role_name, description, is_main_role, parent_role_id) VALUES (?1, ?2, ?3, ?4)",
+        params![role_name, description, is_main_role, parent_role_id],
+    ).map_err(|e| e.to_string())?;
+
+    let target_id = conn.last_insert_rowid();
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "CREATE",
+        "Role",
+        target_id,
+        role_name,
+        None,
+        Some(json!({
+            "role_name": role_name,
+            "description": description
+        })),
+    );
+
+    Ok(target_id)
+}
+
+pub fn update_role(
+    pool: &DbPool, 
+    role_id: i64, 
+    role_name: &str, 
+    description: Option<String>, 
+    is_main_role: bool,
+    parent_role_id: Option<i64>,
+    active_admin_id: i64
+) -> Result<(), String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    let (old_name, old_desc, old_main, old_parent): (String, Option<String>, bool, Option<i64>) = conn.query_row(
+        "SELECT role_name, description, is_main_role, parent_role_id FROM roles WHERE role_id = ?1",
+        params![role_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+    ).map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "UPDATE roles SET role_name = ?1, description = ?2, is_main_role = ?3, parent_role_id = ?4 WHERE role_id = ?5",
+        params![role_name, description, is_main_role, parent_role_id, role_id],
+    ).map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "UPDATE",
+        "Role",
+        role_id,
+        role_name,
+        Some(json!({
+            "role_name": old_name,
+            "description": old_desc,
+            "is_main_role": old_main,
+            "parent_role_id": old_parent
+        })),
+        Some(json!({
+            "role_name": role_name,
+            "description": description,
+            "is_main_role": is_main_role,
+            "parent_role_id": parent_role_id
+        })),
+    );
+
+    Ok(())
+}
+
+pub fn delete_role(pool: &DbPool, role_id: i64, active_admin_id: i64) -> Result<(), String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+
+    // Check if any persons are assigned to this role
+    let person_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM person_roles WHERE role_id = ?1",
+        params![role_id],
+        |row| row.get(0)
+    ).unwrap_or(0);
+
+    if person_count > 0 {
+        return Err(format!("Cannot delete role because it is assigned to {} person(s).", person_count));
+    }
+
+    // Check if any events require this role
+    let event_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM event_required_roles WHERE role_id = ?1",
+        params![role_id],
+        |row| row.get(0)
+    ).unwrap_or(0);
+
+    if event_count > 0 {
+        return Err(format!("Cannot delete role because it is required by {} event(s).", event_count));
+    }
+
+    let (role_name, role_desc): (String, Option<String>) = conn.query_row(
+        "SELECT role_name, description FROM roles WHERE role_id = ?1",
+        params![role_id],
+        |row| Ok((row.get(0)?, row.get(1)?))
+    ).map_err(|e| e.to_string())?;
+
+    conn.execute("DELETE FROM roles WHERE role_id = ?1", params![role_id])
+        .map_err(|e| e.to_string())?;
+
+    let _ = log_audit_action(
+        pool,
+        active_admin_id,
+        "DELETE",
+        "Role",
+        role_id,
+        &role_name,
+        Some(json!({
+            "role_name": role_name,
+            "description": role_desc
+        })),
+        None,
+    );
+
+    Ok(())
 }
 
 pub fn add_person(pool: &DbPool, person: Person) -> Result<i64, String> {
@@ -1281,7 +1452,7 @@ pub fn register_user(
     let mut conn = pool.get().map_err(|e| e.to_string())?;
 
     // Domain validation for university roles
-    let is_university_member = roles.iter().any(|r| r == "student" || r == "professor" || r == "staff");
+    let is_university_member = roles.iter().any(|r| r == "student" || r == "professor" || r == "staff" || r == "employee" || r == "faculty");
     if is_university_member {
         let strict_email: bool = conn.query_row(
             "SELECT setting_value FROM settings WHERE setting_key = 'strict_email_domain'",
@@ -1349,29 +1520,42 @@ pub fn register_user(
     }
 
     // Insert into subtype tables based on roles
-    for role in &roles {
-        match role.as_str() {
-            "student" => {
-                tx.execute(
-                    "INSERT INTO students (person_id, program_id, year_level, is_irregular) VALUES (?1, ?2, ?3, ?4)",
-                    params![person_id, program_id.unwrap_or(1), year_level, is_irregular.unwrap_or(false)],
-                )
-                .map_err(|e| e.to_string())?;
-            }
-            "professor" | "staff" => {
-                tx.execute(
-                    "INSERT INTO employees (person_id, department_id, position_title) VALUES (?1, ?2, ?3)",
-                    params![person_id, department_id.unwrap_or(1), position_title.as_deref().unwrap_or("")],
-                ).map_err(|e| e.to_string())?;
-            }
-            "visitor" => {
-                tx.execute(
-                    "INSERT INTO visitors (person_id, purpose_of_visit, person_to_visit) VALUES (?1, ?2, ?3)",
-                    params![person_id, purpose.as_deref().unwrap_or(""), person_to_visit.as_deref().unwrap_or("")],
-                ).map_err(|e| e.to_string())?;
-            }
-            _ => {} // Other roles might not have subtype tables
-        }
+    let mut is_student = false;
+    let mut is_employee = false;
+    let mut is_visitor = false;
+
+    for role_name in &roles {
+        let parent_id: Option<i64> = tx.query_row(
+            "SELECT parent_role_id FROM roles WHERE LOWER(role_name) = ?1",
+            params![role_name.to_lowercase()],
+            |row| row.get(0)
+        ).unwrap_or(None);
+
+        let r_lower = role_name.to_lowercase();
+        if r_lower == "student" || parent_id == Some(1) { is_student = true; }
+        if r_lower == "employee" || parent_id == Some(2) || r_lower == "professor" || r_lower == "staff" || r_lower == "faculty" { is_employee = true; }
+        if r_lower == "visitor" || parent_id == Some(3) { is_visitor = true; }
+    }
+
+    if is_student {
+        tx.execute(
+            "INSERT INTO students (person_id, program_id, year_level, is_irregular) VALUES (?1, ?2, ?3, ?4)",
+            params![person_id, program_id.unwrap_or(1), year_level, is_irregular.unwrap_or(false)],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    if is_employee {
+        tx.execute(
+            "INSERT INTO employees (person_id, department_id, position_title) VALUES (?1, ?2, ?3)",
+            params![person_id, department_id.unwrap_or(1), position_title.as_deref().unwrap_or("")],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    if is_visitor {
+        tx.execute(
+            "INSERT INTO visitors (person_id, purpose_of_visit, person_to_visit) VALUES (?1, ?2, ?3)",
+            params![person_id, purpose.as_deref().unwrap_or(""), person_to_visit.as_deref().unwrap_or("")],
+        ).map_err(|e| e.to_string())?;
     }
 
     // Fetch final state for accurate logging
@@ -1671,11 +1855,18 @@ pub fn bulk_import_users_from_excel(
 
             let person_id = tx.last_insert_rowid();
 
-            // Link role
+            // Link role(s)
             tx.execute(
                 "INSERT INTO person_roles (person_id, role_id) SELECT ?1, role_id FROM roles WHERE role_name = ?2",
-                params![person_id, role],
+                params![person_id, role.to_lowercase()],
             ).map_err(|e| e.to_string())?;
+
+            if role == "professor" || role == "staff" {
+                tx.execute(
+                    "INSERT OR IGNORE INTO person_roles (person_id, role_id) SELECT ?1, role_id FROM roles WHERE role_name = 'employee'",
+                    params![person_id],
+                ).map_err(|e| e.to_string())?;
+            }
 
             // Link contacts
             if !email.is_empty() {
@@ -1930,11 +2121,24 @@ pub fn update_user(
     }
 
     // Update subtypes
-    // Clear old subtypes first? Or just update if exists.
-    // Given a person can have multiple roles, they can exist in multiple subtype tables.
-    
-    // Students
-    if roles.iter().any(|r| r == "student") {
+    let mut is_student = false;
+    let mut is_employee = false;
+    let mut is_visitor = false;
+
+    for role_name in &roles {
+        let parent_id: Option<i64> = tx.query_row(
+            "SELECT parent_role_id FROM roles WHERE LOWER(role_name) = ?1",
+            params![role_name.to_lowercase()],
+            |row| row.get(0)
+        ).unwrap_or(None);
+
+        let r_lower = role_name.to_lowercase();
+        if r_lower == "student" || parent_id == Some(1) { is_student = true; }
+        if r_lower == "employee" || parent_id == Some(2) || r_lower == "professor" || r_lower == "staff" || r_lower == "faculty" { is_employee = true; }
+        if r_lower == "visitor" || parent_id == Some(3) { is_visitor = true; }
+    }
+
+    if is_student {
         tx.execute(
             "INSERT OR REPLACE INTO students (person_id, program_id, year_level, is_irregular) VALUES (?1, ?2, ?3, ?4)",
             params![person_id, program_id.unwrap_or(1), year_level, is_irregular.unwrap_or(false)],
@@ -1943,8 +2147,7 @@ pub fn update_user(
         tx.execute("DELETE FROM students WHERE person_id = ?1", params![person_id]).map_err(|e| e.to_string())?;
     }
 
-    // Employees
-    if roles.iter().any(|r| r == "professor" || r == "staff") {
+    if is_employee {
         tx.execute(
             "INSERT OR REPLACE INTO employees (person_id, department_id, position_title) VALUES (?1, ?2, ?3)",
             params![person_id, department_id.unwrap_or(1), position_title.as_deref().unwrap_or("")],
@@ -1953,8 +2156,7 @@ pub fn update_user(
         tx.execute("DELETE FROM employees WHERE person_id = ?1", params![person_id]).map_err(|e| e.to_string())?;
     }
 
-    // Visitors
-    if roles.iter().any(|r| r == "visitor") {
+    if is_visitor {
         tx.execute(
             "INSERT OR REPLACE INTO visitors (person_id, purpose_of_visit, person_to_visit) VALUES (?1, ?2, ?3)",
             params![person_id, purpose.as_deref().unwrap_or(""), person_to_visit.as_deref().unwrap_or("")],
@@ -2407,11 +2609,14 @@ fn get_event_details_helper(conn: &rusqlite::Connection, event_id: i64) -> Resul
         })
     }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
 
-    let mut stmt_r = conn.prepare("SELECT r.role_id, r.role_name FROM roles r JOIN event_required_roles err ON r.role_id = err.role_id WHERE err.event_id = ?1").map_err(|e| e.to_string())?;
+    let mut stmt_r = conn.prepare("SELECT r.role_id, r.role_name, r.description, r.is_main_role, r.parent_role_id FROM roles r JOIN event_required_roles err ON r.role_id = err.role_id WHERE err.event_id = ?1").map_err(|e| e.to_string())?;
     let roles = stmt_r.query_map([event_id], |row| {
         Ok(Role {
             role_id: row.get(0)?,
             role_name: row.get(1)?,
+            description: row.get(2)?,
+            is_main_role: row.get(3)?,
+            parent_role_id: row.get(4)?,
         })
     }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
 
@@ -2555,11 +2760,14 @@ pub fn get_events(pool: &DbPool) -> Result<Vec<EventDetails>, String> {
         }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
 
         // Get required roles
-        let mut stmt_r = conn.prepare("SELECT r.role_id, r.role_name FROM roles r JOIN event_required_roles err ON r.role_id = err.role_id WHERE err.event_id = ?1").map_err(|e| e.to_string())?;
+        let mut stmt_r = conn.prepare("SELECT r.role_id, r.role_name, r.description, r.is_main_role, r.parent_role_id FROM roles r JOIN event_required_roles err ON r.role_id = err.role_id WHERE err.event_id = ?1").map_err(|e| e.to_string())?;
         let roles = stmt_r.query_map([event_id], |row| {
             Ok(Role {
                 role_id: row.get(0)?,
                 role_name: row.get(1)?,
+                description: row.get(2)?,
+                is_main_role: row.get(3)?,
+                parent_role_id: row.get(4)?,
             })
         }).map_err(|e| e.to_string())?.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
 

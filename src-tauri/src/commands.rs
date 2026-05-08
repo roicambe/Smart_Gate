@@ -42,6 +42,40 @@ pub fn get_roles(pool: State<'_, DbPool>) -> Result<Vec<Role>, String> {
 }
 
 #[tauri::command]
+pub fn add_role(
+    pool: State<'_, DbPool>,
+    role_name: String,
+    description: Option<String>,
+    is_main_role: bool,
+    parent_role_id: Option<i64>,
+    active_admin_id: i64,
+) -> Result<i64, String> {
+    db::add_role(&pool, &role_name, description, is_main_role, parent_role_id, active_admin_id)
+}
+
+#[tauri::command]
+pub fn update_role(
+    pool: State<'_, DbPool>,
+    role_id: i64,
+    role_name: String,
+    description: Option<String>,
+    is_main_role: bool,
+    parent_role_id: Option<i64>,
+    active_admin_id: i64,
+) -> Result<(), String> {
+    db::update_role(&pool, role_id, &role_name, description, is_main_role, parent_role_id, active_admin_id)
+}
+
+#[tauri::command]
+pub fn delete_role(
+    pool: State<'_, DbPool>,
+    role_id: i64,
+    active_admin_id: i64,
+) -> Result<(), String> {
+    db::delete_role(&pool, role_id, active_admin_id)
+}
+
+#[tauri::command]
 pub fn get_departments(pool: State<'_, DbPool>) -> Result<Vec<Department>, String> {
     db::get_departments(&pool)
 }
@@ -471,7 +505,7 @@ pub fn bulk_import_users_from_excel(
 #[tauri::command]
 pub fn register_user(
     pool: State<'_, DbPool>,
-    role: String,
+    roles: Vec<String>,
     id_number: String,
     first_name: String,
     middle_name: Option<String>,
@@ -491,7 +525,7 @@ pub fn register_user(
 ) -> Result<i64, String> {
     db::register_user(
         &pool,
-        vec![role],
+        roles,
         &id_number,
         &first_name,
         middle_name,
@@ -540,7 +574,7 @@ pub fn get_scan_person_details(
 pub fn update_user(
     pool: State<'_, DbPool>,
     person_id: i64,
-    role: String,
+    roles: Vec<String>,
     id_number: String,
     first_name: String,
     middle_name: Option<String>,
@@ -561,7 +595,7 @@ pub fn update_user(
     db::update_user(
         &pool,
         person_id,
-        vec![role],
+        roles,
         &id_number,
         &first_name,
         middle_name,
