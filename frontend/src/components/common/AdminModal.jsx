@@ -60,7 +60,7 @@ export const AdminModal = ({
                 aria-label="Close modal backdrop"
             />
             <div
-                className={`relative max-h-[92vh] w-full ${sizeClass} overflow-hidden rounded-3xl border shadow-2xl backdrop-blur-3xl animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300 ${palette.panel}`}
+                className={`relative flex max-h-[92vh] flex-col w-full ${sizeClass} overflow-hidden rounded-3xl border shadow-2xl backdrop-blur-3xl animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300 ${palette.panel}`}
                 role="dialog"
                 aria-modal="true"
             >
@@ -86,7 +86,7 @@ export const AdminModal = ({
                     </button>
                 </div>
 
-                <div className={`px-6 py-5 md:px-8 ${bodyClassName}`}>
+                <div className={`flex-1 overflow-y-auto px-6 py-5 md:px-8 ${bodyClassName}`}>
                     {children}
                 </div>
 

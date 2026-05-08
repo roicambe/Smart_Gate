@@ -19,6 +19,9 @@ pub struct Program {
 pub struct Role {
     pub role_id: i64,
     pub role_name: String,
+    pub description: Option<String>,
+    pub is_main_role: bool,
+    pub parent_role_id: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
