@@ -146,6 +146,8 @@ export const drawInstitutionalHeader = (doc, options) => {
     contactIcons = {},
     reportTitle,
     officeName,
+    showSystemTitle = true,
+    systemTitle,
   } = options;
 
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -166,6 +168,10 @@ export const drawInstitutionalHeader = (doc, options) => {
   const phone = safeText(branding?.report_phone, FALLBACKS.phone);
   const email = safeText(branding?.report_email, FALLBACKS.email);
   const reportType = safeText(reportTitle, 'REPORT');
+  const resolvedSystemTitle =
+    typeof systemTitle === 'string'
+      ? systemTitle.trim()
+      : safeText(branding?.system_title, FALLBACKS.systemName);
 
   const logoHeight = 15;
   const logoGap = 2.2;
@@ -258,10 +264,15 @@ export const drawInstitutionalHeader = (doc, options) => {
   }
 
   setHeaderFont(doc, 'bold');
-  doc.setFontSize(10.5);
-  doc.text(safeText(branding?.system_title, FALLBACKS.systemName), pageWidth / 2, headerTop + 28, { align: 'center' });
-  doc.setFontSize(9.5);
-  doc.text(reportType, pageWidth / 2, headerTop + 32.5, { align: 'center' });
+  if (showSystemTitle && resolvedSystemTitle) {
+    doc.setFontSize(10.5);
+    doc.text(resolvedSystemTitle, pageWidth / 2, headerTop + 28, { align: 'center' });
+    doc.setFontSize(9.5);
+    doc.text(reportType, pageWidth / 2, headerTop + 32.5, { align: 'center' });
+  } else {
+    doc.setFontSize(11.5);
+    doc.text(reportType, pageWidth / 2, headerTop + 31, { align: 'center' });
+  }
 
   const dividerY = headerTop + HEADER_HEIGHT + 2.5;
   doc.setDrawColor(150, 150, 150);

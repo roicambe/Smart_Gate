@@ -1,17 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, Plus, Search, Edit2, Trash2, Check, AlertTriangle, Eye, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar, Plus, Search, Edit2, Trash2, Check, AlertTriangle, Eye, Filter, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useToast } from '../toast/ToastProvider';
 import { AdminModal } from '../common/AdminModal';
 import { SortableHeader, useTableSort } from '../common/SortableHeader';
-
-const EVENT_ROLE_OPTIONS = [
-    { value: 'all', label: 'All Roles' },
-    { value: 'student', label: 'Student' },
-    { value: 'staff', label: 'Staff' },
-    { value: 'professor', label: 'Professor' },
-    { value: 'visitor', label: 'Visitor' },
-];
 
 const YEAR_LEVEL_OPTIONS = [
     { value: 1, label: '1st Year' },
@@ -20,7 +12,7 @@ const YEAR_LEVEL_OPTIONS = [
     { value: 4, label: '4th Year' },
 ];
 
-const parseRequiredRoles = (requiredRole) => {
+const parseRequiredRoles = (requiredRole, availableRoles = []) => {
     if (!requiredRole) return ['all'];
     const normalized = requiredRole
         .split(',')
@@ -30,9 +22,17 @@ const parseRequiredRoles = (requiredRole) => {
         return ['all'];
     }
     // If all individual roles are selected, treat as 'all'
-    const allIndividualRoles = EVENT_ROLE_OPTIONS.filter(o => o.value !== 'all').map(o => o.value);
-    if (allIndividualRoles.length > 0 && allIndividualRoles.every(r => normalized.includes(r))) {
-        return ['all'];
+    if (availableRoles.length > 0) {
+        const allIndividualRoles = availableRoles.map(r => r.role_name.toLowerCase());
+        if (allIndividualRoles.every(r => normalized.includes(r))) {
+            return ['all'];
+        }
+    } else {
+        // Fallback for before roles load
+        const fallbackRoles = ['student', 'employee', 'visitor', 'staff', 'professor'];
+        if (fallbackRoles.every(r => normalized.includes(r))) {
+            return ['all'];
+        }
     }
     return Array.from(new Set(normalized));
 };
@@ -44,18 +44,16 @@ const rolesToRequiredRoleValue = (roles) => {
     return roles.join(',');
 };
 
-const formatRequiredRoleLabel = (requiredRole) => {
-    const roles = parseRequiredRoles(requiredRole);
+const formatRequiredRoleLabel = (requiredRole, availableRoles = []) => {
+    const roles = parseRequiredRoles(requiredRole, availableRoles);
     if (roles.includes('all')) return 'All Roles';
     
-    // If all defined roles are selected, show "All Roles"
-    const validRoles = EVENT_ROLE_OPTIONS.filter(o => o.value !== 'all').map(o => o.value);
-    if (validRoles.length > 0 && validRoles.every(r => roles.includes(r))) {
-        return 'All Roles';
-    }
-
     return roles
-        .map((role) => EVENT_ROLE_OPTIONS.find((option) => option.value === role)?.label || role)
+        .map((role) => {
+            const found = availableRoles.find(r => r.role_name.toLowerCase() === role);
+            if (found) return found.role_name.charAt(0).toUpperCase() + found.role_name.slice(1);
+            return role.charAt(0).toUpperCase() + role.slice(1);
+        })
         .join(', ');
 };
 
@@ -134,6 +132,7 @@ export const EventManagement = ({ branding, adminSession }) => {
         required_role: 'all',
         required_programs: null,
         required_year_levels: null,
+        late_threshold: 15,
         is_enabled: true
     });
 
@@ -166,6 +165,7 @@ export const EventManagement = ({ branding, adminSession }) => {
             end_date,
             start_time,
             end_time,
+            late_threshold: event.late_threshold || 0,
             required_role: required_roles && required_roles.length > 0 ? required_roles.map(r => r.role_name).join(',') : 'all'
         };
     };
@@ -177,7 +177,8 @@ export const EventManagement = ({ branding, adminSession }) => {
             event_id: selectedEvent?.event_id || 0,
             event_name,
             description,
-            is_enabled
+            is_enabled,
+            late_threshold: parseInt(data.late_threshold) || 0
         };
 
         const weekly_schedules = [];
@@ -297,9 +298,10 @@ export const EventManagement = ({ branding, adminSession }) => {
             required_role: event.required_role || 'all',
             required_programs: event.required_programs || null,
             required_year_levels: event.required_year_levels || null,
+            late_threshold: event.late_threshold || 0,
             is_enabled: event.is_enabled
         });
-        setSelectedRoles(parseRequiredRoles(event.required_role));
+        setSelectedRoles(parseRequiredRoles(event.required_role, roles));
         setSelectedPrograms(event.required_programs ? event.required_programs.split(',') : ['all']);
         setSelectedYearLevels(event.required_year_levels ? event.required_year_levels.split(',').map(Number) : [1, 2, 3, 4]);
         setShowEditModal(true);
@@ -356,7 +358,7 @@ export const EventManagement = ({ branding, adminSession }) => {
     };
 
     const resetForm = () => {
-        setFormData({ event_name: '', description: '', schedule_type: 'weekly', event_date: '', start_date: '', end_date: '', start_time: '', end_time: '', required_role: 'all', required_programs: null, required_year_levels: null, is_enabled: true });
+        setFormData({ event_name: '', description: '', schedule_type: 'weekly', event_date: '', start_date: '', end_date: '', start_time: '', end_time: '', late_threshold: 15, required_role: 'all', required_programs: null, required_year_levels: null, is_enabled: true });
         setSelectedEvent(null);
         setSelectedRoles(['all']);
         setSelectedPrograms(['all']);
@@ -368,20 +370,51 @@ export const EventManagement = ({ branding, adminSession }) => {
         setShowRegisterModal(true);
     };
 
-    const toggleRole = (role) => {
-        if (role === 'all') {
+    const toggleRole = (roleVal) => {
+        if (roleVal === 'all') {
             setSelectedRoles(['all']);
             return;
         }
 
-        const current = selectedRoles.filter((item) => item !== 'all');
-        if (current.includes(role)) {
-            const next = current.filter((item) => item !== role);
-            setSelectedRoles(next.length > 0 ? next : ['all']);
+        let nextSelected = selectedRoles.filter((item) => item !== 'all');
+        const roleObj = roles.find(r => r.role_name.toLowerCase() === roleVal);
+        const mainRoles = roles.filter(r => r.is_main_role || ['student', 'employee', 'visitor'].includes(r.role_name.toLowerCase()));
+
+        if (nextSelected.includes(roleVal)) {
+            const next = nextSelected.filter((item) => item !== roleVal);
+            
+            // If main role deselected, deselect its sub roles
+            if (roleObj && mainRoles.some(mr => mr.role_id === roleObj.role_id)) {
+                const subRolesOfMain = roles.filter(r => 
+                    r.parent_role_id === roleObj.role_id || 
+                    (roleObj.role_name.toLowerCase() === 'employee' && ['professor', 'staff'].includes(r.role_name.toLowerCase()))
+                );
+                const subNames = subRolesOfMain.map(r => r.role_name.toLowerCase());
+                const finalNext = next.filter(item => !subNames.includes(item));
+                setSelectedRoles(finalNext.length > 0 ? finalNext : ['all']);
+            } else {
+                setSelectedRoles(next.length > 0 ? next : ['all']);
+            }
             return;
         }
 
-        setSelectedRoles([...current, role]);
+        const next = [...nextSelected, roleVal];
+        
+        // If main role selected, select its sub roles
+        if (roleObj && mainRoles.some(mr => mr.role_id === roleObj.role_id)) {
+            const subRolesOfMain = roles.filter(r => 
+                r.parent_role_id === roleObj.role_id || 
+                (roleObj.role_name.toLowerCase() === 'employee' && ['professor', 'staff'].includes(r.role_name.toLowerCase()))
+            );
+            subRolesOfMain.forEach(sr => {
+                const srVal = sr.role_name.toLowerCase();
+                if (!next.includes(srVal)) {
+                    next.push(srVal);
+                }
+            });
+        }
+        
+        setSelectedRoles(next);
     };
 
     const filteredEvents = events.filter(event => {
@@ -534,7 +567,7 @@ export const EventManagement = ({ branding, adminSession }) => {
                                             {event.description || 'No description'}
                                         </td>
                                         <td className="px-6 py-4 text-slate-500">{getEventDateTimeLabel(event)}</td>
-                                        <td className="px-6 py-4 text-slate-500">{formatRequiredRoleLabel(event.required_role)}</td>
+                                        <td className="px-6 py-4 text-slate-500">{formatRequiredRoleLabel(event.required_role, roles)}</td>
                                         <td className="px-6 py-4">
                                             <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${event.is_enabled ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-rose-100 text-rose-700 border border-rose-200'}`}>
                                                 {event.is_enabled ? 'Enabled' : 'Disabled'}
@@ -686,6 +719,53 @@ export const EventManagement = ({ branding, adminSession }) => {
                                             </div>
                                         </div>
 
+                                        <div className="space-y-3">
+                                            <div className="flex items-center justify-between">
+                                                <label className="block text-xs text-white/60 font-medium uppercase tracking-wider">Punctuality Policy</label>
+                                                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                                                    formData.late_threshold <= 15 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                                    formData.late_threshold <= 30 ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                                                    'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                                                }`}>
+                                                    {formData.late_threshold === 0 ? 'Strict: 0m' : `Grace: ${formData.late_threshold}m`}
+                                                </span>
+                                            </div>
+
+                                            <div className="grid grid-cols-4 gap-2">
+                                                {[0, 5, 10, 15, 30, 60].map((mins) => (
+                                                    <button
+                                                        key={mins}
+                                                        type="button"
+                                                        onClick={() => setFormData({ ...formData, late_threshold: mins })}
+                                                        className={`py-2.5 rounded-xl border transition-all text-xs font-bold flex flex-col items-center justify-center gap-1 ${
+                                                            formData.late_threshold === mins 
+                                                                ? 'bg-white text-black border-white shadow-[0_0_15px_rgba(255,255,255,0.2)] scale-[1.02]' 
+                                                                : 'bg-white/5 border-white/10 text-white/60 hover:bg-white/10 hover:border-white/20'
+                                                        }`}
+                                                    >
+                                                        <span>{mins}m</span>
+                                                    </button>
+                                                ))}
+                                                <div className="col-span-2 relative">
+                                                    <input 
+                                                        type="number"
+                                                        min="0"
+                                                        placeholder="Custom..."
+                                                        value={![0, 5, 10, 15, 30, 60].includes(formData.late_threshold) ? formData.late_threshold : ''}
+                                                        onChange={(e) => setFormData({ ...formData, late_threshold: parseInt(e.target.value) || 0 })}
+                                                        className={`w-full h-full bg-white/5 border rounded-xl px-3 py-2.5 text-xs font-bold text-center transition-all focus:outline-none ${
+                                                            ![0, 5, 10, 15, 30, 60].includes(formData.late_threshold) && formData.late_threshold !== 0
+                                                                ? 'border-emerald-500 bg-emerald-500/10 text-white'
+                                                                : 'border-white/10 text-white/40 focus:border-white/30'
+                                                        }`}
+                                                    />
+                                                </div>
+                                            </div>
+                                            <p className="text-[10px] text-white/40 italic leading-tight">
+                                                Defines the grace period in minutes after the start time before attendance is marked as <span className="text-rose-400 font-bold">Late</span>.
+                                            </p>
+                                        </div>
+
                                         <div className="flex items-center gap-3 p-3 bg-white/5 border border-white/10 rounded-xl">
                                             <input type="checkbox" id="isEnabled" checked={formData.is_enabled} onChange={e => setFormData({ ...formData, is_enabled: e.target.checked })} className="w-5 h-5 text-emerald-500 bg-black/50 border-white/20 rounded focus:ring-emerald-500/50" />
                                             <label htmlFor="isEnabled" className="text-sm font-medium text-white">Event Is Enabled</label>
@@ -701,20 +781,75 @@ export const EventManagement = ({ branding, adminSession }) => {
 
                                         <div>
                                             <label className="block text-xs text-white/60 mb-2 font-medium">Required Role <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
-                                            <div className="grid grid-cols-2 gap-2 p-3 bg-black/40 border border-white/10 rounded-xl">
-                                                {EVENT_ROLE_OPTIONS.map((option) => {
-                                                    const active = selectedRoles.includes(option.value);
+                                            
+                                            <div className="space-y-4 p-3 bg-black/40 border border-white/10 rounded-xl">
+                                                <div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => toggleRole('all')}
+                                                        className={`w-full px-3 py-2 rounded-lg text-sm font-semibold border transition-all ${selectedRoles.includes('all') ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                    >
+                                                        All Roles
+                                                    </button>
+                                                </div>
+
+                                                {(() => {
+                                                    const mainRoles = roles.filter(r => r.is_main_role || ['student', 'employee', 'visitor'].includes(r.role_name.toLowerCase()));
+                                                    const allSubRoles = roles.filter(r => !mainRoles.some(mr => mr.role_id === r.role_id));
+
+                                                    const visibleSubRoles = allSubRoles.filter(sr => {
+                                                        const parent = mainRoles.find(mr => mr.role_id === sr.parent_role_id || (mr.role_name.toLowerCase() === 'employee' && ['professor', 'staff'].includes(sr.role_name.toLowerCase())));
+                                                        if (!parent) return false;
+                                                        return selectedRoles.includes('all') || selectedRoles.includes(parent.role_name.toLowerCase());
+                                                    });
+
                                                     return (
-                                                        <button
-                                                            key={option.value}
-                                                            type="button"
-                                                            onClick={() => toggleRole(option.value)}
-                                                            className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
-                                                        >
-                                                            {option.label}
-                                                        </button>
-                                                    );
-                                                })}
+                                                        <>
+                                                            {mainRoles.length > 0 && (
+                                                                <div>
+                                                                    <div className="text-[10px] uppercase tracking-wider text-white/40 mb-2 font-bold">Main Roles</div>
+                                                                    <div className="grid grid-cols-2 gap-2">
+                                                                        {mainRoles.map(role => {
+                                                                            const val = role.role_name.toLowerCase();
+                                                                            const active = selectedRoles.includes(val);
+                                                                            return (
+                                                                                <button
+                                                                                    key={role.role_id}
+                                                                                    type="button"
+                                                                                    onClick={() => toggleRole(val)}
+                                                                                    className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                                                >
+                                                                                    {role.role_name.charAt(0).toUpperCase() + role.role_name.slice(1)}
+                                                                                </button>
+                                                                            )
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                            {visibleSubRoles.length > 0 && (
+                                                                <div>
+                                                                    <div className="text-[10px] uppercase tracking-wider text-white/40 mb-2 font-bold mt-4">Sub Roles</div>
+                                                                    <div className="grid grid-cols-2 gap-2">
+                                                                        {visibleSubRoles.map(role => {
+                                                                            const val = role.role_name.toLowerCase();
+                                                                            const active = selectedRoles.includes(val);
+                                                                            return (
+                                                                                <button
+                                                                                    key={role.role_id}
+                                                                                    type="button"
+                                                                                    onClick={() => toggleRole(val)}
+                                                                                    className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                                                >
+                                                                                    {role.role_name.charAt(0).toUpperCase() + role.role_name.slice(1)}
+                                                                                </button>
+                                                                            )
+                                                                        })}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    )
+                                                })()}
                                             </div>
                                             <p className="mt-2 text-[10px] text-white/40 leading-relaxed italic">
                                                 * Select 'All Roles' to bypass strict role checking.
@@ -827,6 +962,13 @@ export const EventManagement = ({ branding, adminSession }) => {
                                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold ${selectedEvent.is_enabled ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30' : 'bg-rose-500/20 text-rose-300 border border-rose-400/30'}`}>
                                             {selectedEvent.is_enabled ? 'Active' : 'Disabled'}
                                         </span>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs uppercase tracking-wider text-white/40 mb-1 font-semibold">Late Threshold</p>
+                                        <p className="text-white font-medium flex items-center gap-2">
+                                            <Clock className="w-4 h-4 text-emerald-400" />
+                                            {selectedEvent.late_threshold || 0} Minutes
+                                        </p>
                                     </div>
 
                                     {(selectedEvent.required_role.includes('all') || selectedEvent.required_role.includes('student')) && (

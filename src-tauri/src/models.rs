@@ -74,6 +74,7 @@ pub struct Event {
     pub event_name: String,
     pub description: Option<String>,
     pub is_enabled: bool,
+    pub late_threshold: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -231,6 +232,7 @@ pub struct ScanResult {
     pub person_name: Option<String>,
     pub roles: Option<Vec<String>>,
     pub role: Option<String>,
+    pub status: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
