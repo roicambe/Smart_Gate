@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS events (
     event_name VARCHAR UNIQUE NOT NULL,
     description TEXT NULL,
     is_enabled BOOLEAN NOT NULL DEFAULT 1,
+    late_threshold INTEGER NOT NULL DEFAULT 0,
     is_archived BOOLEAN NOT NULL DEFAULT 0,
     archived_at DATETIME NULL
 );

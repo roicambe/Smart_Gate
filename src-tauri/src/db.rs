@@ -1,7 +1,7 @@
 use crate::models::*;
 use calamine::{open_workbook_auto, Data, Reader};
 use serde_json::json;
-use chrono::{Duration, Local, NaiveDateTime};
+use chrono::{Duration, Local, NaiveDateTime, NaiveTime};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, OptionalExtension};
@@ -214,6 +214,24 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
     if !table_has_column(&conn, "roles", "parent_role_id").unwrap_or(true) {
         log::info!("Adding parent_role_id column to roles table...");
         conn.execute("ALTER TABLE roles ADD COLUMN parent_role_id INTEGER NULL REFERENCES roles(role_id);", []).map_err(|e| e.to_string())?;
+    }
+
+    // Add late_threshold column to events if missing
+    if !table_has_column(&conn, "events", "late_threshold").unwrap_or(true) {
+        log::info!("Adding late_threshold column to events table...");
+        conn.execute("ALTER TABLE events ADD COLUMN late_threshold INTEGER NOT NULL DEFAULT 0;", []).map_err(|e| e.to_string())?;
+    }
+
+    // Add is_archived column to events if missing
+    if !table_has_column(&conn, "events", "is_archived").unwrap_or(true) {
+        log::info!("Adding is_archived column to events table...");
+        conn.execute("ALTER TABLE events ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT 0;", []).map_err(|e| e.to_string())?;
+    }
+
+    // Add archived_at column to events if missing
+    if !table_has_column(&conn, "events", "archived_at").unwrap_or(true) {
+        log::info!("Adding archived_at column to events table...");
+        conn.execute("ALTER TABLE events ADD COLUMN archived_at DATETIME NULL;", []).map_err(|e| e.to_string())?;
     }
 
     // Ensure main roles exist and are correctly flagged
@@ -2576,13 +2594,14 @@ pub fn get_event_attendance_logs(
 
 fn get_event_details_helper(conn: &rusqlite::Connection, event_id: i64) -> Result<EventDetails, String> {
     let event = conn.query_row(
-        "SELECT event_id, event_name, description, is_enabled FROM events WHERE event_id = ?1",
+        "SELECT event_id, event_name, description, is_enabled, late_threshold FROM events WHERE event_id = ?1",
         params![event_id],
         |row| Ok(Event {
             event_id: row.get(0)?,
             event_name: row.get(1)?,
             description: row.get(2)?,
             is_enabled: row.get::<_, i32>(3)? == 1,
+            late_threshold: row.get(4)?,
         })
     ).map_err(|e| e.to_string())?;
 
@@ -2637,11 +2656,12 @@ pub fn add_event(
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     tx.execute(
-        "INSERT INTO events (event_name, description, is_enabled) VALUES (?1, ?2, ?3)",
+        "INSERT INTO events (event_name, description, is_enabled, late_threshold) VALUES (?1, ?2, ?3, ?4)",
         params![
             event_details.event.event_name,
             event_details.event.description,
-            event_details.event.is_enabled
+            event_details.event.is_enabled,
+            event_details.event.late_threshold
         ],
     ).map_err(|e| e.to_string())?;
 
@@ -2685,6 +2705,7 @@ pub fn add_event(
         "event_name": event_details.event.event_name,
         "description": event_details.event.description,
         "is_enabled": event_details.event.is_enabled,
+        "late_threshold": event_details.event.late_threshold,
     });
 
     if !event_details.weekly_schedules.is_empty() {
@@ -2715,7 +2736,7 @@ pub fn add_event(
 pub fn get_events(pool: &DbPool) -> Result<Vec<EventDetails>, String> {
     let conn = pool.get().map_err(|e| e.to_string())?;
 
-    let mut stmt = conn.prepare("SELECT event_id, event_name, description, is_enabled FROM events WHERE is_archived = 0")
+    let mut stmt = conn.prepare("SELECT event_id, event_name, description, is_enabled, late_threshold FROM events WHERE is_archived = 0")
         .map_err(|e| e.to_string())?;
 
     let event_rows = stmt
@@ -2725,6 +2746,7 @@ pub fn get_events(pool: &DbPool) -> Result<Vec<EventDetails>, String> {
                 event_name: row.get(1)?,
                 description: row.get(2)?,
                 is_enabled: row.get::<_, i32>(3)? == 1,
+                late_threshold: row.get(4)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -2799,11 +2821,12 @@ pub fn update_event(
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     tx.execute(
-        "UPDATE events SET event_name = ?1, description = ?2, is_enabled = ?3 WHERE event_id = ?4",
+        "UPDATE events SET event_name = ?1, description = ?2, is_enabled = ?3, late_threshold = ?4 WHERE event_id = ?5",
         params![
             event_details.event.event_name,
             event_details.event.description,
             event_details.event.is_enabled,
+            event_details.event.late_threshold,
             event_id
         ],
     ).map_err(|e| e.to_string())?;
@@ -2853,6 +2876,7 @@ pub fn update_event(
         "event_name": event_details.event.event_name,
         "description": event_details.event.description,
         "is_enabled": event_details.event.is_enabled,
+        "late_threshold": event_details.event.late_threshold,
     });
 
     if let Some(old) = old_event_details {
@@ -2974,6 +2998,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
                 person_name: Some(format!("{} {}", first_name, last_name)),
                 role: roles.first().map(|r| r.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &r[1..])),
                 roles: Some(roles),
+                status: None,
             });
         }
 
@@ -2984,6 +3009,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
                 person_name: Some(format!("{} {}", first_name, last_name)),
                 role: roles.first().map(|r| r.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &r[1..])),
                 roles: Some(roles),
+                status: None,
             });
         }
 
@@ -3019,6 +3045,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
                     person_name: Some(format!("{} {}", first_name, last_name)),
                     role: roles.first().map(|r| r.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &r[1..])),
                     roles: Some(roles),
+                    status: None,
                 });
             }
         } else if scanner.function == "entrance" {
@@ -3031,6 +3058,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
                     person_name: Some(format!("{} {}", first_name, last_name)),
                     role: roles.first().map(|r| r.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &r[1..])),
                     roles: Some(roles),
+                    status: None,
                 });
             }
 
@@ -3041,6 +3069,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
                     person_name: Some(format!("{} {}", first_name, last_name)),
                     role: roles.first().map(|r| r.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &r[1..])),
                     roles: Some(roles),
+                    status: None,
                 });
             }
         }
@@ -3063,6 +3092,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
             person_name: Some(format!("{} {}", first_name, last_name)),
             role: roles.first().map(|r| r.chars().next().map_or(String::new(), |f| f.to_uppercase().collect::<String>() + &r[1..])),
             roles: Some(roles),
+            status: None,
         })
     } else {
         Ok(ScanResult {
@@ -3071,6 +3101,7 @@ pub fn log_entry(pool: &DbPool, scanner_id: i64, person_id: i64) -> Result<ScanR
             person_name: None,
             role: None,
             roles: None,
+            status: None,
         })
     }
 }
@@ -3118,6 +3149,7 @@ pub fn manual_id_entry(
                 person_name: Some(format!("{} {}", first_name, last_name)),
                 role: role_label,
                 roles: Some(roles),
+                status: None,
             });
         }
 
@@ -3128,6 +3160,7 @@ pub fn manual_id_entry(
                 person_name: Some(format!("{} {}", first_name, last_name)),
                 role: role_label,
                 roles: Some(roles),
+                status: None,
             });
         }
 
@@ -3163,6 +3196,7 @@ pub fn manual_id_entry(
                     person_name: Some(format!("{} {}", first_name, last_name)),
                     role: role_label,
                     roles: Some(roles),
+                    status: None,
                 });
             }
         } else if scanner.function == "entrance" {
@@ -3175,6 +3209,7 @@ pub fn manual_id_entry(
                     person_name: Some(format!("{} {}", first_name, last_name)),
                     role: role_label,
                     roles: Some(roles),
+                    status: None,
                 });
             }
 
@@ -3185,6 +3220,7 @@ pub fn manual_id_entry(
                     person_name: Some(format!("{} {}", first_name, last_name)),
                     role: role_label,
                     roles: Some(roles),
+                    status: None,
                 });
             }
         }
@@ -3206,6 +3242,7 @@ pub fn manual_id_entry(
             person_name: Some(format!("{} {}", first_name, last_name)),
             role: role_label,
             roles: Some(roles),
+            status: None,
         })
     } else {
         Ok(ScanResult {
@@ -3214,6 +3251,7 @@ pub fn manual_id_entry(
             person_name: None,
             role: None,
             roles: None,
+            status: None,
         })
     }
 }
@@ -4270,6 +4308,7 @@ pub fn log_event_attendance(
             person_name: None,
             role: None,
             roles: None,
+            status: None,
         });
     }
 
@@ -4280,12 +4319,14 @@ pub fn log_event_attendance(
     let current_time = now.format("%H:%M:%S").to_string();
 
     let mut is_scheduled_today = false;
+    let mut matching_start_time = None;
 
     // Check Weekly
     for sw in &event_details.weekly_schedules {
         if sw.day_of_week.to_lowercase() == current_day.to_lowercase() {
             if current_time >= sw.start_time && current_time <= sw.end_time {
                 is_scheduled_today = true;
+                matching_start_time = Some(sw.start_time.clone());
                 break;
             }
         }
@@ -4297,6 +4338,7 @@ pub fn log_event_attendance(
             if current_date >= sd.start_date && current_date <= sd.end_date {
                 if current_time >= sd.start_time && current_time <= sd.end_time {
                     is_scheduled_today = true;
+                    matching_start_time = Some(sd.start_time.clone());
                     break;
                 }
             }
@@ -4310,6 +4352,7 @@ pub fn log_event_attendance(
             person_name: None,
             role: None,
             roles: None,
+            status: None,
         });
     }
 
@@ -4338,6 +4381,7 @@ pub fn log_event_attendance(
                 person_name: Some(format!("{} {}", first_name, last_name)),
                 role: role_label.clone(),
                 roles: Some(roles),
+                status: None,
             });
         }
 
@@ -4348,6 +4392,7 @@ pub fn log_event_attendance(
                 person_name: Some(format!("{} {}", first_name, last_name)),
                 role: role_label.clone(),
                 roles: Some(roles),
+                status: None,
             });
         }
 
@@ -4360,6 +4405,7 @@ pub fn log_event_attendance(
                 person_name: Some(format!("{} {}", first_name, last_name)),
                 role: role_label.clone(),
                 roles: Some(roles),
+                status: None,
             });
         }
 
@@ -4375,6 +4421,7 @@ pub fn log_event_attendance(
                 person_name: Some(format!("{} {}", first_name, last_name)),
                 role: role_label.clone(),
                 roles: Some(roles),
+                status: None,
             });
         }
 
@@ -4392,6 +4439,7 @@ pub fn log_event_attendance(
                 person_name: Some(format!("{} {}", first_name, last_name)),
                 role: role_label.clone(),
                 roles: Some(roles),
+                status: None,
             });
         }
 
@@ -4419,7 +4467,17 @@ pub fn log_event_attendance(
         }
 
         // 5. Log Event Attendance
-        let status = "Present";
+        let mut status = "On Time";
+        if let Some(start_time_str) = matching_start_time {
+            if let Ok(start_time) = NaiveTime::parse_from_str(&start_time_str, "%H:%M:%S") {
+                let late_limit = start_time + Duration::minutes(event_details.event.late_threshold);
+                if let Ok(current_time_parsed) = NaiveTime::parse_from_str(&current_time, "%H:%M:%S") {
+                    if current_time_parsed > late_limit {
+                        status = "Late";
+                    }
+                }
+            }
+        }
 
         conn.execute(
             "INSERT INTO activity_logs (person_id, scanner_id, activity_type, event_id, status, scanned_at) 
@@ -4430,10 +4488,11 @@ pub fn log_event_attendance(
 
         Ok(ScanResult {
             success: true,
-            message: format!("Attendance logged for {}.", event_details.event.event_name),
+            message: format!("Attendance logged for {} ({}).", event_details.event.event_name, status),
             person_name: Some(format!("{} {}", first_name, last_name)),
             role: role_label,
             roles: Some(roles),
+            status: Some(status.to_string()),
         })
     } else {
         Ok(ScanResult {
@@ -4442,6 +4501,7 @@ pub fn log_event_attendance(
             person_name: None,
             role: None,
             roles: None,
+            status: None,
         })
     }
 }
