@@ -57,7 +57,7 @@ const getFullNameLabel = (person) => {
     return `${person.first_name}${middle} ${person.last_name}${suffix}`;
 };
 
-const formatIdNumber = (val) => {
+const formatIdNumber = (val, isDeleting = false) => {
     if (!val) return "";
     
     // 1. Character Filtering: Only allow 0-9, hyphen, and V, I, S (case-insensitive)
@@ -72,7 +72,12 @@ const formatIdNumber = (val) => {
         const afterVis = upper.slice(visIndex + 3);
         // Only keep digits for the visitor numeric part
         const digits = afterVis.replace(/[^0-9]/g, "").slice(0, 5);
-        return `VIS-${digits}`;
+        
+        // Add hyphen if there are digits OR if we are NOT currently backspacing/deleting
+        if (digits.length > 0 || (!isDeleting && upper === "VIS") || upper.includes("VIS-")) {
+            return `VIS-${digits}`;
+        }
+        return "VIS";
     }
     
     // 3. Numeric Logic (Student/Employee)
@@ -132,6 +137,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
     const [activeScanCard, setActiveScanCard] = useState(null);
     const [isManualLocked, setIsManualLocked] = useState(false);
     const [isScannerLocked, setIsScannerLocked] = useState(false);
+    const isDeletingManualRef = useRef(false);
     const audioContextRef = useRef(null);
     const isBackgroundScanRunningRef = useRef(false);
     const scanCardTimerRef = useRef(null);
@@ -676,7 +682,10 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                                     type="text"
                                     placeholder="e.g. 23-00123"
                                     value={manualId}
-                                    onChange={(e) => setManualId(formatIdNumber(e.target.value))}
+                                    onKeyDown={(e) => {
+                                        isDeletingManualRef.current = (e.key === 'Backspace' || e.key === 'Delete');
+                                    }}
+                                    onChange={(e) => setManualId(formatIdNumber(e.target.value, isDeletingManualRef.current))}
                                     className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-white/50 mb-3 text-center tracking-widest uppercase transition-all"
                                     autoFocus
                                     required

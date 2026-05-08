@@ -34,7 +34,11 @@ CREATE TABLE IF NOT EXISTS persons (
 
 CREATE TABLE IF NOT EXISTS roles (
     role_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    role_name TEXT UNIQUE NOT NULL
+    role_name TEXT UNIQUE NOT NULL,
+    description TEXT NULL,
+    is_main_role BOOLEAN NOT NULL DEFAULT 0,
+    parent_role_id INTEGER NULL,
+    FOREIGN KEY (parent_role_id) REFERENCES roles(role_id)
 );
 
 CREATE TABLE IF NOT EXISTS person_roles (
@@ -189,8 +193,16 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 -- Seed Data
-INSERT OR IGNORE INTO roles (role_name) VALUES 
-    ('student'), ('professor'), ('staff'), ('visitor');
+-- Main Roles
+INSERT OR IGNORE INTO roles (role_id, role_name, description) VALUES 
+    (1, 'student', 'Enrolled students of the university.'),
+    (2, 'employee', 'All academic and non-academic personnel.'),
+    (3, 'visitor', 'External guests and temporary visitors.');
+
+-- Sub Roles (under Employee)
+INSERT OR IGNORE INTO roles (role_name, description) VALUES 
+    ('professor', 'Academic faculty members and instructors.'),
+    ('staff', 'Administrative and support personnel.');
 
 INSERT OR IGNORE INTO departments (department_id, department_code, department_name) VALUES
     (1, 'COE', 'College of Education'),
