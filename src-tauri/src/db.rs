@@ -40,6 +40,14 @@ fn table_has_column(
     Ok(false)
 }
 
+fn table_exists(conn: &rusqlite::Connection, table: &str) -> Result<bool, String> {
+    let mut stmt = conn
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?1")
+        .map_err(|e| e.to_string())?;
+    let mut rows = stmt.query([table]).map_err(|e| e.to_string())?;
+    Ok(rows.next().map_err(|e| e.to_string())?.is_some())
+}
+
 fn is_valid_email(email: &str) -> bool {
     let trimmed = email.trim();
     let Some((local, domain)) = trimmed.split_once('@') else {
@@ -188,51 +196,50 @@ pub fn init_db(app_handle: &tauri::AppHandle) -> Result<DbPool, String> {
     // Enable foreign keys
     conn.execute("PRAGMA foreign_keys = ON;", []).map_err(|e| e.to_string())?;
 
+    // --- MIGRATIONS FOR EXISTING TABLES ---
+    // These must run BEFORE execute_batch(schema) because schema.sql contains 
+    // INSERT statements that reference these columns.
+    
+    if table_exists(&conn, "persons")? {
+        if !table_has_column(&conn, "persons", "suffix")? {
+            log::info!("Adding suffix column to persons table...");
+            conn.execute("ALTER TABLE persons ADD COLUMN suffix VARCHAR NULL;", []).map_err(|e| e.to_string())?;
+        }
+    }
+
+    if table_exists(&conn, "roles")? {
+        if !table_has_column(&conn, "roles", "description")? {
+            log::info!("Adding description column to roles table...");
+            conn.execute("ALTER TABLE roles ADD COLUMN description TEXT NULL;", []).map_err(|e| e.to_string())?;
+        }
+        if !table_has_column(&conn, "roles", "is_main_role")? {
+            log::info!("Adding is_main_role column to roles table...");
+            conn.execute("ALTER TABLE roles ADD COLUMN is_main_role BOOLEAN NOT NULL DEFAULT 0;", []).map_err(|e| e.to_string())?;
+        }
+        if !table_has_column(&conn, "roles", "parent_role_id")? {
+            log::info!("Adding parent_role_id column to roles table...");
+            conn.execute("ALTER TABLE roles ADD COLUMN parent_role_id INTEGER NULL REFERENCES roles(role_id);", []).map_err(|e| e.to_string())?;
+        }
+    }
+
+    if table_exists(&conn, "events")? {
+        if !table_has_column(&conn, "events", "late_threshold")? {
+            log::info!("Adding late_threshold column to events table...");
+            conn.execute("ALTER TABLE events ADD COLUMN late_threshold INTEGER NOT NULL DEFAULT 0;", []).map_err(|e| e.to_string())?;
+        }
+        if !table_has_column(&conn, "events", "is_archived")? {
+            log::info!("Adding is_archived column to events table...");
+            conn.execute("ALTER TABLE events ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT 0;", []).map_err(|e| e.to_string())?;
+        }
+        if !table_has_column(&conn, "events", "archived_at")? {
+            log::info!("Adding archived_at column to events table...");
+            conn.execute("ALTER TABLE events ADD COLUMN archived_at DATETIME NULL;", []).map_err(|e| e.to_string())?;
+        }
+    }
+
     // Execute schema.sql (contains IF NOT EXISTS for everything)
     let schema = include_str!("../../docs/database/schema.sql");
     conn.execute_batch(schema).map_err(|e| format!("Failed to execute schema: {}", e))?;
-
-    // Add suffix column if missing
-    if !table_has_column(&conn, "persons", "suffix").unwrap_or(true) {
-        log::info!("Adding suffix column to persons table...");
-        conn.execute("ALTER TABLE persons ADD COLUMN suffix VARCHAR NULL;", []).map_err(|e| e.to_string())?;
-    }
-
-    // Add description column to roles if missing
-    if !table_has_column(&conn, "roles", "description").unwrap_or(true) {
-        log::info!("Adding description column to roles table...");
-        conn.execute("ALTER TABLE roles ADD COLUMN description TEXT NULL;", []).map_err(|e| e.to_string())?;
-    }
-
-    // Add is_main_role column to roles if missing
-    if !table_has_column(&conn, "roles", "is_main_role").unwrap_or(true) {
-        log::info!("Adding is_main_role column to roles table...");
-        conn.execute("ALTER TABLE roles ADD COLUMN is_main_role BOOLEAN NOT NULL DEFAULT 0;", []).map_err(|e| e.to_string())?;
-    }
-
-    // Add parent_role_id column to roles if missing
-    if !table_has_column(&conn, "roles", "parent_role_id").unwrap_or(true) {
-        log::info!("Adding parent_role_id column to roles table...");
-        conn.execute("ALTER TABLE roles ADD COLUMN parent_role_id INTEGER NULL REFERENCES roles(role_id);", []).map_err(|e| e.to_string())?;
-    }
-
-    // Add late_threshold column to events if missing
-    if !table_has_column(&conn, "events", "late_threshold").unwrap_or(true) {
-        log::info!("Adding late_threshold column to events table...");
-        conn.execute("ALTER TABLE events ADD COLUMN late_threshold INTEGER NOT NULL DEFAULT 0;", []).map_err(|e| e.to_string())?;
-    }
-
-    // Add is_archived column to events if missing
-    if !table_has_column(&conn, "events", "is_archived").unwrap_or(true) {
-        log::info!("Adding is_archived column to events table...");
-        conn.execute("ALTER TABLE events ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT 0;", []).map_err(|e| e.to_string())?;
-    }
-
-    // Add archived_at column to events if missing
-    if !table_has_column(&conn, "events", "archived_at").unwrap_or(true) {
-        log::info!("Adding archived_at column to events table...");
-        conn.execute("ALTER TABLE events ADD COLUMN archived_at DATETIME NULL;", []).map_err(|e| e.to_string())?;
-    }
 
     // Ensure main roles exist and are correctly flagged
     conn.execute_batch("

@@ -814,20 +814,20 @@ export const AccessLogs = ({ branding, adminSession }) => {
                         {activeTab === 'eventLogs' ? (
                             <>
                                 <button
-                                    onClick={handleQuickExportPDF}
-                                    disabled={isExporting}
-                                    className={`flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors focus:outline-none shadow-sm ${isExporting ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                >
-                                    {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-                                    <span className="font-semibold text-sm">{isExporting ? 'Wait' : 'Quick Export'}</span>
-                                </button>
-                                <button
                                     onClick={() => setShowManualExportModal(true)}
                                     disabled={isExporting}
                                     className={`flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors focus:outline-none shadow-sm ${isExporting ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 >
                                     <Download className="w-4 h-4" />
                                     <span className="font-semibold text-sm">Manual Export</span>
+                                </button>
+                                <button
+                                    onClick={handleQuickExportPDF}
+                                    disabled={isExporting}
+                                    className={`flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors focus:outline-none shadow-sm ${isExporting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                >
+                                    {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+                                    <span className="font-semibold text-sm">{isExporting ? 'Wait' : 'Quick Export'}</span>
                                 </button>
                             </>
                         ) : (
