@@ -48,9 +48,10 @@ pub fn add_role(
     description: Option<String>,
     is_main_role: bool,
     parent_role_id: Option<i64>,
+    role_behavior: Option<String>,
     active_admin_id: i64,
 ) -> Result<i64, String> {
-    db::add_role(&pool, &role_name, description, is_main_role, parent_role_id, active_admin_id)
+    db::add_role(&pool, &role_name, description, is_main_role, parent_role_id, role_behavior, active_admin_id)
 }
 
 #[tauri::command]
@@ -61,9 +62,10 @@ pub fn update_role(
     description: Option<String>,
     is_main_role: bool,
     parent_role_id: Option<i64>,
+    role_behavior: Option<String>,
     active_admin_id: i64,
 ) -> Result<(), String> {
-    db::update_role(&pool, role_id, &role_name, description, is_main_role, parent_role_id, active_admin_id)
+    db::update_role(&pool, role_id, &role_name, description, is_main_role, parent_role_id, role_behavior, active_admin_id)
 }
 
 #[tauri::command]
@@ -521,6 +523,7 @@ pub fn register_user(
     purpose: Option<String>,
     person_to_visit: Option<String>,
     is_active: bool,
+    is_part_time: Option<bool>,
     active_admin_id: Option<i64>,
 ) -> Result<i64, String> {
     db::register_user(
@@ -541,6 +544,7 @@ pub fn register_user(
         purpose,
         person_to_visit,
         is_active,
+        is_part_time,
         active_admin_id,
     )
 }
@@ -590,6 +594,7 @@ pub fn update_user(
     purpose: Option<String>,
     person_to_visit: Option<String>,
     is_active: bool,
+    is_part_time: Option<bool>,
     active_admin_id: i64,
 ) -> Result<(), String> {
     db::update_user(
@@ -611,6 +616,7 @@ pub fn update_user(
         purpose,
         person_to_visit,
         is_active,
+        is_part_time,
         active_admin_id,
     )
 }

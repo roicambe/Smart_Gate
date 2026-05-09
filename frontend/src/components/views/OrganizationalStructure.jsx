@@ -34,6 +34,7 @@ export const OrganizationalStructure = ({ branding, adminSession }) => {
         department_id: '', // For Program
         role_name: '',
         role_description: '',
+        role_behavior: 'student',
         is_main_role: true,
         parent_role_id: ''
     });
@@ -110,6 +111,7 @@ export const OrganizationalStructure = ({ branding, adminSession }) => {
                     description: formData.role_description || null,
                     isMainRole: activeSubTab === 'main_role',
                     parentRoleId: activeSubTab === 'sub_role' ? parseInt(formData.parent_role_id) : null,
+                    roleBehavior: activeSubTab === 'main_role' ? formData.role_behavior : null,
                     activeAdminId: adminSession?.account_id
                 });
                 showSuccess('Role added successfully!');
@@ -145,6 +147,7 @@ export const OrganizationalStructure = ({ branding, adminSession }) => {
                 ...formData,
                 role_name: item.role_name,
                 role_description: item.description || '',
+                role_behavior: item.role_behavior || 'student',
                 is_main_role: item.is_main_role,
                 parent_role_id: item.parent_role_id || ''
             });
@@ -181,6 +184,7 @@ export const OrganizationalStructure = ({ branding, adminSession }) => {
                     description: formData.role_description || null,
                     isMainRole: formData.is_main_role,
                     parentRoleId: formData.parent_role_id ? parseInt(formData.parent_role_id) : null,
+                    roleBehavior: formData.is_main_role ? formData.role_behavior : null,
                     activeAdminId: adminSession?.account_id
                 });
                 showSuccess('Role updated successfully!');
@@ -228,6 +232,7 @@ export const OrganizationalStructure = ({ branding, adminSession }) => {
             department_id: departments.length > 0 ? departments[0].department_id : '',
             role_name: '',
             role_description: '',
+            role_behavior: 'student',
             is_main_role: activeSubTab === 'main_role',
             parent_role_id: allRoles.filter(r => r.is_main_role).length > 0 ? allRoles.filter(r => r.is_main_role)[0].role_id : ''
         });
@@ -415,7 +420,8 @@ export const OrganizationalStructure = ({ branding, adminSession }) => {
                                 ) : (
                                     <tr>
                                         <SortableHeader label="Role Name" sortKey="role_name" sortConfig={sortConfig} onSort={requestSort} width="200px" />
-                                        <SortableHeader label="Description" sortKey="description" sortConfig={sortConfig} onSort={requestSort} width={activeSubTab === 'sub_role' ? "300px" : "500px"} />
+                                        <SortableHeader label="Description" sortKey="description" sortConfig={sortConfig} onSort={requestSort} width={activeSubTab === 'sub_role' ? "250px" : "350px"} />
+                                        {activeSubTab === 'main_role' && <SortableHeader label="Behavior" sortKey="role_behavior" sortConfig={sortConfig} onSort={requestSort} width="150px" />}
                                         {activeSubTab === 'sub_role' && <SortableHeader label="Parent Role" sortKey="parent_role_id" sortConfig={sortConfig} onSort={requestSort} width="200px" />}
                                         <th className="px-6 py-4 font-bold text-xs uppercase tracking-wider text-slate-700 text-right" style={{ width: '150px' }}>Actions</th>
                                     </tr>
@@ -475,6 +481,26 @@ export const OrganizationalStructure = ({ branding, adminSession }) => {
                                                 <tr key={`role-${item.role_id}-${index}`} className="hover:bg-slate-50 even:bg-slate-50/50 transition-colors group">
                                                     <td className="px-6 py-4 font-bold text-slate-900 capitalize">{item.role_name}</td>
                                                     <td className="px-6 py-4 text-slate-500 italic">{item.description || 'No description provided.'}</td>
+                                                    {activeSubTab === 'main_role' && (
+                                                        <td className="px-6 py-4">
+                                                            {item.role_behavior ? (
+                                                                <span className={`inline-flex items-center gap-1.5 px-3 py-1 text-xs font-bold uppercase tracking-wide rounded-full border ${
+                                                                    item.role_behavior === 'student' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                                                    item.role_behavior === 'employee' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                                                                    'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                                                }`}>
+                                                                    <span className={`w-1.5 h-1.5 rounded-full ${
+                                                                        item.role_behavior === 'student' ? 'bg-blue-500' :
+                                                                        item.role_behavior === 'employee' ? 'bg-amber-500' :
+                                                                        'bg-emerald-500'
+                                                                    }`} />
+                                                                    {item.role_behavior}
+                                                                </span>
+                                                            ) : (
+                                                                <span className="text-slate-400 text-xs italic">Not set</span>
+                                                            )}
+                                                        </td>
+                                                    )}
                                                     {activeSubTab === 'sub_role' && <td className="px-6 py-4 text-slate-600 capitalize font-medium">{parentRoleName}</td>}
                                                     <td className="px-6 py-4 text-right space-x-2">
                                                         <button className="p-2 text-amber-600 hover:bg-amber-100 rounded-lg transition-colors border border-transparent hover:border-amber-200 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Edit"
@@ -593,6 +619,37 @@ export const OrganizationalStructure = ({ branding, adminSession }) => {
                                                 onChange={e => setFormData({ ...formData, role_description: e.target.value })}
                                                 className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:ring-2 focus:ring-white/20 focus:outline-none resize-none" placeholder="Briefly describe the purpose or permissions of this role." />
                                         </div>
+
+                                        {(activeSubTab === 'main_role' || (showEditModal && formData.is_main_role)) && (
+                                            <div>
+                                                <label className="block text-xs text-white/60 mb-2 font-semibold uppercase tracking-wider">Role Behavior <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                                <p className="text-[11px] text-white/40 mb-3 leading-relaxed">This determines which registration fields, ID format, and modal behavior are used when registering or editing profiles with this role.</p>
+                                                <div className="grid grid-cols-3 gap-2.5">
+                                                    {[
+                                                        { value: 'student', label: 'Student', color: 'blue', desc: 'Program, Year Level' },
+                                                        { value: 'employee', label: 'Employee', color: 'amber', desc: 'Department, Position' },
+                                                        { value: 'visitor', label: 'Visitor', color: 'emerald', desc: 'Purpose, Person to Visit' }
+                                                    ].map(opt => {
+                                                        const isSelected = formData.role_behavior === opt.value;
+                                                        const colorMap = {
+                                                            blue: { bg: 'bg-blue-500/15', border: 'border-blue-500/40', text: 'text-blue-300', dot: 'bg-blue-400' },
+                                                            amber: { bg: 'bg-amber-500/15', border: 'border-amber-500/40', text: 'text-amber-300', dot: 'bg-amber-400' },
+                                                            emerald: { bg: 'bg-emerald-500/15', border: 'border-emerald-500/40', text: 'text-emerald-300', dot: 'bg-emerald-400' }
+                                                        };
+                                                        const c = colorMap[opt.color];
+                                                        return (
+                                                            <label key={opt.value} className={`relative flex flex-col items-center gap-1.5 p-3 rounded-xl border cursor-pointer transition-all duration-200 ${isSelected ? `${c.bg} ${c.border} ring-1 ring-white/15` : 'bg-white/[0.03] border-white/5 text-white/40 hover:bg-white/[0.06] hover:border-white/10'}`}>
+                                                                <input type="radio" name="roleBehavior" value={opt.value} checked={isSelected} onChange={e => setFormData({ ...formData, role_behavior: e.target.value })} className="sr-only" />
+                                                                <span className={`text-[13px] font-bold tracking-wide ${isSelected ? 'text-white' : ''}`}>{opt.label}</span>
+                                                                <span className={`text-[10px] ${isSelected ? c.text : 'text-white/30'}`}>{opt.desc}</span>
+                                                                {isSelected && <div className={`absolute -top-1 -right-1 p-0.5 rounded-full ${c.bg} border ${c.border} shadow-lg`}><Check className="w-2.5 h-2.5 text-white" /></div>}
+                                                            </label>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+
                                         {(activeSubTab === 'sub_role' || (showEditModal && !formData.is_main_role)) && (
                                             <div>
                                                 <label className="block text-xs text-white/60 mb-1 font-medium">Parent Main Role <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
