@@ -22,6 +22,7 @@ pub struct Role {
     pub description: Option<String>,
     pub is_main_role: bool,
     pub parent_role_id: Option<i64>,
+    pub role_behavior: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -59,6 +60,7 @@ pub struct Employee {
     pub person_id: i64,
     pub department_id: i64,
     pub position_title: String,
+    pub is_part_time: Option<bool>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -74,6 +76,7 @@ pub struct Event {
     pub event_name: String,
     pub description: Option<String>,
     pub is_enabled: bool,
+    pub late_threshold: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -153,6 +156,7 @@ pub struct EmployeeDetails {
     pub is_archived: bool,
     pub department_id: i64,
     pub position_title: String,
+    pub is_part_time: Option<bool>,
     pub department_name: String,
 }
 
@@ -231,6 +235,7 @@ pub struct ScanResult {
     pub person_name: Option<String>,
     pub roles: Option<Vec<String>>,
     pub role: Option<String>,
+    pub status: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

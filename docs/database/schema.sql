@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS roles (
     description TEXT NULL,
     is_main_role BOOLEAN NOT NULL DEFAULT 0,
     parent_role_id INTEGER NULL,
+    role_behavior TEXT NULL CHECK(role_behavior IN ('student', 'employee', 'visitor')),
     FOREIGN KEY (parent_role_id) REFERENCES roles(role_id)
 );
 
@@ -88,6 +89,7 @@ CREATE TABLE IF NOT EXISTS employees (
     person_id INTEGER PRIMARY KEY,
     department_id INTEGER NOT NULL,
     position_title VARCHAR NOT NULL,
+    is_part_time BOOLEAN NOT NULL DEFAULT 0,
     FOREIGN KEY (person_id) REFERENCES persons(person_id) ON DELETE CASCADE,
     FOREIGN KEY (department_id) REFERENCES departments(department_id)
 );
@@ -105,6 +107,7 @@ CREATE TABLE IF NOT EXISTS events (
     event_name VARCHAR UNIQUE NOT NULL,
     description TEXT NULL,
     is_enabled BOOLEAN NOT NULL DEFAULT 1,
+    late_threshold INTEGER NOT NULL DEFAULT 0,
     is_archived BOOLEAN NOT NULL DEFAULT 0,
     archived_at DATETIME NULL
 );
@@ -194,15 +197,15 @@ CREATE TABLE IF NOT EXISTS settings (
 
 -- Seed Data
 -- Main Roles
-INSERT OR IGNORE INTO roles (role_id, role_name, description) VALUES 
-    (1, 'student', 'Enrolled students of the university.'),
-    (2, 'employee', 'All academic and non-academic personnel.'),
-    (3, 'visitor', 'External guests and temporary visitors.');
+INSERT OR IGNORE INTO roles (role_id, role_name, description, is_main_role, role_behavior) VALUES 
+    (1, 'student', 'Enrolled students of the university.', 1, 'student'),
+    (2, 'employee', 'All academic and non-academic personnel.', 1, 'employee'),
+    (3, 'visitor', 'External guests and temporary visitors.', 1, 'visitor');
 
 -- Sub Roles (under Employee)
-INSERT OR IGNORE INTO roles (role_name, description) VALUES 
-    ('professor', 'Academic faculty members and instructors.'),
-    ('staff', 'Administrative and support personnel.');
+INSERT OR IGNORE INTO roles (role_name, description, is_main_role, parent_role_id) VALUES 
+    ('professor', 'Academic faculty members and instructors.', 0, 2),
+    ('staff', 'Administrative and support personnel.', 0, 2);
 
 INSERT OR IGNORE INTO departments (department_id, department_code, department_name) VALUES
     (1, 'COE', 'College of Education'),

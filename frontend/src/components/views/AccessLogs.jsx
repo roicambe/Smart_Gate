@@ -12,8 +12,29 @@ import { useToast } from '../toast/ToastProvider';
 import { drawInstitutionalHeader, prepareInstitutionalHeaderAssets } from '../../utils/pdfInstitutionalHeader';
 import { Pagination } from '../common/Pagination';
 import { SortableHeader, useTableSort } from '../common/SortableHeader';
+import { AdminModal } from '../common/AdminModal';
 
 export const AccessLogs = ({ branding, adminSession }) => {
+    const MANUAL_EXPORT_PREFS_KEY = 'accessLogs.eventAttendance.manualExportPrefs.v1';
+    function formatDate(dateString) {
+        if (!dateString) return "-";
+        const date = new Date(dateString);
+        return date.toLocaleString();
+    }
+
+    const EVENT_EXPORT_COLUMNS = useMemo(() => ([
+        { id: 'name', label: 'Name', value: (log) => log.person_name || 'N/A' },
+        { id: 'timestamp', label: 'Timestamp', value: (log) => formatDate(log.scanned_at) },
+        { id: 'idNumber', label: 'ID Number', value: (log) => log.id_number || 'N/A' },
+        { id: 'status', label: 'Status', value: (log) => log.status || 'On Time' },
+        { id: 'department', label: 'Department', value: (log) => log.department_name || 'N/A' },
+        { id: 'program', label: 'Program', value: (log) => log.program_name || 'N/A' },
+        { id: 'yearLevel', label: 'Year Level', value: (log) => log.year_level ? `Year ${log.year_level}` : 'N/A' },
+        { id: 'role', label: 'Role', value: (log) => (log.roles || []).join(', ') || 'N/A' },
+        { id: 'subRole', label: 'Sub Role', value: (log) => log.position_title || (log.roles || []).filter(r => !['student', 'visitor'].includes(String(r).toLowerCase())).join(', ') || 'N/A' },
+        { id: 'eventName', label: 'Event', value: (log) => log.event_name || 'N/A' },
+    ]), []);
+
     const [activeTab, setActiveTab] = useState('gateLogs'); // 'gateLogs' | 'eventLogs'
 
     // Gate Logs state
@@ -34,6 +55,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
     // Academic Filtering State (For Event Attendance)
     const [departments, setDepartments] = useState([]);
     const [allPrograms, setAllPrograms] = useState([]);
+    const [allRoles, setAllRoles] = useState([]);
     const [departmentFilter, setDepartmentFilter] = useState('All');
     const [programFilter, setProgramFilter] = useState('All');
     const [yearFilter, setYearFilter] = useState('All');
@@ -45,7 +67,14 @@ export const AccessLogs = ({ branding, adminSession }) => {
 
     // Export State & UX
     const [showExportMenu, setShowExportMenu] = useState(false);
+    const [showManualExportModal, setShowManualExportModal] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
+    const [manualSelectedColumns, setManualSelectedColumns] = useState(['name', 'timestamp', 'idNumber', 'status', 'department', 'role']);
+    const [manualSelectedRoles, setManualSelectedRoles] = useState([]);
+    const [manualDepartment, setManualDepartment] = useState('All');
+    const [manualProgram, setManualProgram] = useState('All');
+    const [manualYearLevel, setManualYearLevel] = useState('All');
+    const [manualReportTitle, setManualReportTitle] = useState('');
     const exportMenuRef = useRef(null);
     const { showSuccess, showError, showWarning, showProcessing } = useToast();
 
@@ -53,12 +82,14 @@ export const AccessLogs = ({ branding, adminSession }) => {
     useEffect(() => {
         const loadAcademicData = async () => {
             try {
-                const [depts, progs] = await Promise.all([
+                const [depts, progs, roles] = await Promise.all([
                     invoke('get_departments'),
-                    invoke('get_programs')
+                    invoke('get_programs'),
+                    invoke('get_roles')
                 ]);
                 setDepartments(depts || []);
                 setAllPrograms(progs || []);
+                setAllRoles(roles || []);
             } catch (err) {
                 console.error("Failed to load academic data:", err);
             }
@@ -87,7 +118,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
         try {
             if (activeTab === 'gateLogs') {
                 const data = await invoke('get_access_logs', {
-                    roleFilter: roleFilter === 'All' ? null : roleFilter.toLowerCase(),
+                    roleFilter: roleFilter === 'All' ? null : roleFilter,
                     actionType: actionFilter === 'All' ? null : actionFilter.toLowerCase(),
                     departmentId: departmentFilter === 'All' ? null : parseInt(departmentFilter),
                     searchTerm: searchTerm.trim() === '' ? null : searchTerm.trim(),
@@ -153,6 +184,76 @@ export const AccessLogs = ({ branding, adminSession }) => {
         return events.sort();
     }, [eventLogs]);
 
+    const exportRoleAwareOptions = useMemo(() => {
+        const source = filteredLogs;
+        
+        const mainRoles = allRoles.filter(r => r.is_main_role || ['student', 'employee', 'visitor'].includes(r.role_name.toLowerCase()));
+        const subRoles = allRoles.filter(r => !mainRoles.some(mr => mr.role_id === r.role_id));
+
+        return {
+            departments: [...new Set(source.map(log => log.department_name).filter(Boolean))].sort(),
+            programs: [...new Set(source.map(log => log.program_name).filter(Boolean))].sort(),
+            yearLevels: [...new Set(source.map(log => log.year_level).filter(Boolean))].sort((a, b) => a - b),
+            mainRoles,
+            subRoles,
+            visitorStatuses: [...new Set(source
+                .filter(log => getRoleType(log) === 'visitor')
+                .map(log => log.status || 'On Time')
+                .filter(Boolean))].sort(),
+        };
+    }, [filteredLogs, allRoles]);
+
+    useEffect(() => {
+        if (!showManualExportModal || activeTab !== 'eventLogs') return;
+        setManualReportTitle(generateEventAttendanceTitle(filteredLogs));
+    }, [showManualExportModal, activeTab, filteredLogs]);
+
+    useEffect(() => {
+        try {
+            const raw = window.localStorage.getItem(MANUAL_EXPORT_PREFS_KEY);
+            if (!raw) return;
+            const prefs = JSON.parse(raw);
+            if (Array.isArray(prefs.columns) && prefs.columns.length) {
+                setManualSelectedColumns(prefs.columns);
+            }
+            if (Array.isArray(prefs.selectedRoles)) {
+                setManualSelectedRoles(prefs.selectedRoles);
+            }
+            if (typeof prefs.department === 'string') setManualDepartment(prefs.department);
+            if (typeof prefs.program === 'string') setManualProgram(prefs.program);
+            if (typeof prefs.yearLevel === 'string') setManualYearLevel(prefs.yearLevel);
+            if (typeof prefs.visitorStatus === 'string') setManualVisitorStatus(prefs.visitorStatus);
+            if (typeof prefs.reportTitle === 'string') setManualReportTitle(prefs.reportTitle);
+        } catch (error) {
+            console.warn('Failed to load manual export preferences', error);
+        }
+    }, []);
+
+    useEffect(() => {
+        try {
+            window.localStorage.setItem(
+                MANUAL_EXPORT_PREFS_KEY,
+                JSON.stringify({
+                    columns: manualSelectedColumns,
+                    selectedRoles: manualSelectedRoles,
+                    department: manualDepartment,
+                    program: manualProgram,
+                    yearLevel: manualYearLevel,
+                    reportTitle: manualReportTitle,
+                })
+            );
+        } catch (error) {
+            console.warn('Failed to save manual export preferences', error);
+        }
+    }, [
+        manualSelectedColumns,
+        manualSelectedRoles,
+        manualDepartment,
+        manualProgram,
+        manualYearLevel,
+        manualReportTitle,
+    ]);
+
     // Sorting
     const { sortConfig, requestSort, sortedData: sortedLogs } = useTableSort(filteredLogs, 'scanned_at', 'desc', 'access_logs');
 
@@ -172,11 +273,29 @@ export const AccessLogs = ({ branding, adminSession }) => {
     }, [sortedLogs, currentPage]);
     const showPagination = sortedLogs.length > ITEMS_PER_PAGE;
 
-    const formatDate = (dateString) => {
-        if (!dateString) return "-";
-        const date = new Date(dateString);
-        return date.toLocaleString();
-    };
+    function generateEventAttendanceTitle(logs) {
+        if (!logs || logs.length === 0) return "Event Attendance Report";
+        const events = [...new Set(logs.map(log => log.event_name).filter(Boolean))];
+        if (events.length === 1) return `${events[0]} Attendance Report`;
+        if (events.length > 1) return `Multi-Event Attendance Report (${events.length} Events)`;
+        return "Event Attendance Report";
+    }
+
+    function getRoleType(log) {
+        const lowerRoles = (log.roles || []).map(r => String(r).toLowerCase());
+        if (lowerRoles.includes('visitor')) return 'visitor';
+        if (lowerRoles.includes('student')) return 'student';
+        if (lowerRoles.some(r => r === 'professor' || r === 'staff' || r === 'employee')) return 'employee';
+        return 'other';
+    }
+
+    function generateEventAttendanceTitle(logsToTitle) {
+        const events = [...new Set((logsToTitle || []).map(log => log.event_name).filter(Boolean))];
+        if (events.length === 1) return `${events[0]} Attendance Report`;
+        if (events.length === 2) return `${events[0]} and ${events[1]} Attendance Report`;
+        if (events.length > 2) return `${events[0]} and ${events.length - 1} More Attendance Report`;
+        return 'Event Attendance Report';
+    }
 
     const getStatistics = (logsToProcess, activeTab) => {
         const stats = {
@@ -422,10 +541,70 @@ export const AccessLogs = ({ branding, adminSession }) => {
         }
     };
 
-    const handleExportPDF = async () => {
-        if (filteredLogs.length === 0) return;
+    const applyManualEventExportFilters = (sourceLogs) => {
+        return sourceLogs.filter((log) => {
+            const logRoles = (log.roles || []).map(r => String(r).toLowerCase());
+            const selectedLower = manualSelectedRoles.map(r => r.toLowerCase());
+            
+            // If no roles selected, include all. If selected, check for intersection.
+            if (manualSelectedRoles.length > 0) {
+                const hasMatch = selectedLower.some(r => logRoles.includes(r));
+                if (!hasMatch) return false;
+            }
+
+            if (manualDepartment !== 'All' && (log.department_name || 'N/A') !== manualDepartment) return false;
+            
+            // Program/Year filter for any student role
+            if (selectedLower.includes('student') || manualSelectedRoles.length === 0) {
+                if (manualProgram !== 'All' && (log.program_name || 'N/A') !== manualProgram) return false;
+                if (manualYearLevel !== 'All' && String(log.year_level || '') !== String(manualYearLevel)) return false;
+            }
+            
+            return true;
+        });
+    };
+
+    const handleQuickExportPDF = async () => {
+        const defaultColumns = ['timestamp', 'name', 'idNumber', 'status', 'department', 'role', 'eventName'];
+        const defaultTitle = generateEventAttendanceTitle(filteredLogs);
+        await handleExportPDF({
+            logsForExport: filteredLogs,
+            selectedColumnIds: defaultColumns,
+            reportTitleOverride: defaultTitle,
+            includeStatsPage: false,
+            entityLabelPrefix: 'Quick PDF Export',
+        });
+    };
+
+    const handleManualExportPDF = async () => {
+        const selectedLogs = applyManualEventExportFilters(filteredLogs);
+        if (!manualSelectedColumns.length) {
+            showWarning('Select at least one column to export.');
+            return;
+        }
+        await handleExportPDF({
+            logsForExport: selectedLogs,
+            selectedColumnIds: manualSelectedColumns,
+            reportTitleOverride: manualReportTitle.trim() || generateEventAttendanceTitle(selectedLogs),
+            includeStatsPage: false,
+            entityLabelPrefix: 'Manual PDF Export',
+        });
+    };
+
+    const handleExportPDF = async ({
+        logsForExport = filteredLogs,
+        selectedColumnIds = [],
+        reportTitleOverride = '',
+        includeStatsPage = true,
+        entityLabelPrefix = 'PDF Export',
+    } = {}) => {
+        if (logsForExport.length === 0) {
+            showWarning('No records match the selected export criteria.');
+            return;
+        }
         setIsExporting(true);
         setShowExportMenu(false);
+        setShowManualExportModal(false);
         showProcessing("Preparing PDF export...");
 
         try {
@@ -440,7 +619,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
 
             const generatedDate = new Date().toLocaleString();
 
-            const reportTitle = activeTab === 'gateLogs' ? 'Access Logs' : 'Event Attendance';
+            const reportTitle = reportTitleOverride || (activeTab === 'gateLogs' ? 'Access Logs Report' : generateEventAttendanceTitle(logsForExport));
             const drawHeader = () => {
                 const layout = drawInstitutionalHeader(doc, {
                     branding,
@@ -448,6 +627,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                     contactIcons: headerAssets.contactIcons,
                     reportTitle,
                     officeName: 'Office of Campus Security',
+                    showSystemTitle: activeTab === 'gateLogs',
                 });
                 layout.setBodyFont?.();
                 doc.setFontSize(8.5);
@@ -461,13 +641,21 @@ export const AccessLogs = ({ branding, adminSession }) => {
             // Remove the initial manual `drawHeader()`. autoTable will call it inside `didDrawPage` for all pages.
 
             // Table Data
-            const tableColumn = activeTab === 'gateLogs'
-                ? ["Timestamp", "Name", "ID Number", "Role", "Department", "Action"]
-                : ["Timestamp", "Name", "ID Number", "Role", "Event Name", "Status"];
+            const selectedColumns = activeTab === 'gateLogs'
+                ? [
+                    { id: 'timestamp', label: 'Timestamp', value: (log) => formatDate(log.scanned_at) },
+                    { id: 'name', label: 'Name', value: (log) => log.person_name },
+                    { id: 'idNumber', label: 'ID Number', value: (log) => log.id_number },
+                    { id: 'role', label: 'Role', value: (log) => log.roles?.join(', ') || 'N/A' },
+                    { id: 'department', label: 'Department', value: (log) => log.department_name },
+                    { id: 'action', label: 'Action', value: (log) => log.scanner_function?.toUpperCase() || 'N/A' },
+                ]
+                : EVENT_EXPORT_COLUMNS.filter(col => selectedColumnIds.includes(col.id));
+            const tableColumn = selectedColumns.map(col => col.label);
 
             const tableRows = [];
 
-            filteredLogs.forEach(log => {
+            logsForExport.forEach(log => {
                 if (activeTab === 'gateLogs') {
                     tableRows.push([
                         formatDate(log.scanned_at),
@@ -478,19 +666,12 @@ export const AccessLogs = ({ branding, adminSession }) => {
                         log.scanner_function.toUpperCase()
                     ]);
                 } else {
-                    tableRows.push([
-                        formatDate(log.scanned_at),
-                        log.person_name,
-                        log.id_number,
-                        log.roles?.join(', ') || 'N/A',
-                        log.event_name,
-                        log.status || 'On Time'
-                    ]);
+                    tableRows.push(selectedColumns.map(col => col.value(log)));
                 }
             });
 
             // --- STEP 1: Generate Statistics on the first page ---
-            const stats = getStatistics(filteredLogs, activeTab);
+            const stats = getStatistics(logsForExport, activeTab);
             const statsData = [];
 
             statsData.push([{ content: 'Overview Statistics', colSpan: 2, styles: { fontStyle: 'bold', fillColor: [241, 245, 249], textColor: [15, 23, 42] } }]);
@@ -530,25 +711,25 @@ export const AccessLogs = ({ branding, adminSession }) => {
                 }
             }
 
-            autoTable(doc, {
-                startY: headerLayout.contentStartY + 2,
-                head: [[{ content: 'REPORT STATISTICS', colSpan: 2, styles: { halign: 'center' } }]],
-                body: statsData,
-                theme: 'grid',
-                headStyles: { fillColor: '#1E293B', textColor: '#FFFFFF', fontStyle: 'bold', fontSize: 10 },
-                bodyStyles: { fontSize: 10 },
-                columnStyles: {
-                    0: { cellWidth: '50%', fontStyle: 'bold' },
-                    1: { cellWidth: '50%' }
-                },
-                didDrawPage: function (data) {
-                    drawHeader();
-                },
-                margin: { top: headerLayout.contentStartY + 2, left: headerLayout.margin, right: headerLayout.margin }
-            });
-
-            // --- STEP 2: Add a new page to securely separate stats from logs ---
-            doc.addPage();
+            if (includeStatsPage) {
+                autoTable(doc, {
+                    startY: headerLayout.contentStartY + 2,
+                    head: [[{ content: 'REPORT STATISTICS', colSpan: 2, styles: { halign: 'center' } }]],
+                    body: statsData,
+                    theme: 'grid',
+                    headStyles: { fillColor: '#1E293B', textColor: '#FFFFFF', fontStyle: 'bold', fontSize: 10 },
+                    bodyStyles: { fontSize: 10 },
+                    columnStyles: {
+                        0: { cellWidth: '50%', fontStyle: 'bold' },
+                        1: { cellWidth: '50%' }
+                    },
+                    didDrawPage: function () {
+                        drawHeader();
+                    },
+                    margin: { top: headerLayout.contentStartY + 2, left: headerLayout.margin, right: headerLayout.margin }
+                });
+                doc.addPage();
+            }
 
             // --- STEP 3: Generate the main logs table ---
             autoTable(doc, {
@@ -556,20 +737,11 @@ export const AccessLogs = ({ branding, adminSession }) => {
                 margin: { top: headerLayout.contentStartY + 2, left: headerLayout.margin, right: headerLayout.margin },
                 head: [tableColumn],
                 body: tableRows,
-                theme: 'striped',
-                headStyles: { fillColor: '#1E293B', textColor: '#FFFFFF', fontStyle: 'bold', fontSize: 9 }, // Charcoal
+                theme: 'grid',
+                headStyles: { fillColor: '#1E293B', textColor: '#FFFFFF', fontStyle: 'bold', fontSize: 9 },
                 bodyStyles: { fontSize: 10 },
-                alternateRowStyles: { fillColor: [248, 250, 252] }, // slate-50
-                styles: { cellPadding: 3, overflow: 'linebreak' },
-                columnStyles: {
-                    0: { cellWidth: 'auto' }, // Timestamp
-                    1: { cellWidth: 'auto' }, // Name
-                    2: { cellWidth: 'auto' }, // ID
-                    3: { cellWidth: 'auto' }, // Role
-                    4: { cellWidth: 'auto' }, // Location
-                    5: { cellWidth: 'auto' }, // Action
-                },
-                didDrawPage: function (data) {
+                styles: { cellPadding: 3, overflow: 'linebreak', lineColor: [203, 213, 225], lineWidth: 0.2 },
+                didDrawPage: function () {
                     drawHeader();
                 }
             });
@@ -609,9 +781,9 @@ export const AccessLogs = ({ branding, adminSession }) => {
                 actionType: 'EXPORT',
                 entityType: activeTab === 'gateLogs' ? 'Entry Logs' : 'Event Attendance',
                 entityId: null,
-                entityLabel: `PDF Export (${filteredLogs.length} records)`,
+                entityLabel: `${entityLabelPrefix} (${logsForExport.length} records)`,
                 oldValues: null,
-                newValues: JSON.stringify({ format: 'PDF', filename, record_count: filteredLogs.length })
+                newValues: JSON.stringify({ format: 'PDF', filename, record_count: logsForExport.length, title: reportTitle, columns: tableColumn })
             }).catch(e => console.error("Audit log failed for PDF export", e));
 
             showSuccess(`Success: Report saved to ${filePath}`);
@@ -639,38 +811,58 @@ export const AccessLogs = ({ branding, adminSession }) => {
                 </div>
                 <div className="flex flex-col items-end gap-3">
                     <div className="flex items-center gap-3">
-                        {/* Export Dropdown */}
-                        <div className="relative shrink-0" ref={exportMenuRef}>
-                            <button
-                                onClick={() => setShowExportMenu(!showExportMenu)}
-                                disabled={isExporting}
-                                className={`flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors focus:outline-none shadow-sm ${isExporting ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            >
-                                {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                                <span className="font-semibold text-sm">
-                                    {isExporting ? 'Wait' : 'Export'}
-                                </span>
-                            </button>
+                        {activeTab === 'eventLogs' ? (
+                            <>
+                                <button
+                                    onClick={() => setShowManualExportModal(true)}
+                                    disabled={isExporting}
+                                    className={`flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors focus:outline-none shadow-sm ${isExporting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                >
+                                    <Download className="w-4 h-4" />
+                                    <span className="font-semibold text-sm">Manual Export</span>
+                                </button>
+                                <button
+                                    onClick={handleQuickExportPDF}
+                                    disabled={isExporting}
+                                    className={`flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors focus:outline-none shadow-sm ${isExporting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                >
+                                    {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+                                    <span className="font-semibold text-sm">{isExporting ? 'Wait' : 'Quick Export'}</span>
+                                </button>
+                            </>
+                        ) : (
+                            <div className="relative shrink-0" ref={exportMenuRef}>
+                                <button
+                                    onClick={() => setShowExportMenu(!showExportMenu)}
+                                    disabled={isExporting}
+                                    className={`flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors focus:outline-none shadow-sm ${isExporting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                >
+                                    {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                                    <span className="font-semibold text-sm">
+                                        {isExporting ? 'Wait' : 'Export'}
+                                    </span>
+                                </button>
 
-                            {showExportMenu && !isExporting && (
-                                <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-50 overflow-hidden">
-                                    <button
-                                        onClick={handleExportPDF}
-                                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors border-b border-slate-100"
-                                    >
-                                        <FileText className="w-4 h-4 text-red-500" />
-                                        Export PDF
-                                    </button>
-                                    <button
-                                        onClick={handleExportExcel}
-                                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
-                                    >
-                                        <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
-                                        Export Excel
-                                    </button>
-                                </div>
-                            )}
-                        </div>
+                                {showExportMenu && !isExporting && (
+                                    <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-50 overflow-hidden">
+                                        <button
+                                            onClick={() => handleExportPDF()}
+                                            className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors border-b border-slate-100"
+                                        >
+                                            <FileText className="w-4 h-4 text-red-500" />
+                                            Export PDF
+                                        </button>
+                                        <button
+                                            onClick={handleExportExcel}
+                                            className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                                        >
+                                            <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
+                                            Export Excel
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
                         <button
                             onClick={fetchLogs}
@@ -726,10 +918,11 @@ export const AccessLogs = ({ branding, adminSession }) => {
                         className="bg-slate-50 border border-slate-200 text-slate-700 sm:text-sm rounded-lg focus:ring-slate-500 focus:border-slate-500 block w-full sm:w-auto p-2 outline-none"
                     >
                         <option value="All">All Roles</option>
-                        <option value="student">Student</option>
-                        <option value="professor">Professor</option>
-                        <option value="staff">Staff</option>
-                        <option value="visitor">Visitor</option>
+                        {allRoles.filter(r => r.is_main_role || ['student', 'employee', 'visitor'].includes(r.role_name.toLowerCase())).map(role => (
+                            <option key={role.role_id} value={role.role_name}>
+                                {role.role_name.charAt(0).toUpperCase() + role.role_name.slice(1)}
+                            </option>
+                        ))}
                     </select>
 
                     {/* Department Filter (Applicable for both Gate Logs and Event Logs) */}
@@ -1007,6 +1200,202 @@ export const AccessLogs = ({ branding, adminSession }) => {
                     currentItemsCount={paginatedLogs.length}
                 />
             </div>
+
+            {activeTab === 'eventLogs' && (
+                <AdminModal
+                    isOpen={showManualExportModal}
+                    onClose={() => setShowManualExportModal(false)}
+                    title="Manual Export"
+                    subtitle="Customize columns, title, and role-based filters for Event Attendance."
+                    icon={<Download className="h-5 w-5 text-emerald-400" />}
+                    tone="default"
+                    size="lg"
+                    bodyClassName="space-y-6"
+                    footer={
+                        <div className="flex justify-end gap-3">
+                            <button
+                                onClick={() => setShowManualExportModal(false)}
+                                className="px-5 py-2.5 text-sm font-bold rounded-xl border border-white/15 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white transition-all"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleManualExportPDF}
+                                disabled={isExporting}
+                                className="px-5 py-2.5 text-sm font-bold rounded-xl bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50 transition-all shadow-lg shadow-emerald-600/20 flex items-center gap-2"
+                            >
+                                <FileText className="w-4 h-4" /> Generate PDF Report
+                            </button>
+                        </div>
+                    }
+                >
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-xs font-bold text-white/50 mb-2">Report Title</label>
+                                    <input
+                                        type="text"
+                                        value={manualReportTitle}
+                                        onChange={(e) => setManualReportTitle(e.target.value)}
+                                        className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none placeholder-white/20 transition-all"
+                                        placeholder="Event Attendance Report"
+                                    />
+                                </div>
+
+                            <div className="space-y-6">
+                                {/* Main Roles Section */}
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between px-1">
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-[12px] font-bold text-white/40">Main Roles</label>
+                                        </div>
+                                        <button 
+                                            onClick={() => {
+                                                const mainRoleNames = exportRoleAwareOptions.mainRoles.map(r => r.role_name);
+                                                setManualSelectedRoles(prev => [...new Set([...prev, ...mainRoleNames])]);
+                                            }}
+                                            className="text-[12px] font-bold text-emerald-400/70 hover:text-emerald-400 transition-colors"
+                                        >
+                                            Select All
+                                        </button>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2 border border-white/10 rounded-2xl p-4 bg-black/20">
+                                        {exportRoleAwareOptions.mainRoles.map(role => {
+                                            const isSelected = manualSelectedRoles.includes(role.role_name);
+                                            return (
+                                                <button
+                                                    key={role.role_id}
+                                                    onClick={() => {
+                                                        const relatedSubRoles = allRoles.filter(r => r.parent_role_id === role.role_id).map(r => r.role_name);
+                                                        if (isSelected) {
+                                                            setManualSelectedRoles(prev => prev.filter(r => r !== role.role_name && !relatedSubRoles.includes(r)));
+                                                        } else {
+                                                            setManualSelectedRoles(prev => [...new Set([...prev, role.role_name, ...relatedSubRoles])]);
+                                                        }
+                                                    }}
+                                                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 border ${
+                                                        isSelected 
+                                                            ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.1)]' 
+                                                            : 'bg-white/5 border-white/10 text-white/40 hover:bg-white/10 hover:text-white/60'
+                                                    }`}
+                                                >
+                                                    {role.role_name}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                {/* Sub Roles Section */}
+                                {exportRoleAwareOptions.subRoles.length > 0 && (
+                                    <div className="space-y-3">
+                                        <div className="flex items-center justify-between px-1">
+                                            <div className="flex items-center gap-2">
+                                                <label className="text-[12px] font-bold text-white/40">Sub-Roles / Designations</label>
+                                            </div>
+                                            <button 
+                                                onClick={() => {
+                                                    const subRoleNames = exportRoleAwareOptions.subRoles.map(r => r.role_name);
+                                                    setManualSelectedRoles(prev => [...new Set([...prev, ...subRoleNames])]);
+                                                }}
+                                                className="text-[12px] font-bold text-blue-400/70 hover:text-blue-400 transition-colors"
+                                            >
+                                                Select All
+                                            </button>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2 border border-white/10 rounded-2xl p-4 bg-black/20">
+                                            {exportRoleAwareOptions.subRoles.map(role => {
+                                                const isSelected = manualSelectedRoles.includes(role.role_name);
+                                                return (
+                                                    <button
+                                                        key={role.role_id}
+                                                        onClick={() => {
+                                                            if (isSelected) {
+                                                                setManualSelectedRoles(prev => prev.filter(r => r !== role.role_name));
+                                                            } else {
+                                                                setManualSelectedRoles(prev => [...new Set([...prev, role.role_name])]);
+                                                            }
+                                                        }}
+                                                        className={`px-4 py-2 rounded-xl text-xs font-bold transition-all duration-300 border ${
+                                                            isSelected 
+                                                                ? 'bg-blue-600/20 border-blue-500 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.1)]' 
+                                                                : 'bg-white/5 border-white/10 text-white/40 hover:bg-white/10 hover:text-white/60'
+                                                        }`}
+                                                    >
+                                                        {role.role_name}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="flex justify-end">
+                                    <button 
+                                        onClick={() => setManualSelectedRoles([])}
+                                        className="text-[12px] font-bold text-white/30 hover:text-white/60 transition-colors flex items-center gap-2"
+                                    >
+                                        <RefreshCw className="w-3 h-3" /> Clear All Roles
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                {(manualSelectedRoles.length > 0 && 
+                                  manualSelectedRoles.some(r => r.toLowerCase() === 'employee' || r.toLowerCase() === 'student' || r.toLowerCase() === 'professor' || r.toLowerCase() === 'staff')) && (
+                                    <div>
+                                        <label className="block text-xs font-bold text-white/50 mb-2">Department</label>
+                                        <select value={manualDepartment} onChange={(e) => setManualDepartment(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none transition-all cursor-pointer">
+                                            <option value="All" className="bg-slate-900">All Departments</option>
+                                            {exportRoleAwareOptions.departments.map(value => <option key={value} value={value} className="bg-slate-900">{value}</option>)}
+                                        </select>
+                                    </div>
+                                )}
+
+                                {(manualSelectedRoles.length > 0 && manualSelectedRoles.some(r => r.toLowerCase() === 'student')) && (
+                                    <>
+                                        <div>
+                                            <label className="block text-xs font-bold text-white/50 mb-2">Academic Program</label>
+                                            <select value={manualProgram} onChange={(e) => setManualProgram(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none transition-all cursor-pointer">
+                                                <option value="All" className="bg-slate-900">All Programs</option>
+                                                {exportRoleAwareOptions.programs.map(value => <option key={value} value={value} className="bg-slate-900">{value}</option>)}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-white/50 mb-2">Year Level</label>
+                                            <select value={manualYearLevel} onChange={(e) => setManualYearLevel(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none transition-all cursor-pointer">
+                                                <option value="All" className="bg-slate-900">All Year Levels</option>
+                                                {exportRoleAwareOptions.yearLevels.map(value => <option key={value} value={String(value)} className="bg-slate-900">{`Year ${value}`}</option>)}
+                                            </select>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-white/50 mb-3">Visible Columns</label>
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 border border-white/10 rounded-2xl p-5 bg-black/20">
+                                    {EVENT_EXPORT_COLUMNS.filter(col => col.id !== 'eventName' || uniqueEvents.length > 1).map(col => (
+                                        <label key={col.id} className="inline-flex items-center gap-3 text-sm text-white/70 hover:text-white transition-colors cursor-pointer group">
+                                            <input
+                                                type="checkbox"
+                                                checked={manualSelectedColumns.includes(col.id)}
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        setManualSelectedColumns(prev => [...new Set([...prev, col.id])]);
+                                                    } else {
+                                                        setManualSelectedColumns(prev => prev.filter(id => id !== col.id));
+                                                    }
+                                                }}
+                                                className="w-4 h-4 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500/30 accent-emerald-500 transition-all"
+                                            />
+                                            <span className="font-medium">{col.label}</span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                </AdminModal>
+            )}
         </div>
     );
 };
