@@ -171,7 +171,11 @@ export const EventManagement = ({ branding, adminSession }) => {
     };
 
     const unflattenEvent = (data) => {
-        const { event_name, description, is_enabled, schedule_type, event_date, start_date, end_date, start_time, end_time, required_role } = data;
+        const { event_name, description, is_enabled, schedule_type, event_date, start_date, end_date, start_time: raw_start, end_time: raw_end, required_role } = data;
+        
+        const formatTimeForDB = (t) => t && t.length === 5 ? `${t}:00` : t;
+        const start_time = formatTimeForDB(raw_start);
+        const end_time = formatTimeForDB(raw_end);
         
         const event = {
             event_id: selectedEvent?.event_id || 0,
@@ -293,8 +297,8 @@ export const EventManagement = ({ branding, adminSession }) => {
             event_date: event.event_date || '',
             start_date: event.start_date || '',
             end_date: event.end_date || '',
-            start_time: event.start_time || '',
-            end_time: event.end_time || '',
+            start_time: event.start_time ? event.start_time.substring(0, 5) : '',
+            end_time: event.end_time ? event.end_time.substring(0, 5) : '',
             required_role: event.required_role || 'all',
             required_programs: event.required_programs || null,
             required_year_levels: event.required_year_levels || null,
@@ -794,7 +798,14 @@ export const EventManagement = ({ branding, adminSession }) => {
                                                 </div>
 
                                                 {(() => {
-                                                    const mainRoles = roles.filter(r => r.is_main_role || ['student', 'employee', 'visitor'].includes(r.role_name.toLowerCase()));
+                                                    const mainRoles = roles
+                                                        .filter(r => r.is_main_role || ['student', 'employee', 'visitor'].includes(r.role_name.toLowerCase()))
+                                                        .sort((a, b) => {
+                                                            const aIsVisitor = a.role_behavior === 'visitor' || a.role_name.toLowerCase() === 'visitor' ? 1 : 0;
+                                                            const bIsVisitor = b.role_behavior === 'visitor' || b.role_name.toLowerCase() === 'visitor' ? 1 : 0;
+                                                            if (aIsVisitor !== bIsVisitor) return aIsVisitor - bIsVisitor;
+                                                            return a.role_name.localeCompare(b.role_name);
+                                                        });
                                                     const allSubRoles = roles.filter(r => !mainRoles.some(mr => mr.role_id === r.role_id));
 
                                                     const visibleSubRoles = allSubRoles.filter(sr => {
