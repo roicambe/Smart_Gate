@@ -307,13 +307,16 @@ export const DataManagement = ({ adminSession }) => {
                                     </td>
                                 </tr>
                             ) : paginatedRecords.map(u => {
-                                const role = (u.role || '').toLowerCase();
-                                const isStudent = role === 'student';
-                                const isVisitor = role === 'visitor';
-                                const departmentLine = isVisitor ? 'VISITOR' : (u.department_name || 'N/A');
-                                const detailLine = isStudent
-                                    ? `${u.program_name || 'N/A'}${u.year_level ? ` - Yr ${u.year_level}` : ''}`
-                                    : (u.position_title || 'N/A');
+                                const isStudent = u.role_behaviors?.includes('student');
+                                const isEmployee = u.role_behaviors?.includes('employee');
+                                const isVisitor = u.role_behaviors?.includes('visitor');
+
+                                const primaryLine = isVisitor ? 'VISITOR' : (u.department_name || 'N/A');
+                                const secondaryLine = isStudent
+                                    ? (u.program_name ? `${u.program_name}${u.year_level ? ` - Yr ${u.year_level}` : ''}` : 'No Program')
+                                    : isEmployee
+                                        ? (u.position_title || 'Faculty/Staff')
+                                        : '---';
 
                                 return (
                                     <tr key={u.person_id} className="hover:bg-slate-50 transition-colors group">
@@ -321,8 +324,8 @@ export const DataManagement = ({ adminSession }) => {
                                         <td className="px-5 py-3 font-medium text-slate-900">{u.first_name} {u.last_name}</td>
                                         <td className="px-5 py-3">
                                             <div className="flex flex-col">
-                                                <span className="font-medium text-slate-900">{departmentLine}</span>
-                                                <span className="text-xs text-slate-500 font-medium">{detailLine}</span>
+                                                <span className="font-medium text-slate-900 text-sm">{primaryLine}</span>
+                                                <span className="text-[10px] text-slate-500 font-medium uppercase tracking-tight">{secondaryLine}</span>
                                             </div>
                                         </td>
                                         <td className="px-5 py-3 text-slate-500">{new Date(u.archived_at).toLocaleString()}</td>
