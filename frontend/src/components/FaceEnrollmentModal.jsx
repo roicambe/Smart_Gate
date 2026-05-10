@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { Camera, X, Loader2, UserPlus, CheckCircle2, AlertTriangle, ArrowRight, FlipHorizontal2 } from "lucide-react";
 import { useFaceRecognition } from "../hooks/useFaceRecognition";
 import { invoke } from "@tauri-apps/api/core";
+import { formatIdNumber } from "../utils/formatters";
+import { ManualIdModal } from "./common/ManualIdModal";
 
 const REQUIRED_CAPTURES = 5;
 
@@ -20,9 +22,9 @@ export const FaceEnrollmentModal = ({ onClose }) => {
     const [idNumber, setIdNumber] = useState('');
     const [personId, setPersonId] = useState(null);
     const [personName, setPersonName] = useState('');
+    const [isLocalProcessing, setIsLocalProcessing] = useState(false);
     const [captures, setCaptures] = useState([]);
     const [error, setError] = useState(null);
-    const [isLocalProcessing, setIsLocalProcessing] = useState(false);
 
     const { enrollPerson, isProcessing: isHookProcessing } = useFaceRecognition();
     const isProcessing = isLocalProcessing || isHookProcessing;
@@ -70,12 +72,12 @@ export const FaceEnrollmentModal = ({ onClose }) => {
         };
     }, [step, selectedCamera]);
 
-    const handleIdLookup = async (e) => {
-        e.preventDefault();
+    const handleIdLookup = async (submittedId) => {
         setError(null);
         try {
-            const details = await invoke('get_scan_person_details', { idNumber: idNumber.trim() });
+            const details = await invoke('get_scan_person_details', { idNumber: submittedId.trim() });
             if (details) {
+                setIdNumber(submittedId.trim());
                 setPersonId(details.person_id);
                 setPersonName(`${details.first_name} ${details.last_name}`);
                 setStep('capturing');
@@ -154,57 +156,16 @@ export const FaceEnrollmentModal = ({ onClose }) => {
                     <X className="w-6 h-6" />
                 </button>
 
-                {/* ===== STEP 1: ID Entry (Matching Manual ID Modal) ===== */}
+                {/* ===== STEP 1: ID Entry (Using Reusable Manual ID Modal) ===== */}
                 {step === 'id_entry' && (
-                    <div className="w-full max-w-md animate-in zoom-in-95 fade-in duration-200">
-                        <div className="bg-black/80 backdrop-blur-2xl border border-white/20 rounded-3xl shadow-2xl overflow-hidden">
-                            <div className="p-8">
-                                <div className="flex items-center gap-4 mb-6">
-                                    <div className="h-14 w-14 bg-white/10 rounded-2xl flex items-center justify-center text-white border border-white/20 shadow-inner">
-                                        <UserPlus className="w-7 h-7" />
-                                    </div>
-                                    <div>
-                                        <h2 className="text-2xl font-bold text-white tracking-wide">Register Your Face</h2>
-                                        <p className="text-white/60 text-sm">Enter your University ID to begin</p>
-                                    </div>
-                                </div>
-                                <form onSubmit={handleIdLookup}>
-                                    <input
-                                        type="text"
-                                        placeholder="e.g. 2026-00123"
-                                        value={idNumber}
-                                        onChange={(e) => setIdNumber(e.target.value)}
-                                        className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-white/50 mb-4 text-center tracking-widest uppercase transition-all"
-                                        autoFocus
-                                        required
-                                    />
-
-                                    {error && (
-                                        <div className="flex items-center gap-2 text-rose-400 text-sm bg-rose-500/10 border border-rose-500/20 rounded-xl px-4 py-3 mb-4">
-                                            <AlertTriangle className="w-4 h-4 shrink-0" />
-                                            <span>{error}</span>
-                                        </div>
-                                    )}
-
-                                    <div className="flex gap-3">
-                                        <button
-                                            type="button"
-                                            onClick={onClose}
-                                            className="flex-1 px-4 py-3 bg-white/5 border border-white/10 text-white/80 font-medium rounded-xl hover:bg-white/10 hover:text-white transition-all focus:outline-none"
-                                        >
-                                            Cancel
-                                        </button>
-                                        <button
-                                            type="submit"
-                                            className="flex-[2] px-4 py-3 bg-white text-black font-bold rounded-xl hover:bg-slate-200 transition-all focus:outline-none focus:ring-4 focus:ring-white/30 flex items-center justify-center gap-2 text-lg shadow-lg"
-                                        >
-                                            Continue <ArrowRight className="w-5 h-5" />
-                                        </button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
+                    <ManualIdModal
+                        isOpen={true}
+                        onClose={onClose}
+                        onSubmit={handleIdLookup}
+                        title="Register Your Face"
+                        subtitle="Enter your University ID to begin"
+                        error={error}
+                    />
                 )}
 
                 {/* ===== STEP 2: Capture Photos ===== */}

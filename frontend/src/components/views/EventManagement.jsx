@@ -88,6 +88,15 @@ const formatRequiredPrograms = (programsStr, programsList) => {
     }).join(', ');
 };
 
+const formatRequiredDepartments = (deptsStr, deptsList) => {
+    if (!deptsStr) return 'All Departments';
+    const ids = deptsStr.split(',');
+    return ids.map(id => {
+        const dept = deptsList.find(d => d.department_id.toString() === id);
+        return dept ? dept.department_code : id;
+    }).join(', ');
+};
+
 const formatRequiredYearLevels = (yearLevelsStr) => {
     if (!yearLevelsStr) return 'All Year Levels';
     return yearLevelsStr.split(',').map(y => {
@@ -99,6 +108,7 @@ const formatRequiredYearLevels = (yearLevelsStr) => {
 export const EventManagement = ({ branding, adminSession }) => {
     const [eventDetails, setEventDetails] = useState([]); // Raw EventDetails from backend
     const [events, setEvents] = useState([]); // Flattened events for UI
+    const [departments, setDepartments] = useState([]);
     const [programs, setPrograms] = useState([]);
     const [roles, setRoles] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
@@ -116,6 +126,7 @@ export const EventManagement = ({ branding, adminSession }) => {
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [selectedEvent, setSelectedEvent] = useState(null);
     const [selectedRoles, setSelectedRoles] = useState(['all']);
+    const [selectedDepartments, setSelectedDepartments] = useState(['all']);
     const [selectedPrograms, setSelectedPrograms] = useState(['all']);
     const [selectedYearLevels, setSelectedYearLevels] = useState([1, 2, 3, 4]);
     const { showSuccess, showError } = useToast();
@@ -130,6 +141,7 @@ export const EventManagement = ({ branding, adminSession }) => {
         start_time: '',
         end_time: '',
         required_role: 'all',
+        required_departments: null,
         required_programs: null,
         required_year_levels: null,
         late_threshold: 15,
@@ -166,12 +178,13 @@ export const EventManagement = ({ branding, adminSession }) => {
             start_time,
             end_time,
             late_threshold: event.late_threshold || 0,
-            required_role: required_roles && required_roles.length > 0 ? required_roles.map(r => r.role_name).join(',') : 'all'
+            required_departments: event.required_departments || null,
+            required_role: required_roles && required_roles.length > 0 ? required_roles.map(r => r.role_name.toLowerCase()).join(',') : 'all'
         };
     };
 
     const unflattenEvent = (data) => {
-        const { event_name, description, is_enabled, schedule_type, event_date, start_date, end_date, start_time: raw_start, end_time: raw_end, required_role } = data;
+        const { event_name, description, is_enabled, schedule_type, event_date, start_date, end_date, start_time: raw_start, end_time: raw_end, required_role, required_departments, required_programs, required_year_levels } = data;
         
         const formatTimeForDB = (t) => t && t.length === 5 ? `${t}:00` : t;
         const start_time = formatTimeForDB(raw_start);
@@ -182,7 +195,10 @@ export const EventManagement = ({ branding, adminSession }) => {
             event_name,
             description,
             is_enabled,
-            late_threshold: parseInt(data.late_threshold) || 0
+            late_threshold: parseInt(data.late_threshold) || 0,
+            required_departments: required_departments || null,
+            required_programs: required_programs || null,
+            required_year_levels: required_year_levels || null
         };
 
         const weekly_schedules = [];
@@ -235,6 +251,16 @@ export const EventManagement = ({ branding, adminSession }) => {
         }
     };
 
+    const fetchDepartments = async () => {
+        try {
+            const data = await invoke('get_departments');
+            setDepartments(data);
+        } catch (error) {
+            console.error(error);
+            showError('Failed to fetch departments.');
+        }
+    };
+
     const fetchPrograms = async () => {
         try {
             const data = await invoke('get_programs');
@@ -256,6 +282,7 @@ export const EventManagement = ({ branding, adminSession }) => {
 
     useEffect(() => {
         fetchEvents();
+        fetchDepartments();
         fetchPrograms();
         fetchRoles();
     }, []);
@@ -264,12 +291,14 @@ export const EventManagement = ({ branding, adminSession }) => {
         e.preventDefault();
         try {
             const requiredRole = rolesToRequiredRoleValue(selectedRoles);
+            const requiredDepartments = selectedDepartments.includes('all') ? null : selectedDepartments.join(',');
             const requiredPrograms = selectedPrograms.includes('all') ? null : selectedPrograms.join(',');
             const requiredYearLevels = selectedYearLevels.length === 4 ? null : selectedYearLevels.join(',');
             
             const payload = unflattenEvent({
                 ...formData,
                 required_role: requiredRole,
+                required_departments: requiredDepartments,
                 required_programs: requiredPrograms,
                 required_year_levels: requiredYearLevels
             });
@@ -300,12 +329,14 @@ export const EventManagement = ({ branding, adminSession }) => {
             start_time: event.start_time ? event.start_time.substring(0, 5) : '',
             end_time: event.end_time ? event.end_time.substring(0, 5) : '',
             required_role: event.required_role || 'all',
+            required_departments: event.required_departments || null,
             required_programs: event.required_programs || null,
             required_year_levels: event.required_year_levels || null,
             late_threshold: event.late_threshold || 0,
             is_enabled: event.is_enabled
         });
         setSelectedRoles(parseRequiredRoles(event.required_role, roles));
+        setSelectedDepartments(event.required_departments ? event.required_departments.split(',') : ['all']);
         setSelectedPrograms(event.required_programs ? event.required_programs.split(',') : ['all']);
         setSelectedYearLevels(event.required_year_levels ? event.required_year_levels.split(',').map(Number) : [1, 2, 3, 4]);
         setShowEditModal(true);
@@ -315,12 +346,14 @@ export const EventManagement = ({ branding, adminSession }) => {
         e.preventDefault();
         try {
             const requiredRole = rolesToRequiredRoleValue(selectedRoles);
+            const requiredDepartments = selectedDepartments.includes('all') ? null : selectedDepartments.join(',');
             const requiredPrograms = selectedPrograms.includes('all') ? null : selectedPrograms.join(',');
             const requiredYearLevels = selectedYearLevels.length === 4 ? null : selectedYearLevels.join(',');
 
             const payload = unflattenEvent({
                 ...formData,
                 required_role: requiredRole,
+                required_departments: requiredDepartments,
                 required_programs: requiredPrograms,
                 required_year_levels: requiredYearLevels
             });
@@ -362,9 +395,10 @@ export const EventManagement = ({ branding, adminSession }) => {
     };
 
     const resetForm = () => {
-        setFormData({ event_name: '', description: '', schedule_type: 'weekly', event_date: '', start_date: '', end_date: '', start_time: '', end_time: '', late_threshold: 15, required_role: 'all', required_programs: null, required_year_levels: null, is_enabled: true });
+        setFormData({ event_name: '', description: '', schedule_type: 'weekly', event_date: '', start_date: '', end_date: '', start_time: '', end_time: '', late_threshold: 15, required_role: 'all', required_departments: null, required_programs: null, required_year_levels: null, is_enabled: true });
         setSelectedEvent(null);
         setSelectedRoles(['all']);
+        setSelectedDepartments(['all']);
         setSelectedPrograms(['all']);
         setSelectedYearLevels([1, 2, 3, 4]);
     };
@@ -436,6 +470,35 @@ export const EventManagement = ({ branding, adminSession }) => {
         const start = (currentPage - 1) * ITEMS_PER_PAGE;
         return sortedEvents.slice(start, start + ITEMS_PER_PAGE);
     }, [sortedEvents, currentPage]);
+
+    const toggleDepartment = (val) => {
+        let nextDepts = [];
+        if (val === 'all') {
+            nextDepts = ['all'];
+        } else {
+            const current = selectedDepartments.filter(d => d !== 'all');
+            if (current.includes(val)) {
+                const next = current.filter(d => d !== val);
+                nextDepts = next.length > 0 ? next : ['all'];
+            } else {
+                nextDepts = [...current, val];
+            }
+        }
+        
+        setSelectedDepartments(nextDepts);
+
+        // Auto-prune programs that are no longer valid for the selected departments
+        if (!nextDepts.includes('all')) {
+            setSelectedPrograms(prev => {
+                if (prev.includes('all')) return prev;
+                const nextProgs = prev.filter(progId => {
+                    const prog = programs.find(p => p.program_id.toString() === progId);
+                    return prog && nextDepts.includes(prog.department_id.toString());
+                });
+                return nextProgs.length > 0 ? nextProgs : ['all'];
+            });
+        }
+    };
 
     const clearFilters = () => {
         setSearchQuery('');
@@ -642,13 +705,22 @@ export const EventManagement = ({ branding, adminSession }) => {
                     icon={showEditModal ? <Edit2 className="w-5 h-5 text-amber-300" /> : <Plus className="w-5 h-5 text-emerald-300" />}
                     size="xl"
                     bodyClassName="p-0"
+                    footer={(
+                        <button 
+                            type="submit" 
+                            form="event-form"
+                            className={`w-full ${showEditModal ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-[0_0_20px_rgba(245,158,11,0.2)]' : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_20px_rgba(16,185,129,0.2)]'} font-bold text-lg py-4 rounded-xl transition-all focus:outline-none focus:ring-4 focus:ring-white/40 flex justify-center items-center gap-2 hover:scale-[1.01]`}
+                        >
+                            <Check className="w-6 h-6" /> {showEditModal ? 'Save Event Configuration' : 'Create New Event'}
+                        </button>
+                    )}
                 >
-                    <form onSubmit={showEditModal ? handleEditSubmit : handleRegisterSubmit} className="flex flex-col flex-1 overflow-hidden">
+                    <form id="event-form" onSubmit={showEditModal ? handleEditSubmit : handleRegisterSubmit} className="p-5 md:p-6">
                             <div className="flex-1">
-                                <div className="grid grid-cols-1 gap-6 pb-8 lg:grid-cols-2">
+                                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                                     {/* Left Column: Basic Info & Schedule */}
-                                    <div className="space-y-4">
-                                        <div className="flex items-center gap-2 mb-2">
+                                    <div className="space-y-3">
+                                        <div className="flex items-center gap-2 mb-1">
                                             <div className="w-1 h-4 bg-emerald-500 rounded-full"></div>
                                             <h3 className="text-sm font-bold text-white/90 uppercase tracking-wider">Basic Information</h3>
                                         </div>
@@ -777,21 +849,21 @@ export const EventManagement = ({ branding, adminSession }) => {
                                     </div>
 
                                     {/* Right Column: Targeting & Requirements */}
-                                    <div className="space-y-4 lg:pl-6">
-                                        <div className="flex items-center gap-2 mb-2">
+                                    <div className="space-y-3 lg:pl-6">
+                                        <div className="flex items-center gap-2 mb-1">
                                             <div className="w-1 h-4 bg-blue-500 rounded-full"></div>
                                             <h3 className="text-sm font-bold text-white/90 uppercase tracking-wider">Targeting & Requirements</h3>
                                         </div>
 
                                         <div>
-                                            <label className="block text-xs text-white/60 mb-2 font-medium">Required Role <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
+                                            <label className="block text-xs text-white/60 mb-1.5 font-medium">Required Role <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
                                             
-                                            <div className="space-y-4 p-3 bg-black/40 border border-white/10 rounded-xl">
+                                            <div className="space-y-3 p-3 bg-black/40 border border-white/10 rounded-xl">
                                                 <div>
                                                     <button
                                                         type="button"
                                                         onClick={() => toggleRole('all')}
-                                                        className={`w-full px-3 py-2 rounded-lg text-sm font-semibold border transition-all ${selectedRoles.includes('all') ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                        className={`w-full px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${selectedRoles.includes('all') ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
                                                     >
                                                         All Roles
                                                     </button>
@@ -828,7 +900,7 @@ export const EventManagement = ({ branding, adminSession }) => {
                                                                                     key={role.role_id}
                                                                                     type="button"
                                                                                     onClick={() => toggleRole(val)}
-                                                                                    className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
                                                                                 >
                                                                                     {role.role_name.charAt(0).toUpperCase() + role.role_name.slice(1)}
                                                                                 </button>
@@ -849,7 +921,7 @@ export const EventManagement = ({ branding, adminSession }) => {
                                                                                     key={role.role_id}
                                                                                     type="button"
                                                                                     onClick={() => toggleRole(val)}
-                                                                                    className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
                                                                                 >
                                                                                     {role.role_name.charAt(0).toUpperCase() + role.role_name.slice(1)}
                                                                                 </button>
@@ -867,64 +939,100 @@ export const EventManagement = ({ branding, adminSession }) => {
                                             </p>
                                         </div>
 
-                                        {(selectedRoles.includes('all') || selectedRoles.includes('student')) && (
-                                            <>
-                                                <div>
-                                                    <label className="block text-xs text-white/60 mb-2 font-medium">Specific Programs</label>
-                                                    <div className="flex flex-wrap gap-2 p-3 bg-black/40 border border-white/10 rounded-xl max-h-48 overflow-y-auto custom-scrollbar">
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => toggleProgram('all')}
-                                                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${selectedPrograms.includes('all') ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
-                                                        >
-                                                            All Programs
-                                                        </button>
-                                                        {programs.map((prog) => {
-                                                            const active = selectedPrograms.includes(prog.program_id.toString());
-                                                            return (
-                                                                <button
-                                                                    key={prog.program_id}
-                                                                    type="button"
-                                                                    onClick={() => toggleProgram(prog.program_id.toString())}
-                                                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all truncate max-w-[150px] ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
-                                                                    title={prog.program_name}
-                                                                >
-                                                                    {prog.program_code}
-                                                                </button>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
+                                        {(() => {
+                                            const roleNames = selectedRoles.includes('all') ? roles.map(r => r.role_name.toLowerCase()) : selectedRoles;
+                                            const hasEmployeeBehavior = roles.some(r => roleNames.includes(r.role_name.toLowerCase()) && (r.role_behavior === 'employee' || r.role_name.toLowerCase() === 'employee'));
+                                            const hasStudentBehavior = roles.some(r => roleNames.includes(r.role_name.toLowerCase()) && (r.role_behavior === 'student' || r.role_name.toLowerCase() === 'student'));
 
-                                                <div>
-                                                    <label className="block text-xs text-white/60 mb-2 font-medium">Specific Year Levels</label>
-                                                    <div className="grid grid-cols-2 gap-2 p-3 bg-black/40 border border-white/10 rounded-xl">
-                                                        {YEAR_LEVEL_OPTIONS.map((option) => {
-                                                            const active = selectedYearLevels.includes(option.value);
-                                                            return (
+                                            return (
+                                                <>
+                                                    {(selectedRoles.includes('all') || hasEmployeeBehavior || hasStudentBehavior) && (
+                                                        <div>
+                                                            <label className="block text-xs text-white/60 mb-2 font-medium">Specific Departments</label>
+                                                            <div className="flex flex-wrap gap-2 p-3 bg-black/40 border border-white/10 rounded-xl max-h-48 overflow-y-auto custom-scrollbar">
                                                                 <button
-                                                                    key={option.value}
                                                                     type="button"
-                                                                    onClick={() => toggleYearLevel(option.value)}
-                                                                    className={`px-3 py-2 rounded-lg text-sm font-semibold border transition-all ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                                    onClick={() => toggleDepartment('all')}
+                                                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${selectedDepartments.includes('all') ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
                                                                 >
-                                                                    {option.label}
+                                                                    All Departments
                                                                 </button>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </div>
-                                            </>
-                                        )}
+                                                                {departments.map((dept) => {
+                                                                    const active = selectedDepartments.includes(dept.department_id.toString());
+                                                                    return (
+                                                                        <button
+                                                                            key={dept.department_id}
+                                                                            type="button"
+                                                                            onClick={() => toggleDepartment(dept.department_id.toString())}
+                                                                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all truncate max-w-[150px] ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                                            title={dept.department_name}
+                                                                        >
+                                                                            {dept.department_code}
+                                                                        </button>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {(selectedRoles.includes('all') || hasStudentBehavior) && (
+                                                        <>
+                                                            <div>
+                                                                <label className="block text-xs text-white/60 mb-2 font-medium">Specific Programs</label>
+                                                                <div className="flex flex-wrap gap-2 p-3 bg-black/40 border border-white/10 rounded-xl max-h-48 overflow-y-auto custom-scrollbar">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => toggleProgram('all')}
+                                                                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${selectedPrograms.includes('all') ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                                    >
+                                                                        All Programs
+                                                                    </button>
+                                                                    {programs
+                                                                        .filter(p => selectedDepartments.includes('all') || selectedDepartments.includes(p.department_id.toString()))
+                                                                        .map((prog) => {
+                                                                            const active = selectedPrograms.includes(prog.program_id.toString());
+                                                                            return (
+                                                                                <button
+                                                                                    key={prog.program_id}
+                                                                                    type="button"
+                                                                                    onClick={() => toggleProgram(prog.program_id.toString())}
+                                                                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all truncate max-w-[150px] ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                                                    title={prog.program_name}
+                                                                                >
+                                                                                    {prog.program_code}
+                                                                                </button>
+                                                                            );
+                                                                        })}
+                                                                </div>
+                                                            </div>
+
+                                                            <div>
+                                                                <label className="block text-xs text-white/60 mb-2 font-medium">Specific Year Levels</label>
+                                                                <div className="grid grid-cols-2 gap-2 p-3 bg-black/40 border border-white/10 rounded-xl">
+                                                                    {YEAR_LEVEL_OPTIONS.map((option) => {
+                                                                        const active = selectedYearLevels.includes(option.value);
+                                                                        return (
+                                                                            <button
+                                                                                key={option.value}
+                                                                                type="button"
+                                                                                onClick={() => toggleYearLevel(option.value)}
+                                                                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                                            >
+                                                                                {option.label}
+                                                                            </button>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </>
+                                            );
+                                        })()}
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="shrink-0 border-t border-white/10 px-5 pt-3">
-                                <button type="submit" className={`w-full ${showEditModal ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-[0_0_20px_rgba(245,158,11,0.2)]' : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_20px_rgba(16,185,129,0.2)]'} font-bold text-lg py-4 rounded-xl transition-all focus:outline-none focus:ring-4 focus:ring-white/40 flex justify-center items-center gap-2 hover:scale-[1.01]`}>
-                                    <Check className="w-6 h-6" /> {showEditModal ? 'Save Event Configuration' : 'Create New Event'}
-                                </button>
-                            </div>
                         </form>
                 </AdminModal>
             )}
@@ -982,20 +1090,34 @@ export const EventManagement = ({ branding, adminSession }) => {
                                         </p>
                                     </div>
 
-                                    {(selectedEvent.required_role.includes('all') || selectedEvent.required_role.includes('student')) && (
-                                        <>
+                                    {(() => {
+                                        const roleNames = selectedEvent.required_role.includes('all') ? roles.map(r => r.role_name.toLowerCase()) : selectedEvent.required_role.split(',').map(r => r.trim().toLowerCase());
+                                        const hasEmployeeBehavior = roles.some(r => roleNames.includes(r.role_name.toLowerCase()) && (r.role_behavior === 'employee' || r.role_name.toLowerCase() === 'employee'));
+                                        const hasStudentBehavior = roles.some(r => roleNames.includes(r.role_name.toLowerCase()) && (r.role_behavior === 'student' || r.role_name.toLowerCase() === 'student'));
+
+                                        return (
                                             <div className="col-span-1 md:col-span-2 border-t border-white/5 pt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                                                <div>
-                                                    <p className="text-xs uppercase tracking-wider text-white/40 mb-1 font-semibold">Target Programs</p>
-                                                    <p className="text-white font-medium text-sm">{formatRequiredPrograms(selectedEvent.required_programs, programs)}</p>
-                                                </div>
-                                                <div>
-                                                    <p className="text-xs uppercase tracking-wider text-white/40 mb-1 font-semibold">Target Year Levels</p>
-                                                    <p className="text-white font-medium text-sm">{formatRequiredYearLevels(selectedEvent.required_year_levels)}</p>
-                                                </div>
+                                                {(selectedEvent.required_role.includes('all') || hasEmployeeBehavior) && (
+                                                    <div>
+                                                        <p className="text-xs uppercase tracking-wider text-white/40 mb-1 font-semibold">Target Departments</p>
+                                                        <p className="text-white font-medium text-sm">{formatRequiredDepartments(selectedEvent.required_departments, departments)}</p>
+                                                    </div>
+                                                )}
+                                                {(selectedEvent.required_role.includes('all') || hasStudentBehavior) && (
+                                                    <>
+                                                        <div>
+                                                            <p className="text-xs uppercase tracking-wider text-white/40 mb-1 font-semibold">Target Programs</p>
+                                                            <p className="text-white font-medium text-sm">{formatRequiredPrograms(selectedEvent.required_programs, programs)}</p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-xs uppercase tracking-wider text-white/40 mb-1 font-semibold">Target Year Levels</p>
+                                                            <p className="text-white font-medium text-sm">{formatRequiredYearLevels(selectedEvent.required_year_levels)}</p>
+                                                        </div>
+                                                    </>
+                                                )}
                                             </div>
-                                        </>
-                                    )}
+                                        );
+                                    })()}
                                 </div>
                             </div>
                     </div>

@@ -23,6 +23,7 @@ const formatDate = (dateStr) => {
 
 export const FaceRecognitionManagement = ({ adminSession, branding }) => {
     const [users, setUsers] = useState([]);
+    const [roles, setRoles] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
     const [filterRole, setFilterRole] = useState('all');
@@ -35,11 +36,15 @@ export const FaceRecognitionManagement = ({ adminSession, branding }) => {
     const fetchData = async () => {
         setIsLoading(true);
         try {
-            const data = await invoke('get_face_registration_status');
-            setUsers(data);
+            const [userData, rolesData] = await Promise.all([
+                invoke('get_face_registration_status'),
+                invoke('get_roles')
+            ]);
+            setUsers(userData);
+            setRoles(rolesData);
         } catch (err) {
             console.error(err);
-            showError('Failed to load face registration data.');
+            showError('Failed to load face recognition management data.');
         } finally {
             setIsLoading(false);
         }
@@ -166,9 +171,11 @@ export const FaceRecognitionManagement = ({ adminSession, branding }) => {
                             className="bg-transparent text-sm font-medium text-slate-700 outline-none cursor-pointer w-full"
                         >
                             <option value="all">Role: All</option>
-                            <option value="student">Students</option>
-                            <option value="professor">Professors</option>
-                            <option value="staff">Staff</option>
+                            {roles.filter(r => r.is_main_role || ['student', 'employee', 'visitor'].includes(r.role_name.toLowerCase())).map(role => (
+                                <option key={role.role_id} value={role.role_name}>
+                                    {formatRoleLabel(role.role_name)}
+                                </option>
+                            ))}
                         </select>
                     </div>
                     <div className="flex items-center gap-2 px-3 py-2.5 bg-slate-50 rounded-xl border border-slate-200 w-52">

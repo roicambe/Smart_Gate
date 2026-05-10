@@ -61,6 +61,7 @@ function App() {
                             setView={setView}
                             isGhostScannerDisabled={isAdminOverlayOpen}
                             branding={branding}
+                            adminSession={adminSession}
                         />
                     )}
                     {view === "action_event" && <EventActionMenu setView={setView} branding={branding} />}

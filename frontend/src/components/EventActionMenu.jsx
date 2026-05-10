@@ -1,88 +1,19 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Keyboard, QrCode, ScanFace, ChevronLeft, ArrowRight, Calendar, X, Lock, Unlock } from "lucide-react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { Keyboard, QrCode, ScanFace, ChevronLeft, ArrowRight, Calendar, X, Lock, Unlock, AlertCircle } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { QRScannerOverlay } from "./QRScannerOverlay";
 import { extractScanId } from "../utils/patternHunter";
 import { useToast } from "./toast/ToastProvider";
+import { useIdCard } from "./IdCardProvider";
 import { FaceScannerModal } from "./FaceScannerModal";
 import { useGhostScannerListener } from "../hooks/useGhostScannerListener";
-
-const ID_CARD_DURATION_MS = 1000;
-const DETAILED_TOAST_ROLES = new Set(["student", "professor", "staff"]);
-
-const formatRoleLabel = (role) => {
-    if (Array.isArray(role)) {
-        return role.map(r => r.charAt(0).toUpperCase() + r.slice(1)).join(', ');
-    }
-    return role ? role.charAt(0).toUpperCase() + role.slice(1) : "---";
-};
-
-const getFullNameLabel = (person) => {
-    if (!person) return "---";
-    const middle = person.middle_name ? ` ${person.middle_name.charAt(0)}.` : '';
-    const suffix = person.suffix ? ` ${person.suffix}` : '';
-    return `${person.first_name}${middle} ${person.last_name}${suffix}`;
-};
-
-const formatIdNumber = (val, isDeleting = false) => {
-    if (!val) return "";
-    
-    // 1. Character Filtering: Only allow 0-9, hyphen, and V, I, S (case-insensitive)
-    let filtered = val.replace(/[^0-9VvIiSs\-]/g, "");
-    const upper = filtered.toUpperCase();
-    
-    // 2. Visitor Logic: Automatically recognize "VIS" (any case)
-    if (upper.includes("VIS")) {
-        // Find the index of "VIS" to handle cases where user types it partially or fully
-        const visIndex = upper.indexOf("VIS");
-        // Extract what follows "VIS"
-        const afterVis = upper.slice(visIndex + 3);
-        // Only keep digits for the visitor numeric part
-        const digits = afterVis.replace(/[^0-9]/g, "").slice(0, 5);
-        
-        // Add hyphen if there are digits OR if we are NOT currently backspacing/deleting
-        if (digits.length > 0 || (!isDeleting && upper === "VIS") || upper.includes("VIS-")) {
-            return `VIS-${digits}`;
-        }
-        return "VIS";
-    }
-    
-    // 3. Numeric Logic (Student/Employee)
-    const digits = filtered.replace(/[^0-9]/g, "");
-    
-    // If it exceeds 7 digits, recognize as employee ID (remove hyphen)
-    if (digits.length > 7) {
-        return digits.slice(0, 9);
-    }
-    
-    // If it has exactly 7 digits, auto-format to student format (XX-XXXXX)
-    if (digits.length === 7) {
-        return `${digits.slice(0, 2)}-${digits.slice(2)}`;
-    }
-    
-    // If user typed a hyphen manually at position 2, preserve it
-    if (filtered.indexOf('-') === 2 && digits.length <= 7) {
-        // Re-apply hyphen after 2 digits if we have at least 2 digits
-        if (digits.length >= 2) {
-             return `${digits.slice(0, 2)}-${digits.slice(2)}`;
-        }
-    }
-    
-    // If typing "V" or "VI", allow it (part of VIS)
-    if (upper === 'V' || upper === 'VI') {
-        return upper;
-    }
-    
-    // Default: return digits
-    return digits;
-};
-
-const getProgramYearLabel = (person) => {
-    if (!person) return null;
-    const program = person.program_name || person.program || "";
-    const year = person.year_level ? ` Yr ${person.year_level}` : "";
-    return program || year ? `${program}${year}` : null;
-};
+import { 
+    formatRoleLabel, 
+    getFullNameLabel, 
+    formatIdNumber, 
+    getProgramYearLabel 
+} from "../utils/formatters";
+import { ManualIdModal } from "./common/ManualIdModal";
 
 const getDetailedToastMessage = (scanDetails) => {
     if (!scanDetails) return "Scan processed.";
@@ -95,40 +26,21 @@ const getDetailedToastMessage = (scanDetails) => {
 export const EventActionMenu = ({ setView, branding }) => {
     const [showManualModal, setShowManualModal] = useState(false);
     const [showQrScanner, setShowQrScanner] = useState(false);
-    const [manualId, setManualId] = useState("");
     const [events, setEvents] = useState([]);
     const [programs, setPrograms] = useState([]);
+    const [departments, setDepartments] = useState([]);
     const [selectedEventId, setSelectedEventId] = useState(null);
+    const [allRoles, setAllRoles] = useState([]);
     const [isProcessingScanner, setIsProcessingScanner] = useState(false);
     const [showFaceScanner, setShowFaceScanner] = useState(false);
     const [flashGreen, setFlashGreen] = useState(false);
-    const [activeScanCard, setActiveScanCard] = useState(null);
+    const [currentTimeState, setCurrentTimeState] = useState(new Date());
     const [isManualLocked, setIsManualLocked] = useState(false);
     const [isScannerLocked, setIsScannerLocked] = useState(false);
-    const isDeletingManualRef = useRef(false);
-    const scanCardTimerRef = useRef(null);
     const scanCardRequestIdRef = useRef(0);
     const { showSuccess, showError, showWarning, showProcessing } = useToast();
-
-    const clearScanCardTimer = useCallback(() => {
-        if (scanCardTimerRef.current) {
-            window.clearTimeout(scanCardTimerRef.current);
-            scanCardTimerRef.current = null;
-        }
-    }, []);
-
-    const showScanCard = useCallback((scanDetails) => {
-        clearScanCardTimer();
-        setActiveScanCard(scanDetails);
-        scanCardTimerRef.current = window.setTimeout(() => {
-            setActiveScanCard(null);
-        }, ID_CARD_DURATION_MS);
-    }, [clearScanCardTimer]);
-
-    const dismissScanCard = useCallback(() => {
-        clearScanCardTimer();
-        setActiveScanCard(null);
-    }, [clearScanCardTimer]);
+    const { showIdCard, dismissIdCard } = useIdCard();
+    const currentEvent = events.find(e => e.event_id === selectedEventId);
 
     const showScanSuccessFeedback = useCallback(async ({
         result,
@@ -139,6 +51,7 @@ export const EventActionMenu = ({ setView, branding }) => {
         const roleLabel = result.role || (result.roles && result.roles.length > 0 ? result.roles[0] : "User");
         const successMessage = fallbackMessage || `${result.message} - ${result.person_name} (${roleLabel})`;
         const normalizedRole = (result.role || "").toString().trim().toLowerCase();
+        const DETAILED_TOAST_ROLES = new Set(["student", "professor", "staff"]);
         const shouldShowDetailedToast = modalActive && DETAILED_TOAST_ROLES.has(normalizedRole);
 
         if (modalActive && !shouldShowDetailedToast) {
@@ -159,7 +72,7 @@ export const EventActionMenu = ({ setView, branding }) => {
                     return;
                 }
 
-                showScanCard(details);
+                showIdCard(details);
                 return;
             }
         } catch (error) {
@@ -169,7 +82,7 @@ export const EventActionMenu = ({ setView, branding }) => {
         if (requestId === scanCardRequestIdRef.current) {
             showSuccess(successMessage);
         }
-    }, [showSuccess, showScanCard]);
+    }, [showSuccess, showIdCard]);
 
     const isModalOpen = showManualModal || showQrScanner || showFaceScanner;
 
@@ -300,12 +213,50 @@ export const EventActionMenu = ({ setView, branding }) => {
                 console.error(error);
             }
         };
+        const fetchDepartments = async () => {
+            try {
+                const data = await invoke('get_departments');
+                setDepartments(data);
+            } catch (error) {
+                console.error(error);
+            }
+        };
+        const fetchRoles = async () => {
+            try {
+                const data = await invoke('get_roles');
+                setAllRoles(data);
+            } catch (error) {
+                console.error(error);
+            }
+        };
         fetchEvents();
         fetchPrograms();
+        fetchDepartments();
+        fetchRoles();
     }, []);
 
-    const handleManualSubmit = async (e) => {
-        e.preventDefault();
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setCurrentTimeState(new Date());
+        }, 10000);
+        return () => clearInterval(interval);
+    }, []);
+
+    const isLate = useMemo(() => {
+        if (!currentEvent || !currentEvent.start_time) return false;
+        
+        const now = currentTimeState;
+        const [h, m] = currentEvent.start_time.split(':').map(Number);
+        const startTime = new Date(now);
+        startTime.setHours(h, m, 0, 0);
+        
+        const threshold = currentEvent.late_threshold || 0;
+        const lateLimit = new Date(startTime.getTime() + (threshold * 60000));
+        
+        return now > lateLimit;
+    }, [currentEvent, currentTimeState]);
+
+    const handleManualSubmit = async (submittedId) => {
 
         if (!selectedEventId) {
             showWarning("No active event selected.");
@@ -315,23 +266,25 @@ export const EventActionMenu = ({ setView, branding }) => {
         try {
             const result = await invoke('log_event_attendance', {
                 eventId: parseInt(selectedEventId, 10),
-                idNumber: manualId,
+                idNumber: submittedId,
                 scannerId: 1
             });
 
             if (result.success) {
-                await showScanSuccessFeedback({
-                    result,
-                    scannedId: manualId,
-                    modalActive: true
-                });
+                // Determine if we are staying in modal mode (locked) or closing to show ID card
+                const isStillActive = isManualLocked || showQrScanner || showFaceScanner;
 
                 if (!isManualLocked) {
                     setShowManualModal(false);
-                    setManualId("");
-                } else {
-                    setManualId("");
                 }
+
+                setTimeout(() => {
+                    showScanSuccessFeedback({
+                        result,
+                        scannedId: submittedId,
+                        modalActive: isStillActive
+                    });
+                }, isManualLocked ? 0 : 300);
             } else {
                 showError(result.message);
             }
@@ -341,7 +294,6 @@ export const EventActionMenu = ({ setView, branding }) => {
         } finally {
             if (!isManualLocked) {
                 setShowManualModal(false);
-                setManualId("");
             }
         }
     };
@@ -397,16 +349,10 @@ export const EventActionMenu = ({ setView, branding }) => {
 
         setIsProcessingScanner(true);
         
-        // Capture modal state before potentially closing one
-        const wasModalOpen = isModalOpen;
-        
-        // If it was a manual modal, we close it as the scan is more specific
-        if (showManualModal) {
-            setShowManualModal(false);
-            setManualId("");
-        }
+        // Use a short timeout to allow state synchronization if needed
+        const isStillActive = isModalOpen;
 
-        await handleQrScan(scannedId, wasModalOpen);
+        await handleQrScan(scannedId, isStillActive);
 
         setTimeout(() => setIsProcessingScanner(false), 500); 
     }, [selectedEventId, handleQrScan, showError, showWarning, showProcessing, isModalOpen, showManualModal]);
@@ -416,11 +362,18 @@ export const EventActionMenu = ({ setView, branding }) => {
         onScanBuffer: processWedgeInput
     });
 
-    const currentEvent = events.find(e => e.event_id === parseInt(selectedEventId, 10));
 
-    const getFormatRole = (role) => {
-        if (!role || role.toLowerCase().includes('all')) return 'All Roles';
-        return role.split(',').map(r => r.trim().charAt(0).toUpperCase() + r.trim().slice(1)).join(', ');
+
+    const getFormatRoleList = (roleStr) => {
+        if (!roleStr || roleStr.toLowerCase().includes('all')) return ['All Roles'];
+        const roles = roleStr.split(',').map(r => r.trim()).filter(Boolean);
+        
+        // If the number of selected roles matches all roles in DB, say "All Roles"
+        if (allRoles.length > 0 && roles.length >= allRoles.length) {
+            return ['All Roles'];
+        }
+        
+        return roles.map(r => r.charAt(0).toUpperCase() + r.slice(1));
     };
 
     const getFormatPrograms = (programsStr) => {
@@ -433,23 +386,32 @@ export const EventActionMenu = ({ setView, branding }) => {
     };
 
     const getFormatYearLevels = (ylStr) => {
-        if (!ylStr || ylStr.toLowerCase().includes('all')) return 'All Year Levels';
+        if (!ylStr || ylStr.trim() === '') return 'All Year Levels';
         return ylStr.split(',').map(y => {
             const val = y.trim();
             return `${val}${['st', 'nd', 'rd', 'th'][parseInt(val, 10) - 1] || 'th'} Year`;
         }).join(', ');
     };
 
+    const getFormatDepartments = (deptStr) => {
+        if (!deptStr || deptStr.toLowerCase().includes('all')) return 'All Departments';
+        const ids = deptStr.split(',').map(id => id.trim());
+        return ids.map(id => {
+            const dept = departments.find(d => d.department_id.toString() === id);
+            return dept ? dept.department_code : id;
+        }).join(', ');
+    };
+
     return (
         <div className="flex-1 flex flex-col w-full h-full p-8 max-w-7xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
             
-            {/* Green Flash Overlay */}
+            {/* Green Flash Overlay - Only show if NO active ID card is shown */}
             {flashGreen && (
                 <div className="absolute inset-0 z-[200] bg-emerald-500/30 pointer-events-none animate-in fade-in duration-75 fade-out duration-300"></div>
             )}
 
             {/* Top Navigation */}
-            <div className="flex flex-col items-center justify-center mb-12 relative w-full pt-4">
+            <div className="flex flex-col items-center justify-center mb-4 relative w-full pt-4">
                 <button
                     onClick={() => setView('main')}
                     className="flex items-center gap-3 px-6 py-3 bg-black/30 backdrop-blur-md border border-white/20 text-white rounded-xl hover:bg-black/40 hover:scale-[1.02] transition-all focus:outline-none focus:ring-2 focus:ring-white/20 shadow-lg group absolute left-0 top-0 z-10"
@@ -458,9 +420,9 @@ export const EventActionMenu = ({ setView, branding }) => {
                     <span className="font-semibold text-base tracking-wide">Main Menu</span>
                 </button>
 
-                <div className="flex flex-col items-center justify-center w-full pointer-events-none mt-16 gap-5">
-                    <div className="p-5 bg-black/20 backdrop-blur-md rounded-full border border-white/10 shadow-inner drop-shadow-xl">
-                        <Calendar className="w-16 h-16 text-slate-300" />
+                <div className="flex flex-col items-center justify-center w-full pointer-events-none mt-8 gap-3">
+                    <div className="p-3 bg-black/20 backdrop-blur-md rounded-full border border-white/10 shadow-inner drop-shadow-xl">
+                        <Calendar className="w-10 h-10 text-slate-300" />
                     </div>
                     <h2 className="text-4xl md:text-5xl font-extrabold text-white tracking-wide drop-shadow-2xl text-center">
                         Event Check-in
@@ -468,16 +430,17 @@ export const EventActionMenu = ({ setView, branding }) => {
                 </div>
             </div>
 
-            {/* Event Selection Dropdown */}
+            {/* Event Selection Dropdown & Card */}
             {events.length > 0 ? (
-                <div className="w-full max-w-xl mx-auto mb-10 pointer-events-auto space-y-4">
-                    <div>
-                        <label className="block text-sm font-semibold text-white mb-2 pl-1 drop-shadow-sm">Select Active Event</label>
+                <div className="w-full flex flex-col items-center mb-4 pointer-events-auto space-y-4">
+                    {/* Dropdown Container - Kept at max-w-xl */}
+                    <div className="w-full max-w-xl space-y-1.5">
+                        <label className="block text-xs font-bold text-white mb-2 pl-1 drop-shadow-sm uppercase tracking-widest opacity-60">Select Active Event</label>
                         <div className="relative">
                             <select
                                 value={selectedEventId || ''}
                                 onChange={(e) => setSelectedEventId(e.target.value ? parseInt(e.target.value, 10) : null)}
-                                className="w-full appearance-none bg-white border-2 border-slate-300 text-slate-900 rounded-xl px-6 py-4 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 hover:border-slate-400 transition-all text-lg font-bold shadow-sm cursor-pointer"
+                                className="w-full appearance-none bg-white border-2 border-slate-300 text-slate-900 rounded-xl px-6 py-3.5 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/20 hover:border-slate-400 transition-all text-lg font-bold shadow-sm cursor-pointer"
                             >
                                 {events.map(ev => {
                                     const now = new Date();
@@ -499,62 +462,140 @@ export const EventActionMenu = ({ setView, branding }) => {
                         </div>
                     </div>
                     
+                    {/* Event Details Card - Wider and More Detailed */}
                     {currentEvent && (
-                        <div className="bg-black/20 backdrop-blur-md border border-white/10 rounded-2xl p-5 animate-in slide-in-from-top-2 duration-300">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                        <div className="w-full max-w-fit min-w-[min(100%,896px)] bg-black/40 backdrop-blur-xl border border-white/10 rounded-[2rem] p-4 md:p-6 animate-in zoom-in-95 slide-in-from-top-4 duration-500 shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden relative group mx-auto">
+                            {/* Decorative accent */}
+                            <div className="absolute top-0 left-0 w-2 h-full bg-gradient-to-b from-blue-500 to-indigo-600"></div>
+                            
+                            <div className="flex flex-col gap-3 md:gap-4">
+                                {/* Header: Name & Description */}
                                 <div className="space-y-1">
-                                    <p className="text-white/50 font-medium uppercase tracking-wider text-[10px]">Required Roles</p>
-                                    <p className="text-white font-bold">{getFormatRole(currentEvent.required_role)}</p>
-                                </div>
-                                <div className="space-y-1">
-                                    <p className="text-white/50 font-medium uppercase tracking-wider text-[10px]">Schedule</p>
-                                    <p className="text-white font-bold">{currentEvent.start_time} - {currentEvent.end_time}</p>
-                                </div>
-                                {(currentEvent.required_role.includes('all') || currentEvent.required_role.includes('student')) && (
-                                    <>
-                                        <div className="space-y-1">
-                                            <p className="text-white/50 font-medium uppercase tracking-wider text-[10px]">Target Programs</p>
-                                            <p className="text-white font-medium text-xs bg-white/5 px-2 py-1 rounded inline-block">{getFormatPrograms(currentEvent.required_programs)}</p>
+                                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                                        <div className="space-y-0.5">
+                                            <h3 className="text-3xl md:text-4xl font-black text-white tracking-tighter drop-shadow-lg leading-tight">
+                                                {currentEvent.event_name}
+                                            </h3>
+                                            <p className="text-base md:text-lg text-white/50 font-medium leading-tight max-w-2xl italic">
+                                                {currentEvent.description || "No description provided for this event."}
+                                            </p>
                                         </div>
-                                        <div className="space-y-1">
-                                            <p className="text-white/50 font-medium uppercase tracking-wider text-[10px]">Target Year Levels</p>
-                                            <p className="text-white font-medium text-xs bg-white/5 px-2 py-1 rounded inline-block">{getFormatYearLevels(currentEvent.required_year_levels)}</p>
+                                        {/* Status Badge */}
+                                        <div className={`px-4 py-1.5 rounded-full border-2 font-black text-[10px] uppercase tracking-[0.2em] shadow-lg inline-flex items-center gap-2 ${
+                                            isLate ? 'bg-rose-500/20 border-rose-500/40 text-rose-300' : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                                        }`}>
+                                            <div className={`h-2 w-2 rounded-full ${isLate ? 'bg-rose-500' : 'bg-emerald-500 animate-pulse'}`}></div>
+                                            {isLate ? 'Late Entry Mode' : 'On-Time Mode'}
                                         </div>
-                                    </>
-                                )}
+                                    </div>
+                                </div>
+
+                                <div className="flex flex-col lg:flex-row gap-4 md:gap-6">
+                                    {/* Left Side: Schedule & Configuration */}
+                                    <div className="flex-1 min-w-[320px] space-y-4">
+                                        <div className="space-y-4 bg-white/5 rounded-3xl p-5 border border-white/10 shadow-inner">
+                                            <div className="space-y-1">
+                                                <div className="flex items-center gap-2 text-blue-300 opacity-60">
+                                                    <Calendar className="w-3 h-3" />
+                                                    <p className="text-[10px] font-black uppercase tracking-[0.2em]">Schedule Details</p>
+                                                </div>
+                                                <div className="space-y-0.5">
+                                                    <p className="text-xl font-bold text-white tracking-tight leading-none">
+                                                        {currentEvent.schedule_type === 'date_range' 
+                                                            ? `${new Date(currentEvent.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${new Date(currentEvent.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+                                                            : currentEvent.event_date
+                                                        }
+                                                    </p>
+                                                    <p className="text-2xl font-black text-white/90 leading-tight">
+                                                        {currentEvent.start_time} <span className="text-white/30 text-lg font-medium mx-1">to</span> {currentEvent.end_time}
+                                                    </p>
+                                                </div>
+                                            </div>
+
+                                            <div className="h-px bg-white/10 w-full"></div>
+
+                                            <div className="space-y-1">
+                                                <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.2em]">Late Configuration</p>
+                                                <div className="flex flex-col gap-1">
+                                                    <p className="text-2xl font-black text-emerald-400 tracking-tight leading-tight">
+                                                        {currentEvent.late_threshold || 0} <span className="text-base font-bold opacity-60">Minutes</span>
+                                                    </p>
+                                                    {isLate && (
+                                                        <div className="flex items-center gap-1.5 text-rose-500 animate-pulse">
+                                                            <AlertCircle className="w-3.5 h-3.5" />
+                                                            <span className="text-[9px] font-black uppercase tracking-widest">Entry Threshold Reached</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Right Side: Requirements */}
+                                    <div className="flex-initial min-w-[320px] bg-indigo-500/10 rounded-3xl p-5 border border-indigo-500/20 space-y-4">
+                                        <div className="flex items-center gap-2 text-indigo-300 opacity-60">
+                                            <Lock className="w-3 h-3" />
+                                            <p className="text-[10px] font-black uppercase tracking-[0.2em]">Requirement Filters</p>
+                                        </div>
+                                        
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                                            <div className="space-y-1 sm:col-span-2">
+                                                <p className="text-[9px] font-bold text-indigo-300/60 uppercase tracking-widest">Required Roles</p>
+                                                <div className={`text-base font-black text-white leading-tight ${getFormatRoleList(currentEvent.required_role).length > 3 ? 'grid grid-flow-col grid-rows-3 gap-x-8' : ''}`}>
+                                                    {getFormatRoleList(currentEvent.required_role).map((role, idx) => (
+                                                        <div key={idx} className="whitespace-nowrap">• {role}</div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <p className="text-[9px] font-bold text-indigo-300/60 uppercase tracking-widest">Departments</p>
+                                                <p className="text-base font-black text-white leading-tight">{getFormatDepartments(currentEvent.required_departments)}</p>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <p className="text-[9px] font-bold text-indigo-300/60 uppercase tracking-widest">Target Programs</p>
+                                                <p className="text-base font-black text-white leading-tight">{getFormatPrograms(currentEvent.required_programs)}</p>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <p className="text-[9px] font-bold text-indigo-300/60 uppercase tracking-widest">Year Levels</p>
+                                                <p className="text-base font-black text-white leading-tight">{getFormatYearLevels(currentEvent.required_year_levels)}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}
                 </div>
             ) : (
-                <div className="w-full max-w-xl mx-auto mb-10 text-center p-4 bg-rose-500/20 border border-rose-500/30 rounded-2xl backdrop-blur-sm shadow-xl">
-                    <p className="text-rose-200 font-medium">No active events found. Please enable an event in Admin Panel.</p>
+                <div className="w-full max-w-xl mx-auto mb-10 text-center p-8 bg-rose-500/10 border border-rose-500/30 rounded-3xl backdrop-blur-md shadow-2xl">
+                    <p className="text-xl text-rose-200 font-bold tracking-tight">No active events found.</p>
+                    <p className="text-rose-200/60 text-sm mt-1">Please enable or schedule an event in the Admin Panel.</p>
                 </div>
             )}
 
             {/* Actions Grid */}
-            <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-8 flex-1 place-content-center items-center ${(!selectedEventId || events.length === 0) ? 'opacity-50 pointer-events-none grayscale-[0.5]' : ''}`}>
+            <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 items-center w-full max-w-6xl mx-auto mt-2 mb-6 ${(!selectedEventId || events.length === 0) ? 'opacity-50 pointer-events-none grayscale-[0.5]' : ''}`}>
                 <button
                     disabled={!selectedEventId || events.length === 0}
                     onClick={() => { setShowManualModal(true); }}
-                    className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]"
+                    className="group relative flex flex-col justify-center items-center p-8 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[180px]"
                 >
-                    <div className="h-20 w-20 bg-white/10 text-white rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:bg-white/20 transition-all duration-300 shadow-lg border border-white/20">
-                        <Keyboard className="w-10 h-10 drop-shadow-md" />
+                    <div className="h-16 w-16 bg-white/10 text-white rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 group-hover:bg-white/20 transition-all duration-300 shadow-lg border border-white/20">
+                        <Keyboard className="w-8 h-8 drop-shadow-md" />
                     </div>
-                    <h3 className="text-2xl font-bold text-white mb-2 drop-shadow-sm">Manual ID</h3>
-                    <p className="text-white/70 text-base">Type in ID</p>
+                    <h3 className="text-xl font-bold text-white mb-1 drop-shadow-sm">Manual ID</h3>
+                    <p className="text-white/60 text-sm">Type in ID</p>
                 </button>
 
                 <button 
                     disabled={!selectedEventId || events.length === 0}
                     onClick={() => { setShowQrScanner(true); }} 
-                    className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]">
-                    <div className="h-20 w-20 bg-white/10 text-white rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:bg-white/20 transition-all duration-300 shadow-lg border border-white/20">
-                        <QrCode className="w-10 h-10 drop-shadow-md" />
+                    className="group relative flex flex-col justify-center items-center p-8 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[180px]">
+                    <div className="h-16 w-16 bg-white/10 text-white rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 group-hover:bg-white/20 transition-all duration-300 shadow-lg border border-white/20">
+                        <QrCode className="w-8 h-8 drop-shadow-md" />
                     </div>
-                    <h3 className="text-2xl font-bold text-white mb-2 drop-shadow-sm">QR Scanner</h3>
-                    <p className="text-white/70 text-base">Scan Digital ID</p>
+                    <h3 className="text-xl font-bold text-white mb-1 drop-shadow-sm">QR Scanner</h3>
+                    <p className="text-white/60 text-sm">Scan Digital ID</p>
                 </button>
 
                 <button 
@@ -566,149 +607,26 @@ export const EventActionMenu = ({ setView, branding }) => {
                             showWarning("Biometric verification is currently unavailable. Please contact the system administrator for support.");
                         }
                     }}
-                    className="group relative flex flex-col justify-center items-center p-10 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[220px]"
+                    className="group relative flex flex-col justify-center items-center p-8 bg-white/10 backdrop-blur-md rounded-3xl border border-white/20 shadow-2xl hover:scale-[1.02] hover:bg-white/15 hover:shadow-white/20 hover:border-white/40 transition-all duration-300 text-center focus:outline-none focus:ring-4 focus:ring-white/30 h-[180px]"
                 >
-                    <div className="h-20 w-20 bg-white/10 text-white rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:bg-white/20 transition-all duration-300 shadow-lg border border-white/20">
-                        <ScanFace className="w-10 h-10 drop-shadow-md" />
+                    <div className="h-16 w-16 bg-white/10 text-white rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 group-hover:bg-white/20 transition-all duration-300 shadow-lg border border-white/20">
+                        <ScanFace className="w-8 h-8 drop-shadow-md" />
                     </div>
-                    <h3 className="text-2xl font-bold text-white mb-2 drop-shadow-sm">Face Scan</h3>
-                    <p className="text-white/70 text-base">Automatic scanning</p>
+                    <h3 className="text-xl font-bold text-white mb-1 drop-shadow-sm">Face Scan</h3>
+                    <p className="text-white/60 text-sm">Automatic scanning</p>
                 </button>
             </div>
-            {activeScanCard && (
-                <div className="pointer-events-none fixed inset-0 z-[200] flex items-center justify-center px-4">
-                    <div className="pointer-events-auto relative w-full max-w-2xl rounded-3xl border border-white/20 bg-black/80 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
-                        <button
-                            type="button"
-                            onClick={dismissScanCard}
-                            className="absolute right-4 top-4 rounded-lg p-2 text-white/70 transition-colors hover:bg-white/10 hover:text-white"
-                            aria-label="Close ID card"
-                        >
-                            <X className="h-5 w-5" />
-                        </button>
-                        <div className="mb-6">
-                            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-200/85">
-                                ID Card
-                            </p>
-                            <h3 className="mt-2 text-4xl font-extrabold text-white">
-                                {getFullNameLabel(activeScanCard)}
-                            </h3>
-                        </div>
-                        <div className="grid grid-cols-1 gap-4 text-base text-slate-100 sm:grid-cols-2">
-                            <div>
-                                <p className="text-xs uppercase tracking-widest text-slate-300/80">Role</p>
-                                <p className="mt-1 text-xl font-semibold">{formatRoleLabel(activeScanCard.role || activeScanCard.roles?.[0])}</p>
-                            </div>
-                            <div>
-                                <p className="text-xs uppercase tracking-widest text-slate-300/80">ID Number</p>
-                                <p className="mt-1 text-xl font-semibold">{activeScanCard.id_number}</p>
-                            </div>
-                            <div>
-                                <p className="text-xs uppercase tracking-widest text-slate-300/80">
-                                    {activeScanCard.role?.toLowerCase() === 'visitor' ? "Person to Visit" : "Department"}
-                                </p>
-                                <p className="mt-1 font-semibold">
-                                    {activeScanCard.role?.toLowerCase() === 'visitor' 
-                                        ? (activeScanCard.person_to_visit || "---")
-                                        : (activeScanCard.department_name || "---")
-                                    }
-                                </p>
-                            </div>
-                            {activeScanCard.role?.toLowerCase() === 'visitor' ? (
-                                <div>
-                                    <p className="text-xs uppercase tracking-widest text-slate-300/80">Purpose of Visit</p>
-                                    <p className="mt-1 font-semibold text-cyan-200">
-                                        {activeScanCard.purpose_of_visit || "---"}
-                                    </p>
-                                </div>
-                            ) : (
-                                <>
-                                    {getProgramYearLabel(activeScanCard) && (
-                                        <div>
-                                            <p className="text-xs uppercase tracking-widest text-slate-300/80">Program & Year</p>
-                                            <p className="mt-1 font-semibold text-cyan-200">
-                                                {getProgramYearLabel(activeScanCard)}
-                                            </p>
-                                        </div>
-                                    )}
-                                    {activeScanCard.position_title && (
-                                        <div>
-                                            <p className="text-xs uppercase tracking-widest text-slate-300/80">Position Title</p>
-                                            <p className="mt-1 font-semibold text-cyan-200">
-                                                {activeScanCard.position_title}
-                                            </p>
-                                        </div>
-                                    )}
-                                </>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
+            {/* Global ID Card is now managed by IdCardProvider */}
 
             {/* Manual ID Modal */}
-            {showManualModal && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md">
-                    <div className="bg-black/80 backdrop-blur-2xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 fade-in duration-200">
-                        <div className="p-8">
-                            <div className="flex items-center gap-4 mb-6">
-                                <div className="h-14 w-14 bg-white/10 rounded-2xl flex items-center justify-center text-white border border-white/20 shadow-inner">
-                                    <Keyboard className="w-7 h-7" />
-                                </div>
-                                <div>
-                                    <h2 className="text-2xl font-bold text-white tracking-wide">Enter ID Number</h2>
-                                    <p className="text-white/60 text-sm">Logging Check-in to Event</p>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => setIsManualLocked(!isManualLocked)}
-                                    className={`ml-auto p-2 rounded-xl border transition-all ${
-                                        isManualLocked 
-                                            ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' 
-                                            : 'bg-white/5 border-white/10 text-white/40 hover:text-white/60'
-                                    }`}
-                                    title={isManualLocked ? "Unlock Modal" : "Lock Modal"}
-                                >
-                                    {isManualLocked ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
-                                </button>
-                            </div>
-                            <form onSubmit={handleManualSubmit}>
-                                <input
-                                    type="text"
-                                    placeholder="e.g. 23-00123"
-                                    value={manualId}
-                                    onKeyDown={(e) => {
-                                        isDeletingManualRef.current = (e.key === 'Backspace' || e.key === 'Delete');
-                                    }}
-                                    onChange={(e) => setManualId(formatIdNumber(e.target.value, isDeletingManualRef.current))}
-                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-4 text-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-white/50 mb-3 text-center tracking-widest uppercase transition-all"
-                                    autoFocus
-                                    required
-                                    maxLength={9}
-                                />
-                                <div className="text-white/40 text-xs space-y-1.5 mb-6 max-w-[240px] mx-auto font-medium">
-                                    <div className="flex justify-between items-center">
-                                        <span>Student ID</span>
-                                        <span className="text-white/70 font-mono font-bold tracking-wider">00-00000</span>
-                                    </div>
-                                    <div className="flex justify-between items-center">
-                                        <span>Employee ID</span>
-                                        <span className="text-white/70 font-mono font-bold tracking-wider">000000000</span>
-                                    </div>
-                                    <div className="flex justify-between items-center">
-                                        <span>Visitor ID</span>
-                                        <span className="text-white/70 font-mono font-bold tracking-wider">VIS-00000</span>
-                                    </div>
-                                </div>
-                                <div className="flex gap-3">
-                                    <button type="button" onClick={() => setShowManualModal(false)} className="flex-1 px-4 py-3 bg-white/5 border border-white/10 text-white/80 font-medium rounded-xl hover:bg-white/10 hover:text-white transition-all focus:outline-none">Cancel</button>
-                                    <button type="submit" className="flex-[2] px-4 py-3 bg-white text-black font-bold rounded-xl hover:bg-slate-200 transition-all focus:outline-none focus:ring-4 focus:ring-white/30 flex items-center justify-center gap-2 text-lg shadow-lg">Submit <ArrowRight className="w-5 h-5" /></button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <ManualIdModal
+                isOpen={showManualModal}
+                onClose={() => setShowManualModal(false)}
+                onSubmit={handleManualSubmit}
+                isLocked={isManualLocked}
+                onToggleLock={() => setIsManualLocked(!isManualLocked)}
+                subtitle="Logging Check-in to Event"
+            />
 
             {showQrScanner && (
                 <QRScannerOverlay 
@@ -720,7 +638,8 @@ export const EventActionMenu = ({ setView, branding }) => {
                             showError(error || "Invalid scan target.");
                             return;
                         }
-                        handleQrScan(scannedId, true);
+                        const isStillActive = isScannerLocked || showManualModal || showFaceScanner;
+                        handleQrScan(scannedId, isStillActive);
                     }} 
                     onClose={() => setShowQrScanner(false)} 
                     isLocked={isScannerLocked}
@@ -740,7 +659,8 @@ export const EventActionMenu = ({ setView, branding }) => {
                         if (!isScannerLocked) {
                             setShowFaceScanner(false);
                         }
-                        handleQrScan(scannedId, true);
+                        const isStillActive = isScannerLocked || showManualModal || showQrScanner;
+                        handleQrScan(scannedId, isStillActive);
                     }}
                 />
             )}

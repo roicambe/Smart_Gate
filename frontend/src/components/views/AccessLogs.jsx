@@ -22,16 +22,29 @@ export const AccessLogs = ({ branding, adminSession }) => {
         return date.toLocaleString();
     }
 
+    const getRoleStyle = (behavior) => {
+        switch (behavior?.toLowerCase()) {
+            case 'student':
+                return 'bg-blue-100 text-blue-700 border-blue-200';
+            case 'employee':
+                return 'bg-purple-100 text-purple-700 border-purple-200';
+            case 'visitor':
+                return 'bg-orange-100 text-orange-700 border-orange-200';
+            default:
+                return 'bg-slate-100 text-slate-700 border-slate-200';
+        }
+    };
+
     const EVENT_EXPORT_COLUMNS = useMemo(() => ([
-        { id: 'name', label: 'Name', value: (log) => log.person_name || 'N/A' },
         { id: 'timestamp', label: 'Timestamp', value: (log) => formatDate(log.scanned_at) },
         { id: 'idNumber', label: 'ID Number', value: (log) => log.id_number || 'N/A' },
-        { id: 'status', label: 'Status', value: (log) => log.status || 'On Time' },
+        { id: 'name', label: 'Name', value: (log) => log.person_name || 'N/A' },
         { id: 'department', label: 'Department', value: (log) => log.department_name || 'N/A' },
         { id: 'program', label: 'Program', value: (log) => log.program_name || 'N/A' },
         { id: 'yearLevel', label: 'Year Level', value: (log) => log.year_level ? `Year ${log.year_level}` : 'N/A' },
         { id: 'role', label: 'Role', value: (log) => (log.roles || []).join(', ') || 'N/A' },
         { id: 'subRole', label: 'Sub Role', value: (log) => log.position_title || (log.roles || []).filter(r => !['student', 'visitor'].includes(String(r).toLowerCase())).join(', ') || 'N/A' },
+        { id: 'status', label: 'Status', value: (log) => log.status || 'On Time' },
         { id: 'eventName', label: 'Event', value: (log) => log.event_name || 'N/A' },
     ]), []);
 
@@ -69,12 +82,16 @@ export const AccessLogs = ({ branding, adminSession }) => {
     const [showExportMenu, setShowExportMenu] = useState(false);
     const [showManualExportModal, setShowManualExportModal] = useState(false);
     const [isExporting, setIsExporting] = useState(false);
-    const [manualSelectedColumns, setManualSelectedColumns] = useState(['name', 'timestamp', 'idNumber', 'status', 'department', 'role']);
+    const [manualSelectedColumns, setManualSelectedColumns] = useState(['timestamp', 'name', 'department', 'status']);
     const [manualSelectedRoles, setManualSelectedRoles] = useState([]);
     const [manualDepartment, setManualDepartment] = useState('All');
     const [manualProgram, setManualProgram] = useState('All');
     const [manualYearLevel, setManualYearLevel] = useState('All');
     const [manualReportTitle, setManualReportTitle] = useState('');
+    const [manualIncludeNumbering, setManualIncludeNumbering] = useState(true);
+    const [manualIncludeAbsent, setManualIncludeAbsent] = useState(false);
+    const [manualIncludeStats, setManualIncludeStats] = useState(false);
+    const [manualIncludePartTime, setManualIncludePartTime] = useState(false);
     const exportMenuRef = useRef(null);
     const { showSuccess, showError, showWarning, showProcessing } = useToast();
 
@@ -222,8 +239,11 @@ export const AccessLogs = ({ branding, adminSession }) => {
             if (typeof prefs.department === 'string') setManualDepartment(prefs.department);
             if (typeof prefs.program === 'string') setManualProgram(prefs.program);
             if (typeof prefs.yearLevel === 'string') setManualYearLevel(prefs.yearLevel);
-            if (typeof prefs.visitorStatus === 'string') setManualVisitorStatus(prefs.visitorStatus);
             if (typeof prefs.reportTitle === 'string') setManualReportTitle(prefs.reportTitle);
+            if (typeof prefs.includeNumbering === 'boolean') setManualIncludeNumbering(prefs.includeNumbering);
+            if (typeof prefs.includeAbsent === 'boolean') setManualIncludeAbsent(prefs.includeAbsent);
+            if (typeof prefs.includeStats === 'boolean') setManualIncludeStats(prefs.includeStats);
+            if (typeof prefs.includePartTime === 'boolean') setManualIncludePartTime(prefs.includePartTime);
         } catch (error) {
             console.warn('Failed to load manual export preferences', error);
         }
@@ -240,6 +260,10 @@ export const AccessLogs = ({ branding, adminSession }) => {
                     program: manualProgram,
                     yearLevel: manualYearLevel,
                     reportTitle: manualReportTitle,
+                    includeNumbering: manualIncludeNumbering,
+                    includeAbsent: manualIncludeAbsent,
+                    includeStats: manualIncludeStats,
+                    includePartTime: manualIncludePartTime,
                 })
             );
         } catch (error) {
@@ -560,6 +584,8 @@ export const AccessLogs = ({ branding, adminSession }) => {
                 if (manualYearLevel !== 'All' && String(log.year_level || '') !== String(manualYearLevel)) return false;
             }
             
+            if (!manualIncludePartTime && log.is_part_time) return false;
+
             return true;
         });
     };
@@ -571,13 +597,106 @@ export const AccessLogs = ({ branding, adminSession }) => {
             logsForExport: filteredLogs,
             selectedColumnIds: defaultColumns,
             reportTitleOverride: defaultTitle,
-            includeStatsPage: false,
+            includeStatsPage: true,
             entityLabelPrefix: 'Quick PDF Export',
         });
     };
 
     const handleManualExportPDF = async () => {
-        const selectedLogs = applyManualEventExportFilters(filteredLogs);
+        let selectedLogs = [...applyManualEventExportFilters(filteredLogs)];
+        
+        if (manualIncludeAbsent) {
+            try {
+                setIsExporting(true);
+                showProcessing("Fetching master list for absent people...");
+                const [students, employees] = await Promise.all([
+                    invoke('get_students'),
+                    invoke('get_employees')
+                ]);
+
+                // Filter master list by selected filters
+                const selectedLowerRoles = manualSelectedRoles.map(r => r.toLowerCase());
+                const masterList = [];
+
+                if (selectedLowerRoles.length === 0 || selectedLowerRoles.includes('student')) {
+                    students.forEach(s => {
+                        if (manualDepartment !== 'All' && (s.department_name || 'N/A') !== manualDepartment) return;
+                        if (manualProgram !== 'All' && (s.program_name || 'N/A') !== manualProgram) return;
+                        if (manualYearLevel !== 'All' && String(s.year_level || '') !== String(manualYearLevel)) return;
+                        
+                        const middleInitial = s.middle_name ? s.middle_name.trim().charAt(0) + '.' : '';
+                        const formattedName = `${s.last_name}, ${s.first_name}${middleInitial ? ' ' + middleInitial : ''}${s.suffix ? ' ' + s.suffix : ''}`;
+                        
+                        masterList.push({
+                            person_name: formattedName,
+                            id_number: s.id_number,
+                            roles: s.roles,
+                            department_name: s.department_name,
+                            program_name: s.program_name,
+                            year_level: s.year_level,
+                            position_title: null,
+                        });
+                    });
+                }
+
+                if (selectedLowerRoles.length === 0 || selectedLowerRoles.some(r => !['student', 'visitor'].includes(r))) {
+                    employees.forEach(e => {
+                        if (manualDepartment !== 'All' && (e.department_name || 'N/A') !== manualDepartment) return;
+                        if (selectedLowerRoles.length > 0) {
+                             const hasMatch = selectedLowerRoles.some(r => (e.roles || []).some(er => er.toLowerCase() === r));
+                             if (!hasMatch) return;
+                        }
+                        
+                        if (!manualIncludePartTime && e.is_part_time) return;
+
+                        const middleInitial = e.middle_name ? e.middle_name.trim().charAt(0) + '.' : '';
+                        const formattedName = `${e.last_name}, ${e.first_name}${middleInitial ? ' ' + middleInitial : ''}${e.suffix ? ' ' + e.suffix : ''}`;
+
+                        masterList.push({
+                            person_name: formattedName,
+                            id_number: e.id_number,
+                            roles: e.roles,
+                            department_name: e.department_name,
+                            program_name: null,
+                            year_level: null,
+                            position_title: e.position_title,
+                            is_part_time: e.is_part_time,
+                        });
+                    });
+                }
+
+                // Identify who attended
+                const attendedIds = new Set(selectedLogs.map(l => l.id_number));
+                
+                // Determine event name for absent entries
+                const eventName = eventFilter !== 'All' ? eventFilter : (selectedLogs[0]?.event_name || 'N/A');
+
+                // Add absent people
+                masterList.forEach(p => {
+                    if (!attendedIds.has(p.id_number)) {
+                        selectedLogs.push({
+                            ...p,
+                            scanned_at: null,
+                            status: 'Absent',
+                            event_name: eventName,
+                            scanner_location: 'N/A',
+                            scanner_function: 'N/A',
+                            log_id: -1
+                        });
+                    }
+                });
+                
+                // Sort them alphabetically by name
+                selectedLogs.sort((a, b) => a.person_name.localeCompare(b.person_name));
+
+            } catch (err) {
+                console.error("Failed to fetch master list for absent people", err);
+                showError("Failed to include absent people.");
+            } finally {
+                setIsExporting(false);
+            }
+        }
+
         if (!manualSelectedColumns.length) {
             showWarning('Select at least one column to export.');
             return;
@@ -586,8 +705,9 @@ export const AccessLogs = ({ branding, adminSession }) => {
             logsForExport: selectedLogs,
             selectedColumnIds: manualSelectedColumns,
             reportTitleOverride: manualReportTitle.trim() || generateEventAttendanceTitle(selectedLogs),
-            includeStatsPage: false,
+            includeStatsPage: manualIncludeStats,
             entityLabelPrefix: 'Manual PDF Export',
+            includeNumbering: manualIncludeNumbering,
         });
     };
 
@@ -597,6 +717,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
         reportTitleOverride = '',
         includeStatsPage = true,
         entityLabelPrefix = 'PDF Export',
+        includeNumbering = false,
     } = {}) => {
         if (logsForExport.length === 0) {
             showWarning('No records match the selected export criteria.');
@@ -651,22 +772,33 @@ export const AccessLogs = ({ branding, adminSession }) => {
                     { id: 'action', label: 'Action', value: (log) => log.scanner_function?.toUpperCase() || 'N/A' },
                 ]
                 : EVENT_EXPORT_COLUMNS.filter(col => selectedColumnIds.includes(col.id));
-            const tableColumn = selectedColumns.map(col => col.label);
+            
+            let tableColumn = selectedColumns.map(col => col.label);
+            if (includeNumbering) {
+                tableColumn = ['#', ...tableColumn];
+            }
 
             const tableRows = [];
 
-            logsForExport.forEach(log => {
+            logsForExport.forEach((log, index) => {
+                let row = [];
                 if (activeTab === 'gateLogs') {
-                    tableRows.push([
+                    row = [
                         formatDate(log.scanned_at),
                         log.person_name,
                         log.id_number,
                         log.roles?.join(', ') || 'N/A',
                         log.department_name,
                         log.scanner_function.toUpperCase()
-                    ]);
+                    ];
                 } else {
-                    tableRows.push(selectedColumns.map(col => col.value(log)));
+                    row = selectedColumns.map(col => col.value(log));
+                }
+
+                if (includeNumbering) {
+                    tableRows.push([(index + 1).toString(), ...row]);
+                } else {
+                    tableRows.push(row);
                 }
             });
 
@@ -738,9 +870,46 @@ export const AccessLogs = ({ branding, adminSession }) => {
                 head: [tableColumn],
                 body: tableRows,
                 theme: 'grid',
-                headStyles: { fillColor: '#1E293B', textColor: '#FFFFFF', fontStyle: 'bold', fontSize: 9 },
-                bodyStyles: { fontSize: 10 },
-                styles: { cellPadding: 3, overflow: 'linebreak', lineColor: [203, 213, 225], lineWidth: 0.2 },
+                headStyles: { fillColor: '#1E293B', textColor: '#FFFFFF', fontStyle: 'bold', fontSize: 8.5 },
+                bodyStyles: { fontSize: 8.5, textColor: [30, 41, 59] },
+                styles: { 
+                    cellPadding: 1.5, 
+                    overflow: 'linebreak', 
+                    lineColor: [203, 213, 225], 
+                    lineWidth: 0.1,
+                    valign: 'middle'
+                },
+                columnStyles: {
+                    // Row Numbering (#)
+                    0: includeNumbering ? { cellWidth: 8, halign: 'center' } : {},
+                    // Adjust other column widths based on their headers
+                    ...(() => {
+                        const styles = {};
+                        tableColumn.forEach((label, idx) => {
+                            if (label === 'Timestamp') styles[idx] = { cellWidth: 32 };
+                            if (label === 'ID Number') styles[idx] = { cellWidth: 22 };
+                            if (label === 'Status') styles[idx] = { cellWidth: 18, halign: 'center', fontStyle: 'bold' };
+                            if (label === 'Year Level') styles[idx] = { cellWidth: 18, halign: 'center' };
+                            if (label === 'Role' || label === 'Sub Role') styles[idx] = { cellWidth: 25 };
+                        });
+                        return styles;
+                    })()
+                },
+                didParseCell: function(data) {
+                    if (data.section === 'body') {
+                        const colLabel = tableColumn[data.column.index];
+                        if (colLabel === 'Status') {
+                            const val = String(data.cell.raw || '').toLowerCase();
+                            if (val.includes('late')) {
+                                data.cell.styles.textColor = [249, 115, 22]; // Orange-500
+                            } else if (val.includes('absent')) {
+                                data.cell.styles.textColor = [225, 29, 72]; // Rose-600
+                            } else if (val.includes('on time') || val.includes('present')) {
+                                data.cell.styles.textColor = [5, 150, 105]; // Emerald-600
+                            }
+                        }
+                    }
+                },
                 didDrawPage: function () {
                     drawHeader();
                 }
@@ -821,14 +990,38 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                     <Download className="w-4 h-4" />
                                     <span className="font-semibold text-sm">Manual Export</span>
                                 </button>
-                                <button
-                                    onClick={handleQuickExportPDF}
-                                    disabled={isExporting}
-                                    className={`flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors focus:outline-none shadow-sm ${isExporting ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                >
-                                    {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
-                                    <span className="font-semibold text-sm">{isExporting ? 'Wait' : 'Quick Export'}</span>
-                                </button>
+                                
+                                <div className="relative shrink-0" ref={exportMenuRef}>
+                                    <button
+                                        onClick={() => setShowExportMenu(!showExportMenu)}
+                                        disabled={isExporting}
+                                        className={`flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors focus:outline-none shadow-sm ${isExporting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                        {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                                        <span className="font-semibold text-sm">
+                                            {isExporting ? 'Wait' : 'Quick Export'}
+                                        </span>
+                                    </button>
+
+                                    {showExportMenu && !isExporting && (
+                                        <div className="absolute right-0 mt-2 w-48 bg-white border border-slate-200 rounded-lg shadow-lg z-50 overflow-hidden">
+                                            <button
+                                                onClick={handleQuickExportPDF}
+                                                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors border-b border-slate-100"
+                                            >
+                                                <FileText className="w-4 h-4 text-red-500" />
+                                                Export PDF
+                                            </button>
+                                            <button
+                                                onClick={handleExportExcel}
+                                                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
+                                            >
+                                                <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
+                                                Export Excel
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
                             </>
                         ) : (
                             <div className="relative shrink-0" ref={exportMenuRef}>
@@ -1080,13 +1273,12 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                         </td>
                                         <td className="px-3 py-1.5">
                                             <div className="flex flex-wrap gap-1">
-                                                {log.roles?.map(role => (
-                                                    <span key={role} className={`px-2 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wider border ${role.toLowerCase() === 'student' ? 'bg-blue-100 text-blue-700 border-blue-200' :
-                                                        role.toLowerCase() === 'professor' ? 'bg-purple-100 text-purple-700 border-purple-200' :
-                                                            role.toLowerCase() === 'visitor' ? 'bg-orange-100 text-orange-700 border-orange-200' :
-                                                                'bg-slate-100 text-slate-700 border-slate-200'
-                                                        }`}>
-                                                        {role}
+                                                {(log.roles_with_behavior || log.roles?.map(r => ({ name: r, behavior: r })) || []).map((roleObj, idx) => (
+                                                    <span 
+                                                        key={`${roleObj.name}-${idx}`} 
+                                                        className={`px-2 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wider border ${getRoleStyle(roleObj.behavior)}`}
+                                                    >
+                                                        {roleObj.name}
                                                     </span>
                                                 ))}
                                             </div>
@@ -1096,16 +1288,14 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                 <td className="px-3 py-1.5">
                                                     <div className="flex flex-col">
                                                         <span className="text-slate-900 font-medium text-xs">
-                                                            {log.roles?.some(r => r.toLowerCase() === 'visitor') ? "VISITOR" : (log.department_name || "-")}
+                                                            {log.role_behaviors?.includes('visitor') ? "VISITOR" : (log.department_name || "N/A")}
                                                         </span>
                                                         <span className="text-[10px] text-slate-500 tracking-tight">
-                                                            {log.roles?.some(r => r.toLowerCase() === 'student')
+                                                            {log.role_behaviors?.includes('student')
                                                                 ? (log.program_name ? `${log.program_name} ${log.year_level ? `- Yr ${log.year_level}` : ""}` : "-")
-                                                                : log.roles?.some(r => r.toLowerCase() === 'professor' || r.toLowerCase() === 'staff')
+                                                                : log.role_behaviors?.includes('employee')
                                                                     ? (log.position_title || "Faculty/Staff")
-                                                                    : log.roles?.some(r => r.toLowerCase() === 'visitor')
-                                                                        ? "N/A"
-                                                                        : "-"
+                                                                    : "---"
                                                             }
                                                         </span>
                                                     </div>
@@ -1129,16 +1319,14 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                 <td className="px-3 py-1.5">
                                                     <div className="flex flex-col">
                                                         <span className="text-slate-900 font-medium text-xs">
-                                                            {log.roles?.some(r => r.toLowerCase() === 'visitor') ? "VISITOR" : (log.department_name || "-")}
+                                                            {log.role_behaviors?.includes('student') 
+                                                                ? (log.program_name || "No Program") 
+                                                                : (log.role_behaviors?.includes('visitor') ? "VISITOR" : (log.department_name || "N/A"))}
                                                         </span>
                                                         <span className="text-[10px] text-slate-500 uppercase tracking-tight">
-                                                            {log.roles?.some(r => r.toLowerCase() === 'student')
-                                                                ? (log.program_name ? `${log.program_name} ${log.year_level ? `- Year ${log.year_level}` : ""}` : "-")
-                                                                : log.roles?.some(r => r.toLowerCase() === 'professor' || r.toLowerCase() === 'staff')
-                                                                    ? (log.position_title || "Faculty/Staff")
-                                                                    : log.roles?.some(r => r.toLowerCase() === 'visitor')
-                                                                        ? "N/A"
-                                                                        : "-"
+                                                            {log.role_behaviors?.includes('student')
+                                                                ? (log.year_level ? `Year ${log.year_level} - ${log.department_name}` : log.department_name)
+                                                                : (log.position_title || "---")
                                                             }
                                                         </span>
                                                     </div>
@@ -1369,6 +1557,48 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                         </div>
                                     </>
                                 )}
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-white/50 mb-3">Report Options</label>
+                                <div className="flex flex-wrap gap-6 border border-white/10 rounded-2xl p-5 bg-black/20">
+                                    <label className="inline-flex items-center gap-3 text-sm text-white/70 hover:text-white transition-colors cursor-pointer group">
+                                        <input
+                                            type="checkbox"
+                                            checked={manualIncludeNumbering}
+                                            onChange={(e) => setManualIncludeNumbering(e.target.checked)}
+                                            className="w-4 h-4 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500/30 accent-emerald-500 transition-all"
+                                        />
+                                        <span className="font-medium">Include Row Numbering</span>
+                                    </label>
+                                    <label className="inline-flex items-center gap-3 text-sm text-white/70 hover:text-white transition-colors cursor-pointer group">
+                                        <input
+                                            type="checkbox"
+                                            checked={manualIncludeAbsent}
+                                            onChange={(e) => setManualIncludeAbsent(e.target.checked)}
+                                            className="w-4 h-4 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500/30 accent-emerald-500 transition-all"
+                                        />
+                                        <span className="font-medium">Include People Without Attendance (Mark as Absent)</span>
+                                    </label>
+                                    <label className="inline-flex items-center gap-3 text-sm text-white/70 hover:text-white transition-colors cursor-pointer group">
+                                        <input
+                                            type="checkbox"
+                                            checked={manualIncludeStats}
+                                            onChange={(e) => setManualIncludeStats(e.target.checked)}
+                                            className="w-4 h-4 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500/30 accent-emerald-500 transition-all"
+                                        />
+                                        <span className="font-medium">Include Statistics Page</span>
+                                    </label>
+                                    <label className="inline-flex items-center gap-3 text-sm text-white/70 hover:text-white transition-colors cursor-pointer group">
+                                        <input
+                                            type="checkbox"
+                                            checked={manualIncludePartTime}
+                                            onChange={(e) => setManualIncludePartTime(e.target.checked)}
+                                            className="w-4 h-4 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500/30 accent-emerald-500 transition-all"
+                                        />
+                                        <span className="font-medium">Include Part-Time Employees</span>
+                                    </label>
+                                </div>
                             </div>
 
                             <div>

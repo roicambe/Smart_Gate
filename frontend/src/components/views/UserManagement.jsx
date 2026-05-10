@@ -48,26 +48,28 @@ const formatName = (val) => {
     // List of suffixes to preserve/handle
     const suffixes = ['Jr', 'Sr', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
 
-    return cleaned.split(' ').map(word => {
-        if (!word) return '';
+    // Split by spaces and hyphens while keeping the delimiters to correctly title case each segment
+    return cleaned.split(/(\s|-)/).map(part => {
+        if (!part) return '';
+        if (part === ' ' || part === '-') return part;
         
-        const cleanWord = word.replace(/[.,]/g, '');
+        const cleanWord = part.replace(/[.,]/g, '');
         const upperWord = cleanWord.toUpperCase();
         
         // Special handling for suffixes
         if (suffixes.includes(upperWord)) {
-            const hasDot = word.endsWith('.');
+            const hasDot = part.endsWith('.');
             return upperWord + (hasDot ? '.' : '');
         }
 
         // Handle specific cases like "Jr." if typed manually with dot
         if (upperWord === 'JR' || upperWord === 'SR') {
-             return upperWord.charAt(0).toUpperCase() + upperWord.slice(1).toLowerCase() + (word.endsWith('.') ? '.' : '');
+             return upperWord.charAt(0).toUpperCase() + upperWord.slice(1).toLowerCase() + (part.endsWith('.') ? '.' : '');
         }
 
         // Standard Title Case
-        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-    }).join(' ');
+        return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+    }).join('');
 };
 
 const buildUserPayload = (mainRole, subRoles, data, roleBehavior) => {
@@ -310,9 +312,14 @@ export const UserManagement = ({ adminSession, branding }) => {
 
     const handleEditClick = (user) => {
         const roles = user.roles || [];
-        const mainRoles = ['student', 'employee', 'visitor'];
-        const mainRole = roles.find(r => mainRoles.includes(r.toLowerCase()))?.toLowerCase() || (mainTab === 'visitors' ? 'visitor' : subTab);
-        const subRoles = roles.filter(r => !mainRoles.includes(r.toLowerCase()));
+        const mainRoleObj = roles.map(r => availableRoles.find(ar => ar.role_name.toLowerCase() === r.trim().toLowerCase()))
+            .find(r => r && r.is_main_role);
+        
+        const mainRole = mainRoleObj ? mainRoleObj.role_name.toLowerCase() : (mainTab === 'visitors' ? 'visitor' : subTab);
+        const subRoles = roles.filter(r => {
+            const roleObj = availableRoles.find(ar => ar.role_name.toLowerCase() === r.trim().toLowerCase());
+            return !roleObj || !roleObj.is_main_role;
+        });
 
         setSelectedUser(user);
         setFormData({
@@ -420,7 +427,11 @@ export const UserManagement = ({ adminSession, branding }) => {
     const visitorYearCode = new Date().getFullYear().toString().slice(-2);
     const handleRegisterClick = () => {
         setFormData({
-            mainRole: mainTab === 'visitors' ? 'visitor' : subTab === 'student' ? 'student' : 'employee',
+            mainRole: (() => {
+                const targetBehavior = mainTab === 'visitors' ? 'visitor' : subTab;
+                const role = availableRoles.find(r => r.is_main_role && (r.role_behavior === targetBehavior || r.role_name.toLowerCase() === targetBehavior));
+                return role ? role.role_name.toLowerCase() : targetBehavior;
+            })(),
             subRoles: [],
             id_number: activeRole === 'visitor' ? `VIS-${Math.floor(10000 + Math.random() * 90000)}` : '',
             first_name: '',
@@ -792,8 +803,7 @@ export const UserManagement = ({ adminSession, branding }) => {
                                     <>
                                         <SortableHeader label="Purpose" sortKey="purpose_of_visit" sortConfig={sortConfig} onSort={requestSort} width="180px" />
                                         <SortableHeader label="Person to Visit" sortKey="person_to_visit" sortConfig={sortConfig} onSort={requestSort} width="180px" />
-                                        <SortableHeader label="Registration Date" sortKey="created_at" sortConfig={sortConfig} onSort={requestSort} width="140px" />
-                                        <th className="px-6 py-4 font-bold text-xs uppercase tracking-wider text-slate-700" style={{ width: '140px' }}>Registration Time</th>
+                                        <SortableHeader label="Registration Info" sortKey="created_at" sortConfig={sortConfig} onSort={requestSort} width="180px" />
                                         <SortableHeader label="Status" sortKey="is_active" sortConfig={sortConfig} onSort={requestSort} width="100px" />
                                     </>
                                 ) : (
@@ -812,7 +822,7 @@ export const UserManagement = ({ adminSession, branding }) => {
                         <tbody className="divide-y divide-slate-100">
                             {isLoading ? (
                                 <tr>
-                                    <td colSpan={mainTab === 'visitors' ? 8 : 5} className="text-center py-20 text-slate-500">
+                                    <td colSpan={mainTab === 'visitors' ? 7 : 5} className="text-center py-20 text-slate-500">
                                         <div className="flex flex-col items-center justify-center space-y-3">
                                             <Loader2 className="w-10 h-10 animate-spin text-blue-500" />
                                             <p className="text-slate-500 font-medium">Synchronizing profile data...</p>
@@ -821,7 +831,7 @@ export const UserManagement = ({ adminSession, branding }) => {
                                 </tr>
                             ) : filteredUsers.length === 0 ? (
                                 <tr>
-                                    <td colSpan={mainTab === 'visitors' ? 8 : 5} className="p-12 text-center">
+                                    <td colSpan={mainTab === 'visitors' ? 7 : 5} className="p-12 text-center">
                                         <div className="flex flex-col items-center justify-center space-y-4">
                                             <div className="p-4 bg-slate-50 rounded-full border border-slate-100">
                                                 <Users className="w-10 h-10 text-slate-300" />
@@ -853,10 +863,10 @@ export const UserManagement = ({ adminSession, branding }) => {
                                                 <td className="px-3 py-1.5 text-slate-600">{user.purpose_of_visit}</td>
                                                 <td className="px-3 py-1.5 text-slate-600">{user.person_to_visit || 'N/A'}</td>
                                                 <td className="px-3 py-1.5 text-slate-600">
-                                                    {user.created_at ? new Date(user.created_at).toLocaleDateString() : 'N/A'}
-                                                </td>
-                                                <td className="px-3 py-1.5 text-slate-600">
-                                                    {user.created_at ? new Date(user.created_at).toLocaleTimeString([], { timeStyle: 'short' }) : 'N/A'}
+                                                    <div className="flex flex-col">
+                                                        <span className="font-medium text-slate-900">{user.created_at ? new Date(user.created_at).toLocaleDateString() : 'N/A'}</span>
+                                                        <span className="text-[10px] text-slate-500 font-mono">{user.created_at ? new Date(user.created_at).toLocaleTimeString([], { timeStyle: 'short' }) : 'N/A'}</span>
+                                                    </div>
                                                 </td>
                                                 <td className="px-3 py-1.5">
                                                     <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${(user.time_out || (user.time_in && new Date(user.time_in).toDateString() !== new Date().toDateString())) ? 'bg-slate-100 text-slate-600 border border-slate-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
@@ -878,7 +888,6 @@ export const UserManagement = ({ adminSession, branding }) => {
                                                                 <span className="font-semibold text-slate-800">{user.department_name || 'N/A'}</span>
                                                                 <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
                                                                     <span className="text-xs text-slate-500 uppercase tracking-wide">{user.role}</span>
-                                                                    {user.is_part_time && <span className="text-[10px] bg-amber-50 text-amber-700 px-1.5 py-0 rounded border border-amber-200 font-bold uppercase tracking-tighter">Part-Time</span>}
                                                                 </div>
                                                             </div>
                                                         )}
@@ -892,6 +901,11 @@ export const UserManagement = ({ adminSession, branding }) => {
                                                         {user.is_irregular && (
                                                             <span className="inline-flex items-center px-2.5 py-0.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-700 border border-amber-200">
                                                                 Irregular
+                                                            </span>
+                                                        )}
+                                                        {user.is_part_time && (
+                                                            <span className="inline-flex items-center px-2.5 py-0.5 text-xs font-semibold rounded-full bg-orange-100 text-orange-700 border border-orange-200">
+                                                                Part-Time
                                                             </span>
                                                         )}
                                                     </div>
