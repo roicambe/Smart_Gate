@@ -108,6 +108,9 @@ CREATE TABLE IF NOT EXISTS events (
     description TEXT NULL,
     is_enabled BOOLEAN NOT NULL DEFAULT 1,
     late_threshold INTEGER NOT NULL DEFAULT 0,
+    required_departments TEXT NULL,
+    required_programs TEXT NULL,
+    required_year_levels TEXT NULL,
     is_archived BOOLEAN NOT NULL DEFAULT 0,
     archived_at DATETIME NULL
 );
@@ -253,8 +256,8 @@ INSERT OR IGNORE INTO accounts (username, password_hash, full_name, role, is_fir
     ('admin', 'admin123', 'System Administrator', 'System Administrator', 0);
 
 -- Default Events
-INSERT OR IGNORE INTO events (event_id, event_name, description) VALUES
-    (1, 'Flag Ceremony', 'Official Monday morning assembly');
+INSERT OR IGNORE INTO events (event_id, event_name, description, late_threshold) VALUES
+    (1, 'Flag Ceremony', 'Official Monday morning assembly', 15);
 
 INSERT OR IGNORE INTO event_weekly (event_id, day_of_week, start_time, end_time) VALUES
     (1, 'Monday', '07:30:00', '08:30:00');

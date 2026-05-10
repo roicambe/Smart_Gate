@@ -77,6 +77,9 @@ pub struct Event {
     pub description: Option<String>,
     pub is_enabled: bool,
     pub late_threshold: i64,
+    pub required_departments: Option<String>,
+    pub required_programs: Option<String>,
+    pub required_year_levels: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -119,6 +122,12 @@ pub struct AuditLog {
     pub old_values: Option<String>,
     pub new_values: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RoleBadge {
+    pub name: String,
+    pub behavior: String,
 }
 
 // ------ Joined Models for Frontend Use ------
@@ -168,6 +177,7 @@ pub struct VisitorDetails {
     pub middle_name: Option<String>,
     pub last_name: String,
     pub suffix: Option<String>,
+    pub roles: Vec<String>,
     pub contacts: Vec<PersonContact>,
     pub purpose_of_visit: String,
     pub person_to_visit: String,
@@ -199,6 +209,9 @@ pub struct ActivityLogDetails {
     pub scanner_function: String,
     pub event_name: Option<String>,
     pub status: Option<String>,
+    pub is_part_time: Option<bool>,
+    pub role_behaviors: Vec<String>,
+    pub roles_with_behavior: Vec<RoleBadge>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -243,6 +256,7 @@ pub struct ScanPersonDetails {
     pub person_id: i64,
     pub roles: Vec<String>,
     pub role: String,
+    pub role_behavior: Option<String>,
     pub id_number: String,
     pub first_name: String,
     pub middle_name: Option<String>,
@@ -251,7 +265,9 @@ pub struct ScanPersonDetails {
     pub department_name: Option<String>,
     pub program_name: Option<String>,
     pub year_level: Option<i64>,
+    pub is_irregular: Option<bool>,
     pub position_title: Option<String>,
+    pub is_part_time: Option<bool>,
     pub purpose_of_visit: Option<String>,
     pub person_to_visit: Option<String>,
     pub face_image: Option<String>,

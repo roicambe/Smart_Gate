@@ -183,7 +183,7 @@ export const OrganizationalStructure = ({ branding, adminSession }) => {
                     roleName: formData.role_name,
                     description: formData.role_description || null,
                     isMainRole: formData.is_main_role,
-                    parentRoleId: formData.parent_role_id ? parseInt(formData.parent_role_id) : null,
+                    parentRoleId: formData.is_main_role ? null : (formData.parent_role_id ? parseInt(formData.parent_role_id) : null),
                     roleBehavior: formData.is_main_role ? formData.role_behavior : null,
                     activeAdminId: adminSession?.account_id
                 });
@@ -234,7 +234,7 @@ export const OrganizationalStructure = ({ branding, adminSession }) => {
             role_description: '',
             role_behavior: 'student',
             is_main_role: activeSubTab === 'main_role',
-            parent_role_id: allRoles.filter(r => r.is_main_role).length > 0 ? allRoles.filter(r => r.is_main_role)[0].role_id : ''
+            parent_role_id: (activeSubTab === 'sub_role' && allRoles.filter(r => r.is_main_role).length > 0) ? allRoles.filter(r => r.is_main_role)[0].role_id : ''
         });
         setSelectedItem(null);
     };
@@ -620,7 +620,7 @@ export const OrganizationalStructure = ({ branding, adminSession }) => {
                                                 className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30 focus:ring-2 focus:ring-white/20 focus:outline-none resize-none" placeholder="Briefly describe the purpose or permissions of this role." />
                                         </div>
 
-                                        {(activeSubTab === 'main_role' || (showEditModal && formData.is_main_role)) && (
+                                         {mainTab === 'roles' && (showEditModal ? formData.is_main_role : activeSubTab === 'main_role') && (
                                             <div>
                                                 <label className="block text-xs text-white/60 mb-2 font-semibold uppercase tracking-wider">Role Behavior <span className="text-rose-500 text-base font-bold ml-0.5">*</span></label>
                                                 <p className="text-[11px] text-white/40 mb-3 leading-relaxed">This determines which registration fields, ID format, and modal behavior are used when registering or editing profiles with this role.</p>
