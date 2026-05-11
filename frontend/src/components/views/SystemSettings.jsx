@@ -73,7 +73,7 @@ export const SystemSettings = ({ setIsAdminLoggedIn, setView, adminSession, bran
                 </div>
             </div>
 
-            <div className="flex-1 min-h-0 relative overflow-y-auto pr-1">
+            <div className={`flex-1 min-h-0 relative ${activeTab === 'system_configuration' ? 'overflow-hidden' : 'overflow-y-auto'} pr-1`}>
                 {activeTab === 'my_account' && (
                     <div className="space-y-6">
                         <MyAccount adminSession={adminSession} setIsAdminLoggedIn={setIsAdminLoggedIn} setView={setView} showToast={notify} />
