@@ -1755,7 +1755,7 @@ pub fn bulk_import_users_from_excel(
     if role_ids.is_empty() {
         return Err("No roles selected for import.".to_string());
     }
-    let mut conn = pool.get().map_err(|e| e.to_string())?;
+    let conn = pool.get().map_err(|e| e.to_string())?;
 
     // 1. Resolve Role and Behavior (using the first role as the behavioral template)
     let primary_role_id = role_ids[0];
