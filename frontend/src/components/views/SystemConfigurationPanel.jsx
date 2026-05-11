@@ -11,6 +11,7 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
     const [enableAutoExit, setEnableAutoExit] = useState(true);
     const [autoExitTime, setAutoExitTime] = useState('22:00');
     const [enableEntryExitValidation, setEnableEntryExitValidation] = useState(true);
+    const [brevoApiKey, setBrevoApiKey] = useState('');
     const [isSaving, setIsSaving] = useState(false);
 
     // Promotion Modal state
@@ -25,6 +26,7 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
             setEnableAutoExit(branding.enable_auto_exit ?? false);
             setAutoExitTime(branding.auto_exit_time ?? '22:00');
             setEnableEntryExitValidation(branding.enable_entry_exit_validation ?? true);
+            setBrevoApiKey(branding.brevo_api_key ?? '');
         }
     }, [branding]);
 
@@ -39,7 +41,8 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
                 enableFaceRecognition: enableFaceRecognition,
                 enableAutoExit: enableAutoExit,
                 autoExitTime: autoExitTime,
-                enableEntryExitValidation: enableEntryExitValidation
+                enableEntryExitValidation: enableEntryExitValidation,
+                brevoApiKey: brevoApiKey
             });
 
             await fetchBranding();
@@ -76,29 +79,34 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
     const canSubmitPromotion = confirmInput === 'PROMOTE' && !isPromoting;
 
     return (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-8 w-full flex flex-col animate-in fade-in duration-500">
-            <SettingsSectionHeader
-                icon={ShieldCheck}
-                title="System Policies & Configuration"
-                description="Configure global access rules, biometric verification, and security settings."
-                iconWrapperClassName="border-blue-200 bg-blue-50 text-blue-600"
-                action={(
-                    <button
-                        onClick={handleSave}
-                        disabled={!isSystemAdministrator || isSaving}
-                        className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-blue-700 focus:outline-none disabled:opacity-70 flex-shrink-0"
-                    >
-                        {isSaving ? (
-                            <div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                        ) : (
-                            <Save size={16} />
-                        )}
-                        {isSaving ? 'Saving...' : 'Save Changes'}
-                    </button>
-                )}
-            />
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm w-full flex flex-col animate-in fade-in duration-500 overflow-hidden h-full max-h-[calc(100vh-16rem)]">
+            {/* Header Section (Fixed) */}
+            <div className="px-8 pt-8 pb-4 border-b border-slate-100 flex-shrink-0 bg-white">
+                <SettingsSectionHeader
+                    icon={ShieldCheck}
+                    title="System Policies & Configuration"
+                    description="Configure global access rules, biometric verification, and security settings."
+                    iconWrapperClassName="border-blue-200 bg-blue-50 text-blue-600"
+                    action={(
+                        <button
+                            onClick={handleSave}
+                            disabled={!isSystemAdministrator || isSaving}
+                            className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 font-bold text-white shadow-sm transition-all hover:bg-blue-700 focus:outline-none disabled:opacity-70 flex-shrink-0"
+                        >
+                            {isSaving ? (
+                                <div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                            ) : (
+                                <Save size={16} />
+                            )}
+                            {isSaving ? 'Saving...' : 'Save Changes'}
+                        </button>
+                    )}
+                />
+            </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            {/* Scrollable Content Area */}
+            <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-white">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                 {/* Email Domain Restriction */}
                 <div className="flex flex-col justify-between gap-4 p-6 rounded-2xl bg-slate-50/60 border border-slate-200 transition-all hover:shadow-md">
                     <div className="flex gap-4">
@@ -259,6 +267,46 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
                 </div>
             </div>
 
+            {/* Brevo API Configuration */}
+            <div className="mt-8 pt-8 border-t border-slate-100">
+                <div className="flex flex-col gap-6">
+                    <div className="flex gap-4">
+                        <div className="mt-1 p-3 bg-indigo-100 text-indigo-600 rounded-xl flex-shrink-0 h-fit">
+                            <Mail className="w-6 h-6" />
+                        </div>
+                        <div className="flex-1">
+                            <h3 className="text-lg font-semibold text-slate-900 leading-tight">Brevo Email API Configuration</h3>
+                            <p className="text-slate-500 mt-2 text-sm leading-relaxed">
+                                Enter your Brevo (formerly Sendinblue) API v3 key to enable system-generated emails (OTPs, Visitor QR Codes, etc.).
+                            </p>
+                            
+                            <div className="mt-4">
+                                <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
+                                    API Key
+                                </label>
+                                <div className="relative group">
+                                    <input
+                                        type="password"
+                                        value={brevoApiKey}
+                                        onChange={(e) => setBrevoApiKey(e.target.value)}
+                                        disabled={!isSystemAdministrator || isSaving}
+                                        placeholder="xkeysib-..."
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-3.5 text-sm font-mono text-slate-900 focus:outline-none focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all group-hover:border-slate-300"
+                                    />
+                                    <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-indigo-500 transition-colors pointer-events-none">
+                                        <ShieldCheck size={18} />
+                                    </div>
+                                </div>
+                                <p className="mt-3 text-xs text-slate-400 flex items-center gap-1.5 italic">
+                                    <Info size={12} />
+                                    <span>This key is encrypted at rest and never shared externally.</span>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             {/* Academic Year Promotion */}
             <div className="mt-6 pt-6 border-t border-slate-100">
                 <div className="flex flex-col md:flex-row items-center justify-between gap-6 p-6 rounded-2xl bg-amber-50/40 border border-amber-200/60 transition-all hover:shadow-md">
@@ -283,6 +331,7 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
                         Promote All Students
                     </button>
                 </div>
+            </div>
             </div>
 
             {/* Confirmation Modal */}

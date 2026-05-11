@@ -5,10 +5,17 @@ use rusqlite::params;
 use serde_json::json;
 use tauri::{command, State};
 
-async fn send_brevo_email(payload: serde_json::Value) -> Result<(), String> {
-    let api_key = std::env::var("BREVO_API_KEY").unwrap_or_else(|_| "".to_string());
+async fn send_brevo_email(pool: &DbPool, payload: serde_json::Value) -> Result<(), String> {
+    let mut api_key = db::get_setting(pool, "brevo_api_key")
+        .unwrap_or(None)
+        .unwrap_or_default();
+    
     if api_key.is_empty() {
-        return Err("BREVO_API_KEY not found in environment variables".to_string());
+        api_key = std::env::var("BREVO_API_KEY").unwrap_or_else(|_| "".to_string());
+    }
+
+    if api_key.is_empty() {
+        return Err("Brevo API Key not found. Please configure it in System Settings.".to_string());
     }
 
     let client = Client::new();
@@ -39,6 +46,7 @@ async fn send_brevo_email(payload: serde_json::Value) -> Result<(), String> {
 }
 
 pub async fn send_verification_otp_email(
+    pool: &DbPool,
     email: &str,
     full_name: &str,
     otp_code: &str,
@@ -94,7 +102,7 @@ pub async fn send_verification_otp_email(
         "htmlContent": html_content
     });
 
-    send_brevo_email(payload).await
+    send_brevo_email(pool, payload).await
 }
 
 #[command]
@@ -218,7 +226,7 @@ pub async fn send_visitor_qr(
         "htmlContent": html_content
     });
 
-    send_brevo_email(payload).await?;
+    send_brevo_email(&state, payload).await?;
     Ok("Email sent successfully!".to_string())
 }
 
@@ -229,6 +237,7 @@ pub async fn send_verification_otp(
 ) -> Result<String, String> {
     let challenge = db::create_first_login_challenge(&state, account_id)?;
     send_verification_otp_email(
+        &state,
         &challenge.email,
         &challenge.account.full_name,
         &challenge.otp_code,
@@ -241,6 +250,7 @@ pub async fn send_verification_otp(
 }
 
 pub async fn send_password_reset_otp_email(
+    pool: &DbPool,
     email: &str,
     full_name: &str,
     otp_code: &str,
@@ -296,5 +306,5 @@ pub async fn send_password_reset_otp_email(
         "htmlContent": html_content
     });
 
-    send_brevo_email(payload).await
+    send_brevo_email(pool, payload).await
 }

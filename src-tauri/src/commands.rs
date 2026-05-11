@@ -288,6 +288,7 @@ pub async fn admin_login(
 
         let challenge = db::create_first_login_challenge(&pool, account_id)?;
         if let Err(err) = email::send_verification_otp_email(
+            &pool,
             &challenge.email,
             &challenge.account.full_name,
             &challenge.otp_code,
@@ -443,7 +444,7 @@ pub async fn forgot_password_request(
         db::forgot_password_request(&pool, &email, &username)?;
 
     // Send the OTP email
-    email::send_password_reset_otp_email(&email, &full_name, &otp_code)
+    email::send_password_reset_otp_email(&pool, &email, &full_name, &otp_code)
         .await
         .map_err(|e| format!("Failed to send email: {}", e))?;
 
@@ -498,10 +499,10 @@ pub fn get_visitors(pool: State<'_, DbPool>, sort_order: Option<String>) -> Resu
 pub fn bulk_import_users_from_excel(
     pool: State<'_, DbPool>,
     file_path: String,
-    role: String,
+    role_ids: Vec<i64>,
     active_admin_id: i64,
 ) -> Result<BulkImportResult, String> {
-    db::bulk_import_users_from_excel(&pool, &file_path, &role, active_admin_id)
+    db::bulk_import_users_from_excel(&pool, &file_path, role_ids, active_admin_id)
 }
 
 #[tauri::command]
@@ -706,6 +707,7 @@ pub fn update_system_configuration(
     enable_auto_exit: bool,
     auto_exit_time: String,
     enable_entry_exit_validation: bool,
+    brevo_api_key: Option<String>,
 ) -> Result<(), String> {
     db::update_system_configuration(
         &pool,
@@ -715,6 +717,7 @@ pub fn update_system_configuration(
         enable_auto_exit,
         auto_exit_time,
         enable_entry_exit_validation,
+        brevo_api_key,
     )
 }
 

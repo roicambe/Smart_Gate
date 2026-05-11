@@ -1749,11 +1749,30 @@ pub fn register_user(
 pub fn bulk_import_users_from_excel(
     pool: &DbPool,
     file_path: &str,
-    role: &str, // This is still one role for the batch
+    role_ids: Vec<i64>,
     active_admin_id: i64,
 ) -> Result<BulkImportResult, String> {
-    if !matches!(role, "student" | "professor" | "staff") {
-        return Err("Excel import is only supported for students, professors, and staff.".to_string());
+    if role_ids.is_empty() {
+        return Err("No roles selected for import.".to_string());
+    }
+    let mut conn = pool.get().map_err(|e| e.to_string())?;
+
+    // 1. Resolve Role and Behavior (using the first role as the behavioral template)
+    let primary_role_id = role_ids[0];
+    let (role_name, role_behavior): (String, Option<String>) = conn
+        .query_row(
+            "SELECT role_name, 
+                    COALESCE(role_behavior, (SELECT role_behavior FROM roles r2 WHERE r2.role_id = roles.parent_role_id)) as behavior
+             FROM roles WHERE role_id = ?1",
+            params![primary_role_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| format!("Role ID {} not found.", primary_role_id))?;
+
+    let behavior = role_behavior.unwrap_or_else(|| role_name.to_lowercase());
+
+    if !matches!(behavior.as_str(), "student" | "employee") {
+        return Err(format!("Excel import is only supported for student or employee type roles. Role '{}' has behavior '{}'.", role_name, behavior));
     }
 
     let mut workbook = open_workbook_auto(file_path)
@@ -1798,33 +1817,31 @@ pub fn bulk_import_users_from_excel(
         None
     };
 
-    let id_headers = if role == "student" {
-        vec!["id_number", "id number", "id", "student id", "student number", "identification", "id_no"]
+    // --- Expanded Header Aliases ---
+    let id_headers = if behavior == "student" {
+        vec!["id_number", "id number", "id", "student id", "student number", "identification", "id_no", "id no", "id#", "student_no", "profile id"]
     } else {
-        vec!["id_number", "id number", "id", "employee id", "employee number", "identification", "id_no"]
+        vec!["id_number", "id number", "id", "employee id", "employee number", "identification", "id_no", "id no", "id#", "employee_no", "profile id", "staff id"]
     };
     let idx_id_number = require_col(&id_headers)?;
-    let idx_first_name = require_col(&["first_name", "first name", "given name", "fname", "name"])?;
-    let idx_last_name = require_col(&["last_name", "last name", "surname", "lname", "family name"])?;
-    let idx_middle_name = optional_col(&["middle_name", "middle name", "mname", "middle"]);
-    let idx_email = optional_col(&["email", "e-mail", "gmail", "yahoo", "outlook", "contact email"]);
-    let idx_contact = optional_col(&["contact_number", "contact number", "phone", "cellphone", "mobile", "mobile number", "contact"]);
+    let idx_first_name = require_col(&["first_name", "first name", "given name", "fname", "name", "f_name", "1st name", "first_names", "given_names"])?;
+    let idx_last_name = require_col(&["last_name", "last name", "surname", "lname", "family name", "l_name", "2nd name", "last_names", "family_names", "surnames"])?;
+    let idx_middle_name = optional_col(&["middle_name", "middle name", "mname", "middle", "mid name", "mid_name", "m_name"]);
+    let idx_email = optional_col(&["email", "e-mail", "gmail", "yahoo", "outlook", "contact email", "email_address", "email address", "e mail", "official email"]);
+    let idx_contact = optional_col(&["contact_number", "contact number", "phone", "cellphone", "mobile", "mobile number", "contact", "tel", "telephone", "cell", "cel", "mobile_no", "contact_no"]);
 
-    let idx_program_name = optional_col(&["program_name", "program name", "course", "program", "course name"]);
-    let idx_program_code = optional_col(&["program_code", "program code", "course code"]);
-    let idx_year_level = optional_col(&["year_level", "year level", "year", "level", "yr level", "yr"]);
+    let idx_program_name = optional_col(&["program_name", "program name", "course", "program", "course name", "prog", "course_name", "major", "specialization"]);
+    let idx_program_code = optional_col(&["program_code", "program code", "course code", "prog code", "prog_code"]);
+    let idx_year_level = optional_col(&["year_level", "year level", "year", "level", "yr level", "yr", "year_lvl", "yr_lvl"]);
 
-    let idx_department_name = optional_col(&["department_name", "department name", "dept name", "department", "dept"]);
-    let idx_department_code = optional_col(&["department_code", "department code", "dept code"]);
-    let idx_position_title = optional_col(&["position_title", "position title", "position", "title", "job title", "rank"]);
+    let idx_department_name = optional_col(&["department_name", "department name", "dept name", "department", "dept", "office", "college", "unit", "dept_name"]);
+    let idx_department_code = optional_col(&["department_code", "department code", "dept code", "dept_code", "office code"]);
+    let idx_position_title = optional_col(&["position_title", "position title", "position", "title", "job title", "rank", "designation", "job"]);
 
-    if role == "student" && idx_program_name.is_none() && idx_program_code.is_none() {
+    if behavior == "student" && idx_program_name.is_none() && idx_program_code.is_none() {
         return Err("Student import requires a Program Name or Program Code column.".to_string());
     }
-    if (role == "professor" || role == "staff")
-        && idx_department_name.is_none()
-        && idx_department_code.is_none()
-    {
+    if behavior == "employee" && idx_department_name.is_none() && idx_department_code.is_none() {
         return Err("Employee import requires a Department Name or Department Code column.".to_string());
     }
 
@@ -1836,7 +1853,7 @@ pub fn bulk_import_users_from_excel(
     let mut program_lookup: HashMap<String, i64> = HashMap::new();
     let mut department_lookup: HashMap<String, i64> = HashMap::new();
 
-    if role == "student" {
+    if behavior == "student" {
         let mut stmt = conn
             .prepare("SELECT program_id, program_name, program_code FROM programs")
             .map_err(|e| e.to_string())?;
@@ -1856,7 +1873,7 @@ pub fn bulk_import_users_from_excel(
         }
     }
 
-    if role == "professor" || role == "staff" {
+    if behavior == "employee" {
         let mut stmt = conn
             .prepare("SELECT department_id, department_name, department_code FROM departments")
             .map_err(|e| e.to_string())?;
@@ -1916,7 +1933,7 @@ pub fn bulk_import_users_from_excel(
         }
 
         // --- ID Number Validation ---
-        if role == "student" {
+        if behavior == "student" {
             if !student_id_regex.is_match(&id_number) {
                 failed_count += 1;
                 error_logs.push(format!("Row {line_number}: Invalid Student ID '{}'. Must follow '00-00000' format.", id_number));
@@ -1992,12 +2009,14 @@ pub fn bulk_import_users_from_excel(
             let person_id = tx.last_insert_rowid();
 
             // Link role(s)
-            tx.execute(
-                "INSERT INTO person_roles (person_id, role_id) SELECT ?1, role_id FROM roles WHERE LOWER(role_name) = ?2",
-                params![person_id, role.to_lowercase()],
-            ).map_err(|e| e.to_string())?;
+            for rid in &role_ids {
+                tx.execute(
+                    "INSERT INTO person_roles (person_id, role_id) VALUES (?1, ?2)",
+                    params![person_id, rid],
+                ).map_err(|e| e.to_string())?;
+            }
 
-            if role == "professor" || role == "staff" {
+            if behavior == "employee" {
                 tx.execute(
                     "INSERT OR IGNORE INTO person_roles (person_id, role_id) SELECT ?1, role_id FROM roles WHERE LOWER(role_name) = 'employee'",
                     params![person_id],
@@ -2018,7 +2037,7 @@ pub fn bulk_import_users_from_excel(
                 ).map_err(|e| e.to_string())?;
             }
 
-            if role == "student" {
+            if behavior == "student" {
                 let program_name_value = get_col(idx_program_name);
                 let program_code_value = get_col(idx_program_code);
                 let year_level_value = get_col(idx_year_level);
@@ -2049,15 +2068,12 @@ pub fn bulk_import_users_from_excel(
                     params![person_id, program_id, year_level],
                 )
                 .map_err(|e| e.to_string())?;
-            } else {
-                let department_name_value = get_col(idx_department_name);
-                let department_code_value = get_col(idx_department_code);
-                let position_title = get_col(idx_position_title);
-                if position_title.is_empty() {
-                    return Err(format!("Row {line_number}: position_title is required."));
-                }
-
-                let department_id = [&department_name_value, &department_code_value]
+            } else if behavior == "employee" {
+                let dept_name_value = get_col(idx_department_name);
+                let dept_code_value = get_col(idx_department_code);
+                let pos_title = get_col(idx_position_title);
+                
+                let department_id = [&dept_name_value, &dept_code_value]
                     .iter()
                     .filter(|v| !v.is_empty())
                     .map(|v| normalize_lookup_key(v))
@@ -2065,13 +2081,13 @@ pub fn bulk_import_users_from_excel(
                     .ok_or_else(|| {
                         format!(
                             "Row {line_number}: Department '{}' (Code: '{}') not found in system.",
-                            department_name_value, department_code_value
+                            dept_name_value, dept_code_value
                         )
                     })?;
 
                 tx.execute(
                     "INSERT INTO employees (person_id, department_id, position_title) VALUES (?1, ?2, ?3)",
-                    params![person_id, department_id, position_title],
+                    params![person_id, department_id, if pos_title.is_empty() { "Employee" } else { &pos_title }],
                 )
                 .map_err(|e| e.to_string())?;
             }
@@ -2093,12 +2109,7 @@ pub fn bulk_import_users_from_excel(
     }
 
     if success_count > 0 {
-        let role_label = match role {
-            "student" => "Student",
-            "professor" => "Professor",
-            "staff" => "Staff",
-            _ => "User",
-        };
+        let role_label = &role_name;
         let summary = format!("Bulk Imported {} {} Profiles via Excel.", success_count, role_label);
         let _ = log_audit_action(
             pool,
@@ -4847,6 +4858,7 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
     let mut enable_auto_exit: bool = false;
     let mut auto_exit_time: String = "22:00".to_string();
     let mut enable_entry_exit_validation: bool = true;
+    let mut brevo_api_key: Option<String> = None;
 
     let mut stmt = conn
         .prepare("SELECT setting_key, setting_value FROM settings")
@@ -4883,6 +4895,7 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
                 "enable_auto_exit" => enable_auto_exit = value == "1" || value.to_lowercase() == "true",
                 "auto_exit_time" => auto_exit_time = value,
                 "enable_entry_exit_validation" => enable_entry_exit_validation = value == "1" || value.to_lowercase() == "true",
+                "brevo_api_key" => brevo_api_key = Some(value).filter(|v| !v.is_empty()),
                 "circle_logo_format" => {
                     // Legacy support: if individual ones aren't set yet, they could inherit this
                     // but we'll prioritize individual ones.
@@ -4913,7 +4926,22 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
         enable_auto_exit,
         auto_exit_time,
         enable_entry_exit_validation,
+        brevo_api_key,
     })
+}
+
+pub fn get_setting(pool: &DbPool, key: &str) -> Result<Option<String>, String> {
+    let conn = pool.get().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT setting_value FROM settings WHERE setting_key = ?1")
+        .map_err(|e| e.to_string())?;
+    
+    let value: Option<String> = stmt
+        .query_row(params![key], |row| row.get(0))
+        .optional()
+        .map_err(|e| e.to_string())?;
+    
+    Ok(value)
 }
 
 pub fn update_system_branding(
@@ -5054,6 +5082,7 @@ pub fn update_system_configuration(
     enable_auto_exit: bool,
     auto_exit_time: String,
     enable_entry_exit_validation: bool,
+    brevo_api_key: Option<String>,
 ) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
     let old = get_system_branding(pool).unwrap_or_default();
@@ -5065,6 +5094,7 @@ pub fn update_system_configuration(
         ("enable_auto_exit", if enable_auto_exit { "1" } else { "0" }.to_string()),
         ("auto_exit_time", auto_exit_time.clone()),
         ("enable_entry_exit_validation", if enable_entry_exit_validation { "1" } else { "0" }.to_string()),
+        ("brevo_api_key", brevo_api_key.clone().unwrap_or_default()),
     ];
 
     for (key, value) in settings_to_update {
@@ -5083,6 +5113,7 @@ pub fn update_system_configuration(
         "enable_auto_exit": old.enable_auto_exit,
         "auto_exit_time": old.auto_exit_time,
         "enable_entry_exit_validation": old.enable_entry_exit_validation,
+        "brevo_api_key": old.brevo_api_key,
     });
 
     let new_values = json!({
@@ -5091,6 +5122,7 @@ pub fn update_system_configuration(
         "enable_auto_exit": enable_auto_exit,
         "auto_exit_time": auto_exit_time,
         "enable_entry_exit_validation": enable_entry_exit_validation,
+        "brevo_api_key": brevo_api_key,
     });
 
     let _ = log_audit_action(
