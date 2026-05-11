@@ -339,6 +339,7 @@ pub struct SystemBranding {
     pub auto_exit_time: String,
     pub enable_entry_exit_validation: bool,
     pub brevo_api_key: Option<String>,
+    pub app_icon: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

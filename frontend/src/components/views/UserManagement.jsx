@@ -1382,7 +1382,24 @@ export const UserManagement = ({ adminSession, branding }) => {
                             </div>
                             <ul className="space-y-1.5 text-blue-100/60 pl-6 list-disc font-medium">
                                 <li>Use the standardized template provided below. Do not rename column headers.</li>
-                                <li>Required fields: <span className="text-blue-200">id_number, first_name, last_name</span>.</li>
+                                <li>
+                                    Required fields: <span className="text-blue-200">id_number, first_name, last_name</span>
+                                    {importRoleIds.some(rid => {
+                                        const r = availableRoles.find(ar => ar.role_id === rid);
+                                        const behavior = r?.role_behavior || availableRoles.find(ar2 => ar2.role_id === r?.parent_role_id)?.role_behavior;
+                                        return behavior === 'student';
+                                    }) && (
+                                        <>, <span className="text-blue-200">program, year_level</span></>
+                                    )}
+                                    {importRoleIds.some(rid => {
+                                        const r = availableRoles.find(ar => ar.role_id === rid);
+                                        const behavior = r?.role_behavior || availableRoles.find(ar2 => ar2.role_id === r?.parent_role_id)?.role_behavior;
+                                        return behavior === 'employee';
+                                    }) && (
+                                        <>, <span className="text-blue-200">department</span></>
+                                    )}
+                                    .
+                                </li>
                                 <li>Existing <span className="text-blue-200">id_number</span> records will be skipped during processing.</li>
                                 <li>Unresolved departments or programs will be logged in the error summary.</li>
                             </ul>

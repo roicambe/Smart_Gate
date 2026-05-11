@@ -24,10 +24,39 @@ pub fn run() {
             }
             let pool = db::init_db(app.handle()).expect("Failed to initialize database");
             
+            // --- Initialize App Icon ---
+            if let Ok(branding) = db::get_system_branding(&pool) {
+                if let Some(icon_data) = branding.app_icon {
+                    if !icon_data.is_empty() {
+                        let base64_str = if icon_data.contains(',') {
+                            icon_data.split(',').nth(1).unwrap_or(&icon_data)
+                        } else {
+                            &icon_data
+                        };
+                        if let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, base64_str) {
+                            if let Ok(img_decoded) = image::load_from_memory(&bytes) {
+                                let (width, height) = image::GenericImageView::dimensions(&img_decoded);
+                                let rgba = img_decoded.to_rgba8().into_raw();
+                                let tauri_img = tauri::image::Image::new_owned(rgba, width, height);
+                                
+                                // In Tauri v2, icons are set per window
+                                for window in app.handle().webview_windows().values() {
+                                    let _ = window.set_icon(tauri_img.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
             // --- Initialize Face Recognition Pipeline ---
             // Graceful: if ONNX models are not present, the app still starts.
-            // Face recognition commadnds will return errors until models are placed.
-            let face_config = face_recognition::PipelineConfig::default();
+            let resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let face_config = face_recognition::PipelineConfig {
+                scrfd_model_path: resource_dir.join("models/det_2.5g.onnx").to_string_lossy().to_string(),
+                arcface_model_path: resource_dir.join("models/w600k_r50.onnx").to_string_lossy().to_string(),
+                ..face_recognition::PipelineConfig::default()
+            };
             let pipeline_opt = match face_recognition::pipeline::RecognitionPipeline::new(face_config) {
                 Ok(mut pipeline) => {
                     // Load existing embeddings from DB into the HNSW index

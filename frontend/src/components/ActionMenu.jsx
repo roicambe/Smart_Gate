@@ -63,13 +63,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
         const roleLabel = result.role || (result.roles && result.roles.length > 0 ? result.roles[0] : "User");
         const successMessage = fallbackMessage || `${result.message} - ${result.person_name} (${roleLabel})`;
         const normalizedRole = (result.role || "").toString().trim().toLowerCase();
-        const DETAILED_TOAST_ROLES = new Set(["student", "professor", "staff"]);
-        const shouldShowDetailedToast = modalActive && DETAILED_TOAST_ROLES.has(normalizedRole);
 
-        if (modalActive && !shouldShowDetailedToast) {
-            showSuccess(successMessage);
-            return;
-        }
 
         const requestId = ++scanCardRequestIdRef.current;
         try {
@@ -79,11 +73,6 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
             }
 
             if (details) {
-                if (modalActive) {
-                    showSuccess(getDetailedToastMessage(details));
-                    return;
-                }
-
                 showIdCard(details);
                 return;
             }
