@@ -28,9 +28,7 @@ export const ManualIdModal = ({
     const handleSubmit = (e) => {
         e.preventDefault();
         onSubmit(manualId);
-        if (!isLocked) {
-            setManualId("");
-        }
+        setManualId("");
     };
 
     return (
