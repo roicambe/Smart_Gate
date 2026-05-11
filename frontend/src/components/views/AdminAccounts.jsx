@@ -211,7 +211,9 @@ export const AdminAccounts = ({ adminSession, branding, showToast }) => {
     }, [sortedAccounts, currentPage]);
 
     return (
-        <div className="relative flex min-h-0 w-full flex-col space-y-6 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+        <div className="relative flex min-h-0 w-full flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden h-full max-h-[calc(100vh-16rem)]">
+            {/* Header Section (Fixed) */}
+            <div className="px-8 pt-8 pb-4 flex-shrink-0 bg-white">
             <SettingsSectionHeader
                 icon={UserPlus}
                 title="Administrative Registry"
@@ -226,8 +228,11 @@ export const AdminAccounts = ({ adminSession, branding, showToast }) => {
                     </button>
                 )}
             />
+            </div>
 
-            <div className="min-h-0 w-full overflow-y-auto rounded-xl border border-slate-200">
+            {/* Scrollable Content Area */}
+            <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-white border-t border-slate-100">
+                <div className="flex flex-col gap-6">
                 <table className="w-full text-left text-sm text-slate-600 table-fixed">
                     <thead className="bg-slate-100 sticky top-0 z-10 border-b border-slate-200">
                         <tr>
@@ -625,6 +630,7 @@ export const AdminAccounts = ({ adminSession, branding, showToast }) => {
                     </div>
                 </AdminModal>
             )}
+            </div>
         </div>
     );
 };

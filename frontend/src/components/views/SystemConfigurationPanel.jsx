@@ -81,7 +81,7 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
     return (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm w-full flex flex-col animate-in fade-in duration-500 overflow-hidden h-full max-h-[calc(100vh-16rem)]">
             {/* Header Section (Fixed) */}
-            <div className="px-8 pt-8 pb-4 border-b border-slate-100 flex-shrink-0 bg-white">
+            <div className="px-8 pt-8 pb-4 flex-shrink-0 bg-white">
                 <SettingsSectionHeader
                     icon={ShieldCheck}
                     title="System Policies & Configuration"
@@ -105,7 +105,7 @@ export const SystemConfigurationPanel = ({ branding, fetchBranding, adminSession
             </div>
 
             {/* Scrollable Content Area */}
-            <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-white">
+            <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-white border-t border-slate-100">
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                 {/* Email Domain Restriction */}
                 <div className="flex flex-col justify-between gap-4 p-6 rounded-2xl bg-slate-50/60 border border-slate-200 transition-all hover:shadow-md">

@@ -3,7 +3,7 @@ use crate::email;
 use crate::models::*;
 use serde::Serialize;
 use std::process::Command;
-use tauri::State;
+use tauri::{State, Manager};
 use base64;
 use image;
 
@@ -659,6 +659,7 @@ pub fn get_system_branding(pool: State<'_, DbPool>) -> Result<SystemBranding, St
 
 #[tauri::command]
 pub fn update_system_branding(
+    app: tauri::AppHandle,
     pool: State<'_, DbPool>,
     admin_id: i64,
     name: String,
@@ -676,7 +677,33 @@ pub fn update_system_branding(
     primary_logo_enabled: Option<bool>,
     secondary_logo_1_enabled: Option<bool>,
     secondary_logo_2_enabled: Option<bool>,
+    app_icon: Option<String>,
 ) -> Result<(), String> {
+    // If a new icon is provided, try to update the application icon immediately
+    if let Some(ref icon_data) = app_icon {
+        if !icon_data.is_empty() {
+            // Base64 usually looks like "data:image/png;base64,..."
+            let base64_str = if icon_data.contains(',') {
+                icon_data.split(',').nth(1).unwrap_or(icon_data)
+            } else {
+                icon_data
+            };
+
+            if let Ok(bytes) = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, base64_str) {
+                if let Ok(img_decoded) = image::load_from_memory(&bytes) {
+                    let (width, height) = image::GenericImageView::dimensions(&img_decoded);
+                    let rgba = img_decoded.to_rgba8().into_raw();
+                    let tauri_img = tauri::image::Image::new_owned(rgba, width, height);
+                    
+                    // In Tauri v2, icons are set per window
+                    for window in app.webview_windows().values() {
+                        let _ = window.set_icon(tauri_img.clone());
+                    }
+                }
+            }
+        }
+    }
+
     db::update_system_branding(
         &pool,
         admin_id,
@@ -695,6 +722,7 @@ pub fn update_system_branding(
         primary_logo_enabled.unwrap_or(true),
         secondary_logo_1_enabled.unwrap_or(true),
         secondary_logo_2_enabled.unwrap_or(true),
+        app_icon,
     )
 }
 

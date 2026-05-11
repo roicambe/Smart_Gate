@@ -1673,6 +1673,9 @@ pub fn register_user(
     let is_visitor = behaviors.contains("visitor");
 
     if is_student {
+        if year_level.is_none() {
+            return Err("Year Level is required for student registration.".to_string());
+        }
         tx.execute(
             "INSERT INTO students (person_id, program_id, year_level, is_irregular) VALUES (?1, ?2, ?3, ?4)",
             params![person_id, program_id.unwrap_or(1), year_level, is_irregular.unwrap_or(false)],
@@ -1838,8 +1841,13 @@ pub fn bulk_import_users_from_excel(
     let idx_department_code = optional_col(&["department_code", "department code", "dept code", "dept_code", "office code"]);
     let idx_position_title = optional_col(&["position_title", "position title", "position", "title", "job title", "rank", "designation", "job"]);
 
-    if behavior == "student" && idx_program_name.is_none() && idx_program_code.is_none() {
-        return Err("Student import requires a Program Name or Program Code column.".to_string());
+    if behavior == "student" {
+        if idx_program_name.is_none() && idx_program_code.is_none() {
+            return Err("Student import requires a Program Name or Program Code column.".to_string());
+        }
+        if idx_year_level.is_none() {
+            return Err("Student import requires a Year Level column.".to_string());
+        }
     }
     if behavior == "employee" && idx_department_name.is_none() && idx_department_code.is_none() {
         return Err("Employee import requires a Department Name or Department Code column.".to_string());
@@ -2053,15 +2061,13 @@ pub fn bulk_import_users_from_excel(
                         )
                     })?;
 
-                let year_level = if year_level_value.is_empty() {
-                    None
-                } else {
-                    Some(
-                        year_level_value
-                            .parse::<i64>()
-                            .map_err(|_| format!("Row {line_number}: Invalid year_level '{}'.", year_level_value))?,
-                    )
-                };
+                if year_level_value.is_empty() {
+                    return Err(format!("Row {line_number}: Year Level is required for student profiles."));
+                }
+
+                let year_level = year_level_value
+                    .parse::<i64>()
+                    .map_err(|_| format!("Row {line_number}: Invalid Year Level '{}' for ID '{}'. Must be a numeric value.", year_level_value, id_number))?;
 
                 tx.execute(
                     "INSERT INTO students (person_id, program_id, year_level) VALUES (?1, ?2, ?3)",
@@ -2293,6 +2299,9 @@ pub fn update_user(
     let is_visitor = behaviors.contains("visitor");
 
     if is_student {
+        if year_level.is_none() {
+            return Err("Year Level is required for student updates.".to_string());
+        }
         tx.execute(
             "INSERT OR REPLACE INTO students (person_id, program_id, year_level, is_irregular) VALUES (?1, ?2, ?3, ?4)",
             params![person_id, program_id.unwrap_or(1), year_level, is_irregular.unwrap_or(false)],
@@ -4859,6 +4868,7 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
     let mut auto_exit_time: String = "22:00".to_string();
     let mut enable_entry_exit_validation: bool = true;
     let mut brevo_api_key: Option<String> = None;
+    let mut app_icon: Option<String> = None;
 
     let mut stmt = conn
         .prepare("SELECT setting_key, setting_value FROM settings")
@@ -4896,6 +4906,7 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
                 "auto_exit_time" => auto_exit_time = value,
                 "enable_entry_exit_validation" => enable_entry_exit_validation = value == "1" || value.to_lowercase() == "true",
                 "brevo_api_key" => brevo_api_key = Some(value).filter(|v| !v.is_empty()),
+                "app_icon" => app_icon = Some(value).filter(|v| !v.is_empty()),
                 "circle_logo_format" => {
                     // Legacy support: if individual ones aren't set yet, they could inherit this
                     // but we'll prioritize individual ones.
@@ -4927,6 +4938,7 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
         auto_exit_time,
         enable_entry_exit_validation,
         brevo_api_key,
+        app_icon,
     })
 }
 
@@ -4962,6 +4974,7 @@ pub fn update_system_branding(
     primary_logo_enabled: bool,
     secondary_logo_1_enabled: bool,
     secondary_logo_2_enabled: bool,
+    app_icon: Option<String>,
 ) -> Result<(), String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
 
@@ -4987,6 +5000,7 @@ pub fn update_system_branding(
         ("primary_logo_enabled", if primary_logo_enabled { "1" } else { "0" }.to_string()),
         ("secondary_logo_1_enabled", if secondary_logo_1_enabled { "1" } else { "0" }.to_string()),
         ("secondary_logo_2_enabled", if secondary_logo_2_enabled { "1" } else { "0" }.to_string()),
+        ("app_icon", app_icon.clone().unwrap_or_default()),
     ];
 
     for (key, value) in settings_to_update {
