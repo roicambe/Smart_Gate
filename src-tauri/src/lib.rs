@@ -24,6 +24,8 @@ pub fn run() {
             }
             let pool = db::init_db(app.handle()).expect("Failed to initialize database");
             
+
+            
             // --- Initialize App Icon ---
             if let Ok(branding) = db::get_system_branding(&pool) {
                 if let Some(icon_data) = branding.app_icon {
