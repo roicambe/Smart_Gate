@@ -17,6 +17,7 @@ import {
     getProgramYearLabel 
 } from "../utils/formatters";
 import { ManualIdModal } from "./common/ManualIdModal";
+import { PersonCombobox } from "./common/PersonCombobox";
 
 const getDetailedToastMessage = (scanDetails) => {
     if (!scanDetails) return "Scan processed.";
@@ -537,7 +538,13 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                                 <div className="grid grid-cols-2 gap-5">
                                     <div>
                                         <label className="block text-sm font-medium text-white/70 mb-1">Person to Visit <span className="text-rose-500">*</span></label>
-                                        <input required type="text" value={visitorForm.personToVisit} onChange={e => setVisitorForm({...visitorForm, personToVisit: e.target.value})} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50" placeholder="Prof. Smith" />
+                                        <PersonCombobox
+                                            required
+                                            value={visitorForm.personToVisit}
+                                            onChange={val => setVisitorForm({...visitorForm, personToVisit: val})}
+                                            className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-slate-400/50"
+                                            placeholder="Type a name to search..."
+                                        />
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium text-white/70 mb-1">Purpose of Visit <span className="text-rose-500">*</span></label>

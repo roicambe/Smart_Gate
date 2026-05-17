@@ -12,12 +12,14 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Smart Gate",
         "width": 800,
         "height": 600,
         "fullscreen": true,
         "resizable": false,
-        "decorations": false
+        "decorations": false,
+        "additionalBrowserArgs": "--use-fake-ui-for-media-stream"
       }
     ],
     "security": {

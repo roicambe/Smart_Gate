@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
-    History, Search, Filter, RefreshCw, Calendar, ArrowUpRight, ArrowDownLeft, Download, FileText, FileSpreadsheet, Loader2, ChevronLeft, ChevronRight
+    History, Search, Filter, RefreshCw, Calendar, ArrowUpRight, ArrowDownLeft, Download, FileText, FileSpreadsheet, Loader2, ChevronLeft, ChevronRight, Plus, Trash2, Table, PanelRightClose
 } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
@@ -92,8 +92,64 @@ export const AccessLogs = ({ branding, adminSession }) => {
     const [manualIncludeAbsent, setManualIncludeAbsent] = useState(false);
     const [manualIncludeStats, setManualIncludeStats] = useState(false);
     const [manualIncludePartTime, setManualIncludePartTime] = useState(false);
+    const [manualExportAsTemplate, setManualExportAsTemplate] = useState(false);
+    const [showTemplateBuilder, setShowTemplateBuilder] = useState(false);
+    const [templateRows, setTemplateRows] = useState(() => Array.from({ length: 5 }, () => ({})));
+    const [templateExtraColumns, setTemplateExtraColumns] = useState([]);
+    const [editingCell, setEditingCell] = useState(null);
+    const [templatePersons, setTemplatePersons] = useState([]);
     const exportMenuRef = useRef(null);
     const { showSuccess, showError, showWarning, showProcessing } = useToast();
+
+    // Fetch persons for template autocomplete when builder opens
+    useEffect(() => {
+        if (!showTemplateBuilder || templatePersons.length > 0) return;
+        const fetchPersons = async () => {
+            try {
+                const persons = await invoke('get_persons');
+                const names = persons
+                    .filter(p => !p.id_number.startsWith('VIS-') && p.is_active)
+                    .map(p => {
+                        const rest = [p.first_name, p.middle_name, p.suffix].filter(Boolean).join(' ');
+                        return `${p.last_name}, ${rest}`;
+                    });
+                setTemplatePersons([...new Set(names)]);
+            } catch (err) {
+                console.error("Failed to fetch persons for template autocomplete:", err);
+            }
+        };
+        fetchPersons();
+    }, [showTemplateBuilder]);
+
+    const getSuggestionsForColumn = useCallback((colId, inputValue) => {
+        if (!inputValue || inputValue.length < 1) return [];
+        const lower = inputValue.toLowerCase();
+        let pool = [];
+        switch (colId) {
+            case 'name':
+                pool = templatePersons;
+                break;
+            case 'department':
+                pool = departments.map(d => d.department_name);
+                break;
+            case 'program':
+                pool = allPrograms.map(p => p.program_name);
+                break;
+            case 'role':
+            case 'subRole':
+                pool = allRoles.map(r => r.role_name);
+                break;
+            case 'yearLevel':
+                pool = ['Year 1', 'Year 2', 'Year 3', 'Year 4'];
+                break;
+            case 'idNumber':
+                pool = templatePersons.length > 0 ? [] : []; // ID numbers not easily autocompleted
+                break;
+            default:
+                return [];
+        }
+        return pool.filter(item => item.toLowerCase().includes(lower)).slice(0, 8);
+    }, [templatePersons, departments, allPrograms, allRoles]);
 
     // Fetch academic structure for filters
     useEffect(() => {
@@ -697,17 +753,20 @@ export const AccessLogs = ({ branding, adminSession }) => {
             }
         }
 
-        if (!manualSelectedColumns.length) {
+        const totalColumns = manualSelectedColumns.length + (manualExportAsTemplate ? templateExtraColumns.length : 0);
+        if (!totalColumns) {
             showWarning('Select at least one column to export.');
             return;
         }
         await handleExportPDF({
-            logsForExport: selectedLogs,
+            logsForExport: manualExportAsTemplate ? [] : selectedLogs,
             selectedColumnIds: manualSelectedColumns,
             reportTitleOverride: manualReportTitle.trim() || generateEventAttendanceTitle(selectedLogs),
-            includeStatsPage: manualIncludeStats,
-            entityLabelPrefix: 'Manual PDF Export',
+            includeStatsPage: manualExportAsTemplate ? false : manualIncludeStats,
+            entityLabelPrefix: manualExportAsTemplate ? 'Template PDF Export' : 'Manual PDF Export',
             includeNumbering: manualIncludeNumbering,
+            isTemplateMode: manualExportAsTemplate,
+            templateData: manualExportAsTemplate ? { rows: templateRows, extraColumns: templateExtraColumns } : null,
         });
     };
 
@@ -718,15 +777,18 @@ export const AccessLogs = ({ branding, adminSession }) => {
         includeStatsPage = true,
         entityLabelPrefix = 'PDF Export',
         includeNumbering = false,
+        isTemplateMode = false,
+        templateData = null,
     } = {}) => {
-        if (logsForExport.length === 0) {
+        if (!isTemplateMode && logsForExport.length === 0) {
             showWarning('No records match the selected export criteria.');
             return;
         }
         setIsExporting(true);
         setShowExportMenu(false);
         setShowManualExportModal(false);
-        showProcessing("Preparing PDF export...");
+        setShowTemplateBuilder(false);
+        showProcessing(isTemplateMode ? "Preparing template export..." : "Preparing PDF export...");
 
         try {
             const doc = new jsPDF();
@@ -774,33 +836,53 @@ export const AccessLogs = ({ branding, adminSession }) => {
                 : EVENT_EXPORT_COLUMNS.filter(col => selectedColumnIds.includes(col.id));
             
             let tableColumn = selectedColumns.map(col => col.label);
+            if (isTemplateMode && templateData?.extraColumns?.length) {
+                tableColumn = [...tableColumn, ...templateData.extraColumns];
+            }
             if (includeNumbering) {
                 tableColumn = ['#', ...tableColumn];
             }
 
             const tableRows = [];
 
-            logsForExport.forEach((log, index) => {
-                let row = [];
-                if (activeTab === 'gateLogs') {
-                    row = [
-                        formatDate(log.scanned_at),
-                        log.person_name,
-                        log.id_number,
-                        log.roles?.join(', ') || 'N/A',
-                        log.department_name,
-                        log.scanner_function.toUpperCase()
-                    ];
-                } else {
-                    row = selectedColumns.map(col => col.value(log));
-                }
+            if (isTemplateMode) {
+                const rows = templateData?.rows || Array.from({ length: 20 }, () => ({}));
+                rows.forEach((rowData, index) => {
+                    const totalCols = tableColumn.length - (includeNumbering ? 1 : 0);
+                    const row = [];
+                    for (let i = 0; i < totalCols; i++) {
+                        const colKey = i < selectedColumns.length ? selectedColumns[i].id : `extra_${i - selectedColumns.length}`;
+                        row.push(rowData[colKey] || '');
+                    }
+                    if (includeNumbering) {
+                        tableRows.push([(index + 1).toString(), ...row]);
+                    } else {
+                        tableRows.push(row);
+                    }
+                });
+            } else {
+                logsForExport.forEach((log, index) => {
+                    let row = [];
+                    if (activeTab === 'gateLogs') {
+                        row = [
+                            formatDate(log.scanned_at),
+                            log.person_name,
+                            log.id_number,
+                            log.roles?.join(', ') || 'N/A',
+                            log.department_name,
+                            log.scanner_function.toUpperCase()
+                        ];
+                    } else {
+                        row = selectedColumns.map(col => col.value(log));
+                    }
 
-                if (includeNumbering) {
-                    tableRows.push([(index + 1).toString(), ...row]);
-                } else {
-                    tableRows.push(row);
-                }
-            });
+                    if (includeNumbering) {
+                        tableRows.push([(index + 1).toString(), ...row]);
+                    } else {
+                        tableRows.push(row);
+                    }
+                });
+            }
 
             // --- STEP 1: Generate Statistics on the first page ---
             const stats = getStatistics(logsForExport, activeTab);
@@ -1400,20 +1482,30 @@ export const AccessLogs = ({ branding, adminSession }) => {
                     size="lg"
                     bodyClassName="space-y-6"
                     footer={
-                        <div className="flex justify-end gap-3">
-                            <button
-                                onClick={() => setShowManualExportModal(false)}
-                                className="px-5 py-2.5 text-sm font-bold rounded-xl border border-white/15 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white transition-all"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={handleManualExportPDF}
-                                disabled={isExporting}
-                                className="px-5 py-2.5 text-sm font-bold rounded-xl bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50 transition-all shadow-lg shadow-emerald-600/20 flex items-center gap-2"
-                            >
-                                <FileText className="w-4 h-4" /> Generate PDF Report
-                            </button>
+                        <div className="flex justify-between items-center gap-3">
+                            {manualExportAsTemplate && (
+                                <button
+                                    onClick={() => setShowTemplateBuilder(true)}
+                                    className="px-5 py-2.5 text-sm font-bold rounded-xl border border-blue-500/30 bg-blue-600/15 text-blue-400 hover:bg-blue-600/25 hover:text-blue-300 transition-all flex items-center gap-2"
+                                >
+                                    <Table className="w-4 h-4" /> Configure Template Table
+                                </button>
+                            )}
+                            <div className="flex justify-end gap-3 ml-auto">
+                                <button
+                                    onClick={() => setShowManualExportModal(false)}
+                                    className="px-5 py-2.5 text-sm font-bold rounded-xl border border-white/15 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white transition-all"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleManualExportPDF}
+                                    disabled={isExporting}
+                                    className="px-5 py-2.5 text-sm font-bold rounded-xl bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-50 transition-all shadow-lg shadow-emerald-600/20 flex items-center gap-2"
+                                >
+                                    <FileText className="w-4 h-4" /> {manualExportAsTemplate ? 'Export Template' : 'Generate PDF Report'}
+                                </button>
+                            </div>
                         </div>
                     }
                 >
@@ -1598,6 +1690,16 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                         />
                                         <span className="font-medium">Include Part-Time Employees</span>
                                     </label>
+                                    <div className="w-full border-t border-white/10 my-1"></div>
+                                    <label className="inline-flex items-center gap-3 text-sm text-amber-400/80 hover:text-amber-300 transition-colors cursor-pointer group w-full">
+                                        <input
+                                            type="checkbox"
+                                            checked={manualExportAsTemplate}
+                                            onChange={(e) => setManualExportAsTemplate(e.target.checked)}
+                                            className="w-4 h-4 rounded border-amber-500/30 bg-white/5 text-amber-500 focus:ring-amber-500/30 accent-amber-500 transition-all"
+                                        />
+                                        <span className="font-medium">Export as Blank Template (Headers Only)</span>
+                                    </label>
                                 </div>
                             </div>
 
@@ -1625,6 +1727,285 @@ export const AccessLogs = ({ branding, adminSession }) => {
                             </div>
                         </div>
                 </AdminModal>
+            )}
+
+            {/* Template Builder Drawer */}
+            {showTemplateBuilder && (
+                <div className="fixed inset-0 z-[110] flex">
+                    {/* Backdrop */}
+                    <button
+                        type="button"
+                        onClick={() => setShowTemplateBuilder(false)}
+                        className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200"
+                        aria-label="Close template builder"
+                    />
+
+                    {/* Main modal preview (left side) */}
+                    <div className="relative w-[30%] flex items-center justify-center p-6 animate-in slide-in-from-right-4 duration-300">
+                        <div className="bg-slate-950/90 border border-white/15 rounded-2xl p-6 w-full max-w-lg max-h-[85vh] overflow-y-auto backdrop-blur-xl shadow-2xl">
+                            <div className="flex items-center gap-3 mb-4">
+                                <div className="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30">
+                                    <FileText className="w-5 h-5 text-emerald-400" />
+                                </div>
+                                <div>
+                                    <h3 className="text-white font-semibold text-sm">Export Preview</h3>
+                                    <p className="text-white/50 text-xs">Template mode active</p>
+                                </div>
+                            </div>
+                            <div className="space-y-2 text-xs text-white/50">
+                                <p><span className="text-white/70 font-semibold">Title:</span> {manualReportTitle || 'Untitled Report'}</p>
+                                <p><span className="text-white/70 font-semibold">Columns:</span> {manualSelectedColumns.length + templateExtraColumns.length}</p>
+                                <p><span className="text-white/70 font-semibold">Rows:</span> {templateRows.length}</p>
+                                <p><span className="text-white/70 font-semibold">Numbering:</span> {manualIncludeNumbering ? 'Yes' : 'No'}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Template Builder Drawer (right side) */}
+                    <div className="relative w-[70%] bg-slate-950/95 border-l border-white/15 backdrop-blur-xl shadow-2xl flex flex-col animate-in slide-in-from-right-8 duration-300 overflow-hidden">
+                        {/* Drawer Header */}
+                        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-black/20 shrink-0">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-xl bg-blue-500/15 border border-blue-500/30">
+                                    <Table className="w-5 h-5 text-blue-400" />
+                                </div>
+                                <div>
+                                    <h3 className="text-white font-bold text-base">Template Builder</h3>
+                                    <p className="text-white/50 text-xs">Customize rows, columns, and cell content</p>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setShowTemplateBuilder(false)}
+                                className="p-2 rounded-xl border border-white/15 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white transition-all"
+                            >
+                                <PanelRightClose className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {/* Structural Controls */}
+                        <div className="flex items-center gap-3 px-6 py-3 border-b border-white/10 bg-black/10 shrink-0">
+                            <button
+                                onClick={() => {
+                                    const colName = `Column ${templateExtraColumns.length + 1}`;
+                                    setTemplateExtraColumns(prev => [...prev, colName]);
+                                }}
+                                className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg border border-blue-500/30 bg-blue-600/15 text-blue-400 hover:bg-blue-600/25 transition-all"
+                            >
+                                <Plus className="w-3.5 h-3.5" /> Add Column
+                            </button>
+                            <button
+                                onClick={() => setTemplateRows(prev => [...prev, {}])}
+                                className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg border border-emerald-500/30 bg-emerald-600/15 text-emerald-400 hover:bg-emerald-600/25 transition-all"
+                            >
+                                <Plus className="w-3.5 h-3.5" /> Add Row
+                            </button>
+                            <div className="ml-auto text-xs text-white/40">
+                                {templateRows.length} rows × {manualSelectedColumns.length + templateExtraColumns.length} columns
+                            </div>
+                        </div>
+
+                        {/* Mini-Spreadsheet */}
+                        <div className="flex-1 overflow-auto min-h-0 p-4">
+                            <div className="overflow-auto rounded-xl border border-white/10">
+                                <table className="w-full text-xs border-collapse">
+                                    <thead className="sticky top-0 z-10">
+                                        <tr className="bg-slate-800/90 backdrop-blur-sm">
+                                            {manualIncludeNumbering && (
+                                                <th className="px-3 py-2.5 text-left text-white/60 font-bold border-b border-r border-white/10 whitespace-nowrap w-12">#</th>
+                                            )}
+                                            {EVENT_EXPORT_COLUMNS.filter(col => manualSelectedColumns.includes(col.id)).map(col => (
+                                                <th key={col.id} className="px-3 py-2.5 text-left text-white/80 font-bold border-b border-r border-white/10 whitespace-nowrap">
+                                                    {col.label}
+                                                </th>
+                                            ))}
+                                            {templateExtraColumns.map((colName, colIdx) => (
+                                                <th key={`extra-${colIdx}`} className="px-2 py-1.5 text-left border-b border-r border-white/10 whitespace-nowrap group">
+                                                    <div className="flex items-center gap-1">
+                                                        {editingCell?.type === 'header' && editingCell?.col === colIdx ? (
+                                                            <input
+                                                                autoFocus
+                                                                type="text"
+                                                                value={colName}
+                                                                onChange={(e) => {
+                                                                    setTemplateExtraColumns(prev => {
+                                                                        const updated = [...prev];
+                                                                        updated[colIdx] = e.target.value;
+                                                                        return updated;
+                                                                    });
+                                                                }}
+                                                                onBlur={() => setEditingCell(null)}
+                                                                onKeyDown={(e) => e.key === 'Enter' && setEditingCell(null)}
+                                                                className="bg-blue-500/20 border border-blue-500/40 rounded px-1.5 py-0.5 text-blue-300 text-xs font-bold w-full focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+                                                            />
+                                                        ) : (
+                                                            <span
+                                                                className="text-blue-400 font-bold cursor-pointer hover:text-blue-300 transition-colors"
+                                                                onDoubleClick={() => setEditingCell({ type: 'header', col: colIdx })}
+                                                                title="Double-click to rename"
+                                                            >
+                                                                {colName}
+                                                            </span>
+                                                        )}
+                                                        <button
+                                                            onClick={() => {
+                                                                setTemplateExtraColumns(prev => prev.filter((_, i) => i !== colIdx));
+                                                                setTemplateRows(prev => prev.map(row => {
+                                                                    const updated = { ...row };
+                                                                    delete updated[`extra_${colIdx}`];
+                                                                    return updated;
+                                                                }));
+                                                            }}
+                                                            className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-rose-400/60 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                                                            title="Remove column"
+                                                        >
+                                                            <Trash2 className="w-3 h-3" />
+                                                        </button>
+                                                    </div>
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {templateRows.map((row, rowIdx) => (
+                                            <tr key={rowIdx} className="group hover:bg-white/[0.03] transition-colors">
+                                                {manualIncludeNumbering && (
+                                                    <td className="px-3 py-2 text-white/30 font-mono border-b border-r border-white/5 text-center">{rowIdx + 1}</td>
+                                                )}
+                                                {EVENT_EXPORT_COLUMNS.filter(col => manualSelectedColumns.includes(col.id)).map(col => (
+                                                    <td key={col.id} className="px-1 py-1 border-b border-r border-white/5">
+                                                        {editingCell?.type === 'cell' && editingCell?.row === rowIdx && editingCell?.col === col.id ? (
+                                                            <div className="relative">
+                                                                <input
+                                                                    autoFocus
+                                                                    type="text"
+                                                                    value={row[col.id] || ''}
+                                                                    onChange={(e) => {
+                                                                        setTemplateRows(prev => {
+                                                                            const updated = [...prev];
+                                                                            updated[rowIdx] = { ...updated[rowIdx], [col.id]: e.target.value };
+                                                                            return updated;
+                                                                        });
+                                                                    }}
+                                                                    onBlur={() => setTimeout(() => setEditingCell(null), 150)}
+                                                                    onKeyDown={(e) => {
+                                                                        if (e.key === 'Enter') setEditingCell(null);
+                                                                        if (e.key === 'Tab') {
+                                                                            e.preventDefault();
+                                                                            setEditingCell(null);
+                                                                        }
+                                                                        if (e.key === 'Escape') setEditingCell(null);
+                                                                    }}
+                                                                    className="w-full bg-blue-500/10 border border-blue-500/30 rounded px-2 py-1 text-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500/40"
+                                                                />
+                                                                {getSuggestionsForColumn(col.id, row[col.id]).length > 0 && (
+                                                                    <ul className="absolute z-50 left-0 right-0 mt-0.5 max-h-32 overflow-y-auto rounded-lg border border-white/15 bg-slate-900/98 backdrop-blur-xl shadow-2xl py-0.5 animate-in fade-in duration-100">
+                                                                        {getSuggestionsForColumn(col.id, row[col.id]).map((suggestion, sIdx) => (
+                                                                            <li key={sIdx}>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onMouseDown={(e) => {
+                                                                                        e.preventDefault();
+                                                                                        setTemplateRows(prev => {
+                                                                                            const updated = [...prev];
+                                                                                            updated[rowIdx] = { ...updated[rowIdx], [col.id]: suggestion };
+                                                                                            return updated;
+                                                                                        });
+                                                                                        setEditingCell(null);
+                                                                                    }}
+                                                                                    className="w-full text-left px-3 py-1.5 text-xs text-white/70 hover:bg-white/10 hover:text-white transition-colors"
+                                                                                >
+                                                                                    {suggestion}
+                                                                                </button>
+                                                                            </li>
+                                                                        ))}
+                                                                    </ul>
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <div
+                                                                className="px-2 py-1.5 text-white/50 cursor-text min-h-[28px] rounded hover:bg-white/5 transition-colors"
+                                                                onClick={() => setEditingCell({ type: 'cell', row: rowIdx, col: col.id })}
+                                                                title="Click to edit"
+                                                            >
+                                                                {row[col.id] || ''}
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                ))}
+                                                {templateExtraColumns.map((_, colIdx) => (
+                                                    <td key={`extra-${colIdx}`} className="px-1 py-1 border-b border-r border-white/5">
+                                                        {editingCell?.type === 'cell' && editingCell?.row === rowIdx && editingCell?.col === `extra_${colIdx}` ? (
+                                                            <input
+                                                                autoFocus
+                                                                type="text"
+                                                                value={row[`extra_${colIdx}`] || ''}
+                                                                onChange={(e) => {
+                                                                    setTemplateRows(prev => {
+                                                                        const updated = [...prev];
+                                                                        updated[rowIdx] = { ...updated[rowIdx], [`extra_${colIdx}`]: e.target.value };
+                                                                        return updated;
+                                                                    });
+                                                                }}
+                                                                onBlur={() => setEditingCell(null)}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') setEditingCell(null);
+                                                                    if (e.key === 'Tab') {
+                                                                        e.preventDefault();
+                                                                        setEditingCell(null);
+                                                                    }
+                                                                }}
+                                                                className="w-full bg-blue-500/10 border border-blue-500/30 rounded px-2 py-1 text-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500/40"
+                                                            />
+                                                        ) : (
+                                                            <div
+                                                                className="px-2 py-1.5 text-white/50 cursor-text min-h-[28px] rounded hover:bg-white/5 transition-colors"
+                                                                onClick={() => setEditingCell({ type: 'cell', row: rowIdx, col: `extra_${colIdx}` })}
+                                                                title="Click to edit"
+                                                            >
+                                                                {row[`extra_${colIdx}`] || ''}
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                ))}
+                                                {/* Delete row button */}
+                                                <td className="px-1 py-1 border-b border-white/5">
+                                                    <button
+                                                        onClick={() => setTemplateRows(prev => prev.filter((_, i) => i !== rowIdx))}
+                                                        className="opacity-0 group-hover:opacity-100 p-1 rounded text-rose-400/50 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                                                        title="Delete row"
+                                                    >
+                                                        <Trash2 className="w-3 h-3" />
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        {/* Drawer Footer */}
+                        <div className="flex items-center justify-between px-6 py-4 border-t border-white/10 bg-black/20 shrink-0">
+                            <button
+                                onClick={() => {
+                                    setTemplateRows(Array.from({ length: 5 }, () => ({})));
+                                    setTemplateExtraColumns([]);
+                                }}
+                                className="px-4 py-2 text-xs font-bold rounded-lg border border-white/10 bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/80 transition-all flex items-center gap-2"
+                            >
+                                <RefreshCw className="w-3.5 h-3.5" /> Reset Table
+                            </button>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setShowTemplateBuilder(false)}
+                                    className="px-4 py-2 text-xs font-bold rounded-lg border border-white/15 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white transition-all"
+                                >
+                                    Done
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );
