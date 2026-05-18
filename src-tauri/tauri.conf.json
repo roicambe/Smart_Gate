@@ -28,6 +28,7 @@
   },
   "bundle": {
     "active": true,
+    "publisher": "Roi Cambe",
     "targets": "all",
     "resources": [
       "models/*"
