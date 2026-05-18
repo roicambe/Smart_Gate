@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
-    History, Search, Filter, RefreshCw, Calendar, ArrowUpRight, ArrowDownLeft, Download, FileText, FileSpreadsheet, Loader2, ChevronLeft, ChevronRight, Plus, Trash2, Table, PanelRightClose
+    History, Search, Filter, RefreshCw, Calendar, ArrowUpRight, ArrowDownLeft, Download, FileText, FileSpreadsheet, Loader2, ChevronLeft, ChevronRight, Plus, Trash2, Table, PanelRightClose, Sun, Moon
 } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
@@ -84,9 +84,9 @@ export const AccessLogs = ({ branding, adminSession }) => {
     const [isExporting, setIsExporting] = useState(false);
     const [manualSelectedColumns, setManualSelectedColumns] = useState(['timestamp', 'name', 'department', 'status']);
     const [manualSelectedRoles, setManualSelectedRoles] = useState([]);
-    const [manualDepartment, setManualDepartment] = useState('All');
-    const [manualProgram, setManualProgram] = useState('All');
-    const [manualYearLevel, setManualYearLevel] = useState('All');
+    const [manualSelectedDepartments, setManualSelectedDepartments] = useState([]);
+    const [manualSelectedPrograms, setManualSelectedPrograms] = useState([]);
+    const [manualSelectedYears, setManualSelectedYears] = useState([]);
     const [manualReportTitle, setManualReportTitle] = useState('');
     const [manualIncludeNumbering, setManualIncludeNumbering] = useState(true);
     const [manualIncludeAbsent, setManualIncludeAbsent] = useState(false);
@@ -98,6 +98,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
     const [templateExtraColumns, setTemplateExtraColumns] = useState([]);
     const [editingCell, setEditingCell] = useState(null);
     const [templatePersons, setTemplatePersons] = useState([]);
+    const [templateDarkMode, setTemplateDarkMode] = useState(true);
     const exportMenuRef = useRef(null);
     const { showSuccess, showError, showWarning, showProcessing } = useToast();
 
@@ -150,6 +151,64 @@ export const AccessLogs = ({ branding, adminSession }) => {
         }
         return pool.filter(item => item.toLowerCase().includes(lower)).slice(0, 8);
     }, [templatePersons, departments, allPrograms, allRoles]);
+
+    const handleCellNavigation = (rowIdx, colId, e) => {
+        const visiblePredefined = EVENT_EXPORT_COLUMNS.filter(col => manualSelectedColumns.includes(col.id)).map(col => col.id);
+        const extraColKeys = templateExtraColumns.map((_, idx) => `extra_${idx}`);
+        const allColKeys = [...visiblePredefined, ...extraColKeys];
+        
+        if (allColKeys.length === 0) return;
+        
+        const colIdx = allColKeys.indexOf(colId);
+        if (colIdx === -1) return;
+        
+        let newRow = rowIdx;
+        let newColIdx = colIdx;
+        
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            if (e.shiftKey) {
+                newColIdx = colIdx - 1;
+                if (newColIdx < 0) {
+                    newColIdx = allColKeys.length - 1;
+                    newRow = rowIdx - 1;
+                }
+            } else {
+                newColIdx = colIdx + 1;
+                if (newColIdx >= allColKeys.length) {
+                    newColIdx = 0;
+                    newRow = rowIdx + 1;
+                }
+            }
+        } else if (e.key === 'ArrowRight') {
+            const cursorPosition = e.target.selectionStart;
+            if (cursorPosition !== e.target.value.length) return;
+            newColIdx = colIdx + 1;
+            if (newColIdx >= allColKeys.length) {
+                newColIdx = 0;
+                newRow = rowIdx + 1;
+            }
+        } else if (e.key === 'ArrowLeft') {
+            const cursorPosition = e.target.selectionStart;
+            if (cursorPosition !== 0) return;
+            newColIdx = colIdx - 1;
+            if (newColIdx < 0) {
+                newColIdx = allColKeys.length - 1;
+                newRow = rowIdx - 1;
+            }
+        } else if (e.key === 'ArrowUp') {
+            newRow = rowIdx - 1;
+        } else if (e.key === 'ArrowDown') {
+            newRow = rowIdx + 1;
+        } else {
+            return;
+        }
+        
+        if (newRow >= 0 && newRow < templateRows.length) {
+            const nextColId = allColKeys[newColIdx];
+            setEditingCell({ type: 'cell', row: newRow, col: nextColId });
+        }
+    };
 
     // Fetch academic structure for filters
     useEffect(() => {
@@ -257,24 +316,56 @@ export const AccessLogs = ({ branding, adminSession }) => {
         return events.sort();
     }, [eventLogs]);
 
+    const manualHasStudentBehavior = useMemo(() => {
+        if (manualSelectedRoles.length === 0) return false;
+        return allRoles.some(r => 
+            manualSelectedRoles.includes(r.role_name.toLowerCase()) && 
+            (r.role_behavior === 'student' || r.role_name.toLowerCase() === 'student')
+        );
+    }, [manualSelectedRoles, allRoles]);
+
+    const manualHasEmployeeBehavior = useMemo(() => {
+        if (manualSelectedRoles.length === 0) return false;
+        return allRoles.some(r => 
+            manualSelectedRoles.includes(r.role_name.toLowerCase()) && 
+            (r.role_behavior === 'employee' || r.role_name.toLowerCase() === 'employee')
+        );
+    }, [manualSelectedRoles, allRoles]);
+
+    const manualAvailablePrograms = useMemo(() => {
+        if (manualSelectedDepartments.length === 0) {
+            return [...new Set(allPrograms.map(p => p.program_name).filter(Boolean))].sort();
+        }
+        const selectedDeptIds = departments
+            .filter(d => manualSelectedDepartments.includes(d.department_name))
+            .map(d => d.department_id);
+        return [...new Set(allPrograms
+            .filter(p => selectedDeptIds.includes(p.department_id))
+            .map(p => p.program_name)
+            .filter(Boolean))].sort();
+    }, [manualSelectedDepartments, departments, allPrograms]);
+
+    useEffect(() => {
+        if (manualSelectedPrograms.length === 0) return;
+        setManualSelectedPrograms(prev => prev.filter(p => manualAvailablePrograms.includes(p)));
+    }, [manualAvailablePrograms]);
+
     const exportRoleAwareOptions = useMemo(() => {
-        const source = filteredLogs;
-        
         const mainRoles = allRoles.filter(r => r.is_main_role || ['student', 'employee', 'visitor'].includes(r.role_name.toLowerCase()));
         const subRoles = allRoles.filter(r => !mainRoles.some(mr => mr.role_id === r.role_id));
 
+        const deptNames = [...new Set(departments.map(d => d.department_name).filter(Boolean))].sort();
+        const progNames = [...new Set(allPrograms.map(p => p.program_name).filter(Boolean))].sort();
+
         return {
-            departments: [...new Set(source.map(log => log.department_name).filter(Boolean))].sort(),
-            programs: [...new Set(source.map(log => log.program_name).filter(Boolean))].sort(),
-            yearLevels: [...new Set(source.map(log => log.year_level).filter(Boolean))].sort((a, b) => a - b),
+            departments: deptNames,
+            programs: progNames,
+            yearLevels: [1, 2, 3, 4],
             mainRoles,
             subRoles,
-            visitorStatuses: [...new Set(source
-                .filter(log => getRoleType(log) === 'visitor')
-                .map(log => log.status || 'On Time')
-                .filter(Boolean))].sort(),
+            visitorStatuses: ['On Time', 'Late', 'Excused'],
         };
-    }, [filteredLogs, allRoles]);
+    }, [departments, allPrograms, allRoles]);
 
     useEffect(() => {
         if (!showManualExportModal || activeTab !== 'eventLogs') return;
@@ -292,9 +383,9 @@ export const AccessLogs = ({ branding, adminSession }) => {
             if (Array.isArray(prefs.selectedRoles)) {
                 setManualSelectedRoles(prefs.selectedRoles);
             }
-            if (typeof prefs.department === 'string') setManualDepartment(prefs.department);
-            if (typeof prefs.program === 'string') setManualProgram(prefs.program);
-            if (typeof prefs.yearLevel === 'string') setManualYearLevel(prefs.yearLevel);
+            if (Array.isArray(prefs.manualSelectedDepartments)) setManualSelectedDepartments(prefs.manualSelectedDepartments);
+            if (Array.isArray(prefs.manualSelectedPrograms)) setManualSelectedPrograms(prefs.manualSelectedPrograms);
+            if (Array.isArray(prefs.manualSelectedYears)) setManualSelectedYears(prefs.manualSelectedYears);
             if (typeof prefs.reportTitle === 'string') setManualReportTitle(prefs.reportTitle);
             if (typeof prefs.includeNumbering === 'boolean') setManualIncludeNumbering(prefs.includeNumbering);
             if (typeof prefs.includeAbsent === 'boolean') setManualIncludeAbsent(prefs.includeAbsent);
@@ -312,9 +403,9 @@ export const AccessLogs = ({ branding, adminSession }) => {
                 JSON.stringify({
                     columns: manualSelectedColumns,
                     selectedRoles: manualSelectedRoles,
-                    department: manualDepartment,
-                    program: manualProgram,
-                    yearLevel: manualYearLevel,
+                    manualSelectedDepartments: manualSelectedDepartments,
+                    manualSelectedPrograms: manualSelectedPrograms,
+                    manualSelectedYears: manualSelectedYears,
                     reportTitle: manualReportTitle,
                     includeNumbering: manualIncludeNumbering,
                     includeAbsent: manualIncludeAbsent,
@@ -328,9 +419,9 @@ export const AccessLogs = ({ branding, adminSession }) => {
     }, [
         manualSelectedColumns,
         manualSelectedRoles,
-        manualDepartment,
-        manualProgram,
-        manualYearLevel,
+        manualSelectedDepartments,
+        manualSelectedPrograms,
+        manualSelectedYears,
         manualReportTitle,
     ]);
 
@@ -632,12 +723,12 @@ export const AccessLogs = ({ branding, adminSession }) => {
                 if (!hasMatch) return false;
             }
 
-            if (manualDepartment !== 'All' && (log.department_name || 'N/A') !== manualDepartment) return false;
+            if (manualSelectedDepartments.length > 0 && !manualSelectedDepartments.includes(log.department_name || 'N/A')) return false;
             
             // Program/Year filter for any student role
             if (selectedLower.includes('student') || manualSelectedRoles.length === 0) {
-                if (manualProgram !== 'All' && (log.program_name || 'N/A') !== manualProgram) return false;
-                if (manualYearLevel !== 'All' && String(log.year_level || '') !== String(manualYearLevel)) return false;
+                if (manualSelectedPrograms.length > 0 && !manualSelectedPrograms.includes(log.program_name || 'N/A')) return false;
+                if (manualSelectedYears.length > 0 && !manualSelectedYears.map(String).includes(String(log.year_level || ''))) return false;
             }
             
             if (!manualIncludePartTime && log.is_part_time) return false;
@@ -676,9 +767,9 @@ export const AccessLogs = ({ branding, adminSession }) => {
 
                 if (selectedLowerRoles.length === 0 || selectedLowerRoles.includes('student')) {
                     students.forEach(s => {
-                        if (manualDepartment !== 'All' && (s.department_name || 'N/A') !== manualDepartment) return;
-                        if (manualProgram !== 'All' && (s.program_name || 'N/A') !== manualProgram) return;
-                        if (manualYearLevel !== 'All' && String(s.year_level || '') !== String(manualYearLevel)) return;
+                        if (manualSelectedDepartments.length > 0 && !manualSelectedDepartments.includes(s.department_name || 'N/A')) return;
+                        if (manualSelectedPrograms.length > 0 && !manualSelectedPrograms.includes(s.program_name || 'N/A')) return;
+                        if (manualSelectedYears.length > 0 && !manualSelectedYears.map(String).includes(String(s.year_level || ''))) return;
                         
                         const middleInitial = s.middle_name ? s.middle_name.trim().charAt(0) + '.' : '';
                         const formattedName = `${s.last_name}, ${s.first_name}${middleInitial ? ' ' + middleInitial : ''}${s.suffix ? ' ' + s.suffix : ''}`;
@@ -697,7 +788,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
 
                 if (selectedLowerRoles.length === 0 || selectedLowerRoles.some(r => !['student', 'visitor'].includes(r))) {
                     employees.forEach(e => {
-                        if (manualDepartment !== 'All' && (e.department_name || 'N/A') !== manualDepartment) return;
+                        if (manualSelectedDepartments.length > 0 && !manualSelectedDepartments.includes(e.department_name || 'N/A')) return;
                         if (selectedLowerRoles.length > 0) {
                              const hasMatch = selectedLowerRoles.some(r => (e.roles || []).some(er => er.toLowerCase() === r));
                              if (!hasMatch) return;
@@ -1619,37 +1710,114 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                {(manualSelectedRoles.length > 0 && 
-                                  manualSelectedRoles.some(r => r.toLowerCase() === 'employee' || r.toLowerCase() === 'student' || r.toLowerCase() === 'professor' || r.toLowerCase() === 'staff')) && (
-                                    <div>
-                                        <label className="block text-xs font-bold text-white/50 mb-2">Department</label>
-                                        <select value={manualDepartment} onChange={(e) => setManualDepartment(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none transition-all cursor-pointer">
-                                            <option value="All" className="bg-slate-900">All Departments</option>
-                                            {exportRoleAwareOptions.departments.map(value => <option key={value} value={value} className="bg-slate-900">{value}</option>)}
-                                        </select>
-                                    </div>
-                                )}
+                            {(manualHasStudentBehavior || manualHasEmployeeBehavior) && (
+                                <div className="space-y-5 border border-white/10 rounded-2xl p-5 bg-black/20">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                        <div>
+                                            <label className="block text-xs font-bold text-white/50 mb-2">Specific Departments</label>
+                                            <div className="flex flex-wrap gap-2 p-3 bg-black/40 border border-white/10 rounded-xl max-h-48 overflow-y-auto custom-scrollbar">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setManualSelectedDepartments([])}
+                                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${manualSelectedDepartments.length === 0 ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.15)]' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                >
+                                                    All Departments
+                                                </button>
+                                                {departments.map((dept) => {
+                                                    const active = manualSelectedDepartments.includes(dept.department_name);
+                                                    return (
+                                                        <button
+                                                            key={dept.department_id}
+                                                            type="button"
+                                                            onClick={() => {
+                                                                if (active) {
+                                                                    setManualSelectedDepartments(prev => prev.filter(d => d !== dept.department_name));
+                                                                } else {
+                                                                    setManualSelectedDepartments(prev => [...prev, dept.department_name]);
+                                                                }
+                                                            }}
+                                                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all truncate max-w-[150px] ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.15)]' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                            title={dept.department_name}
+                                                        >
+                                                            {dept.department_code}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
 
-                                {(manualSelectedRoles.length > 0 && manualSelectedRoles.some(r => r.toLowerCase() === 'student')) && (
-                                    <>
+                                        {manualHasStudentBehavior && (
+                                            <div>
+                                                <label className="block text-xs font-bold text-white/50 mb-2">Specific Year Levels</label>
+                                                <div className="grid grid-cols-2 gap-2 p-3 bg-black/40 border border-white/10 rounded-xl">
+                                                    {[1, 2, 3, 4].map((year) => {
+                                                        const active = manualSelectedYears.includes(year);
+                                                        const ordinal = year === 1 ? '1st' : year === 2 ? '2nd' : year === 3 ? '3rd' : '4th';
+                                                        return (
+                                                            <button
+                                                                key={year}
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (active) {
+                                                                        setManualSelectedYears(prev => prev.filter(y => y !== year));
+                                                                    } else {
+                                                                        setManualSelectedYears(prev => [...prev, year].sort());
+                                                                    }
+                                                                }}
+                                                                className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.15)]' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                            >
+                                                                {ordinal} Year
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {manualHasStudentBehavior && (
                                         <div>
-                                            <label className="block text-xs font-bold text-white/50 mb-2">Academic Program</label>
-                                            <select value={manualProgram} onChange={(e) => setManualProgram(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none transition-all cursor-pointer">
-                                                <option value="All" className="bg-slate-900">All Programs</option>
-                                                {exportRoleAwareOptions.programs.map(value => <option key={value} value={value} className="bg-slate-900">{value}</option>)}
-                                            </select>
+                                            <label className="block text-xs font-bold text-white/50 mb-2">Specific Programs</label>
+                                            <div className="flex flex-wrap gap-2 p-3 bg-black/40 border border-white/10 rounded-xl max-h-48 overflow-y-auto custom-scrollbar">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setManualSelectedPrograms([])}
+                                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${manualSelectedPrograms.length === 0 ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.15)]' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                >
+                                                    All Programs
+                                                </button>
+                                                {allPrograms
+                                                    .filter(prog => {
+                                                        if (manualSelectedDepartments.length === 0) return true;
+                                                        const dept = departments.find(d => d.department_id === prog.department_id);
+                                                        return dept && manualSelectedDepartments.includes(dept.department_name);
+                                                    })
+                                                    .map((prog) => {
+                                                        const active = manualSelectedPrograms.includes(prog.program_name);
+                                                        return (
+                                                            <button
+                                                                key={prog.program_id}
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    if (active) {
+                                                                        setManualSelectedPrograms(prev => prev.filter(p => p !== prog.program_name));
+                                                                    } else {
+                                                                        setManualSelectedPrograms(prev => [...prev, prog.program_name]);
+                                                                    }
+                                                                }}
+                                                                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all truncate max-w-[150px] ${active ? 'bg-emerald-500/20 border-emerald-400/60 text-emerald-100 shadow-[0_0_12px_rgba(16,185,129,0.15)]' : 'bg-white/5 border-white/15 text-white/70 hover:bg-white/10 hover:text-white'}`}
+                                                                title={prog.program_name}
+                                                            >
+                                                                {prog.program_code}
+                                                            </button>
+                                                        );
+                                                    })
+                                                }
+                                            </div>
                                         </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-white/50 mb-2">Year Level</label>
-                                            <select value={manualYearLevel} onChange={(e) => setManualYearLevel(e.target.value)} className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:ring-2 focus:ring-white/20 focus:outline-none transition-all cursor-pointer">
-                                                <option value="All" className="bg-slate-900">All Year Levels</option>
-                                                {exportRoleAwareOptions.yearLevels.map(value => <option key={value} value={String(value)} className="bg-slate-900">{`Year ${value}`}</option>)}
-                                            </select>
-                                        </div>
-                                    </>
-                                )}
-                            </div>
+                                    )}
+                                </div>
+                            )}
 
                             <div>
                                 <label className="block text-xs font-bold text-white/50 mb-3">Report Options</label>
@@ -1762,64 +1930,103 @@ export const AccessLogs = ({ branding, adminSession }) => {
                     </div>
 
                     {/* Template Builder Drawer (right side) */}
-                    <div className="relative w-[70%] bg-slate-950/95 border-l border-white/15 backdrop-blur-xl shadow-2xl flex flex-col animate-in slide-in-from-right-8 duration-300 overflow-hidden">
+                    <div className={`relative w-[70%] border-l shadow-2xl flex flex-col animate-in slide-in-from-right-8 duration-300 overflow-hidden ${
+                        templateDarkMode ? 'bg-slate-950/95 border-white/15 backdrop-blur-xl' : 'bg-slate-50 border-slate-200'
+                    }`}>
                         {/* Drawer Header */}
-                        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-black/20 shrink-0">
+                        <div className={`flex items-center justify-between px-6 py-4 border-b shrink-0 ${
+                            templateDarkMode ? 'border-white/10 bg-black/20 text-white' : 'border-slate-200 bg-slate-100 text-slate-900'
+                        }`}>
                             <div className="flex items-center gap-3">
-                                <div className="p-2 rounded-xl bg-blue-500/15 border border-blue-500/30">
-                                    <Table className="w-5 h-5 text-blue-400" />
+                                <div className={`p-2 rounded-xl border ${
+                                    templateDarkMode ? 'bg-blue-500/15 border-blue-500/30' : 'bg-blue-50 border-blue-200'
+                                }`}>
+                                    <Table className={`w-5 h-5 ${templateDarkMode ? 'text-blue-400' : 'text-blue-600'}`} />
                                 </div>
                                 <div>
-                                    <h3 className="text-white font-bold text-base">Template Builder</h3>
-                                    <p className="text-white/50 text-xs">Customize rows, columns, and cell content</p>
+                                    <h3 className="font-bold text-base">Template Builder</h3>
+                                    <p className={`text-xs ${templateDarkMode ? 'text-white/50' : 'text-slate-500'}`}>Customize rows, columns, and cell content</p>
                                 </div>
                             </div>
-                            <button
-                                onClick={() => setShowTemplateBuilder(false)}
-                                className="p-2 rounded-xl border border-white/15 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white transition-all"
-                            >
-                                <PanelRightClose className="w-5 h-5" />
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => setTemplateDarkMode(!templateDarkMode)}
+                                    className={`p-2 rounded-xl border transition-all ${
+                                        templateDarkMode 
+                                            ? 'border-white/15 bg-white/5 text-amber-400 hover:bg-white/10' 
+                                            : 'border-slate-200 bg-slate-200/50 text-amber-600 hover:bg-slate-200'
+                                    }`}
+                                    title={templateDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                                >
+                                    {templateDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                                </button>
+                                <button
+                                    onClick={() => setShowTemplateBuilder(false)}
+                                    className={`p-2 rounded-xl border transition-all ${
+                                        templateDarkMode
+                                            ? 'border-white/15 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white'
+                                            : 'border-slate-200 bg-slate-200/50 text-slate-600 hover:bg-slate-200 hover:text-slate-900'
+                                    }`}
+                                >
+                                    <PanelRightClose className="w-5 h-5" />
+                                </button>
+                            </div>
                         </div>
 
                         {/* Structural Controls */}
-                        <div className="flex items-center gap-3 px-6 py-3 border-b border-white/10 bg-black/10 shrink-0">
+                        <div className={`flex items-center gap-3 px-6 py-3 border-b shrink-0 ${
+                            templateDarkMode ? 'border-white/10 bg-black/10 text-white/40' : 'border-slate-200 bg-slate-50/50 text-slate-600'
+                        }`}>
                             <button
                                 onClick={() => {
                                     const colName = `Column ${templateExtraColumns.length + 1}`;
                                     setTemplateExtraColumns(prev => [...prev, colName]);
                                 }}
-                                className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg border border-blue-500/30 bg-blue-600/15 text-blue-400 hover:bg-blue-600/25 transition-all"
+                                className={`flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${
+                                    templateDarkMode
+                                        ? 'border-blue-500/30 bg-blue-600/15 text-blue-400 hover:bg-blue-600/25'
+                                        : 'border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100'
+                                }`}
                             >
                                 <Plus className="w-3.5 h-3.5" /> Add Column
                             </button>
                             <button
                                 onClick={() => setTemplateRows(prev => [...prev, {}])}
-                                className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg border border-emerald-500/30 bg-emerald-600/15 text-emerald-400 hover:bg-emerald-600/25 transition-all"
+                                className={`flex items-center gap-2 px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${
+                                    templateDarkMode
+                                        ? 'border-emerald-500/30 bg-emerald-600/15 text-emerald-400 hover:bg-emerald-600/25'
+                                        : 'border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+                                }`}
                             >
                                 <Plus className="w-3.5 h-3.5" /> Add Row
                             </button>
-                            <div className="ml-auto text-xs text-white/40">
+                            <div className={`ml-auto text-xs ${templateDarkMode ? 'text-white/40' : 'text-slate-400'}`}>
                                 {templateRows.length} rows × {manualSelectedColumns.length + templateExtraColumns.length} columns
                             </div>
                         </div>
 
                         {/* Mini-Spreadsheet */}
                         <div className="flex-1 overflow-auto min-h-0 p-4">
-                            <div className="overflow-auto rounded-xl border border-white/10">
+                            <div className={`overflow-auto rounded-xl border ${templateDarkMode ? 'border-white/10' : 'border-slate-200 bg-white'}`}>
                                 <table className="w-full text-xs border-collapse">
                                     <thead className="sticky top-0 z-10">
-                                        <tr className="bg-slate-800/90 backdrop-blur-sm">
+                                        <tr className={templateDarkMode ? 'bg-slate-800/90 backdrop-blur-sm' : 'bg-slate-100/95 backdrop-blur-sm'}>
                                             {manualIncludeNumbering && (
-                                                <th className="px-3 py-2.5 text-left text-white/60 font-bold border-b border-r border-white/10 whitespace-nowrap w-12">#</th>
+                                                <th className={`px-3 py-2.5 text-left font-bold border-b border-r whitespace-nowrap w-12 ${
+                                                    templateDarkMode ? 'border-white/10 text-white/60' : 'border-slate-200 text-slate-500'
+                                                }`}>#</th>
                                             )}
                                             {EVENT_EXPORT_COLUMNS.filter(col => manualSelectedColumns.includes(col.id)).map(col => (
-                                                <th key={col.id} className="px-3 py-2.5 text-left text-white/80 font-bold border-b border-r border-white/10 whitespace-nowrap">
+                                                <th key={col.id} className={`px-3 py-2.5 text-left font-bold border-b border-r whitespace-nowrap ${
+                                                    templateDarkMode ? 'border-white/10 text-white/80' : 'border-slate-200 text-slate-800'
+                                                }`}>
                                                     {col.label}
                                                 </th>
                                             ))}
                                             {templateExtraColumns.map((colName, colIdx) => (
-                                                <th key={`extra-${colIdx}`} className="px-2 py-1.5 text-left border-b border-r border-white/10 whitespace-nowrap group">
+                                                <th key={`extra-${colIdx}`} className={`px-2 py-1.5 text-left border-b border-r whitespace-nowrap group ${
+                                                     templateDarkMode ? 'border-white/10' : 'border-slate-200'
+                                                 }`}>
                                                     <div className="flex items-center gap-1">
                                                         {editingCell?.type === 'header' && editingCell?.col === colIdx ? (
                                                             <input
@@ -1835,11 +2042,17 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                                 }}
                                                                 onBlur={() => setEditingCell(null)}
                                                                 onKeyDown={(e) => e.key === 'Enter' && setEditingCell(null)}
-                                                                className="bg-blue-500/20 border border-blue-500/40 rounded px-1.5 py-0.5 text-blue-300 text-xs font-bold w-full focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+                                                                className={`rounded px-1.5 py-0.5 text-xs font-bold w-full focus:outline-none focus:ring-1 ${
+                                                                     templateDarkMode 
+                                                                         ? 'bg-blue-500/20 border border-blue-500/40 text-blue-300 focus:ring-blue-500/50' 
+                                                                         : 'bg-blue-50 border border-blue-300 text-blue-600 focus:ring-blue-400'
+                                                                 }`}
                                                             />
                                                         ) : (
                                                             <span
-                                                                className="text-blue-400 font-bold cursor-pointer hover:text-blue-300 transition-colors"
+                                                                className={`font-bold cursor-pointer transition-colors ${
+                                                                     templateDarkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-700'
+                                                                 }`}
                                                                 onDoubleClick={() => setEditingCell({ type: 'header', col: colIdx })}
                                                                 title="Double-click to rename"
                                                             >
@@ -1867,12 +2080,18 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                     </thead>
                                     <tbody>
                                         {templateRows.map((row, rowIdx) => (
-                                            <tr key={rowIdx} className="group hover:bg-white/[0.03] transition-colors">
+                                            <tr key={rowIdx} className={`group transition-colors ${
+                                                 templateDarkMode ? 'hover:bg-white/[0.03]' : 'hover:bg-slate-100/50'
+                                             }`}>
                                                 {manualIncludeNumbering && (
-                                                    <td className="px-3 py-2 text-white/30 font-mono border-b border-r border-white/5 text-center">{rowIdx + 1}</td>
+                                                    <td className={`px-3 py-2 font-mono border-b border-r text-center ${
+                                                         templateDarkMode ? 'border-white/5 text-white/30' : 'border-slate-100 text-slate-400'
+                                                     }`}>{rowIdx + 1}</td>
                                                 )}
                                                 {EVENT_EXPORT_COLUMNS.filter(col => manualSelectedColumns.includes(col.id)).map(col => (
-                                                    <td key={col.id} className="px-1 py-1 border-b border-r border-white/5">
+                                                    <td key={col.id} className={`px-1 py-1 border-b border-r ${
+                                                         templateDarkMode ? 'border-white/5' : 'border-slate-100'
+                                                     }`}>
                                                         {editingCell?.type === 'cell' && editingCell?.row === rowIdx && editingCell?.col === col.id ? (
                                                             <div className="relative">
                                                                 <input
@@ -1889,16 +2108,23 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                                     onBlur={() => setTimeout(() => setEditingCell(null), 150)}
                                                                     onKeyDown={(e) => {
                                                                         if (e.key === 'Enter') setEditingCell(null);
-                                                                        if (e.key === 'Tab') {
-                                                                            e.preventDefault();
-                                                                            setEditingCell(null);
-                                                                        }
                                                                         if (e.key === 'Escape') setEditingCell(null);
+                                                                        if (['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                                                                            handleCellNavigation(rowIdx, col.id, e);
+                                                                        }
                                                                     }}
-                                                                    className="w-full bg-blue-500/10 border border-blue-500/30 rounded px-2 py-1 text-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500/40"
+                                                                    className={`w-full rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 ${
+                                                                         templateDarkMode 
+                                                                             ? 'bg-blue-500/10 border border-blue-500/30 text-white focus:ring-blue-500/40' 
+                                                                             : 'bg-blue-50 border border-blue-300 text-slate-800 focus:ring-blue-400'
+                                                                     }`}
                                                                 />
                                                                 {getSuggestionsForColumn(col.id, row[col.id]).length > 0 && (
-                                                                    <ul className="absolute z-50 left-0 right-0 mt-0.5 max-h-32 overflow-y-auto rounded-lg border border-white/15 bg-slate-900/98 backdrop-blur-xl shadow-2xl py-0.5 animate-in fade-in duration-100">
+                                                                    <ul className={`absolute z-50 left-0 right-0 mt-0.5 max-h-32 overflow-y-auto rounded-lg border py-0.5 animate-in fade-in duration-100 ${
+                                                                         templateDarkMode 
+                                                                             ? 'border-white/15 bg-slate-900/98 shadow-2xl' 
+                                                                             : 'border-slate-200 bg-white shadow-lg'
+                                                                     }`}>
                                                                         {getSuggestionsForColumn(col.id, row[col.id]).map((suggestion, sIdx) => (
                                                                             <li key={sIdx}>
                                                                                 <button
@@ -1912,7 +2138,11 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                                                         });
                                                                                         setEditingCell(null);
                                                                                     }}
-                                                                                    className="w-full text-left px-3 py-1.5 text-xs text-white/70 hover:bg-white/10 hover:text-white transition-colors"
+                                                                                    className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                                                                                         templateDarkMode 
+                                                                                             ? 'text-white/70 hover:bg-white/10 hover:text-white' 
+                                                                                             : 'text-slate-700 hover:bg-slate-100 hover:text-slate-950'
+                                                                                     }`}
                                                                                 >
                                                                                     {suggestion}
                                                                                 </button>
@@ -1923,7 +2153,11 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                             </div>
                                                         ) : (
                                                             <div
-                                                                className="px-2 py-1.5 text-white/50 cursor-text min-h-[28px] rounded hover:bg-white/5 transition-colors"
+                                                                className={`px-2 py-1.5 cursor-text min-h-[28px] rounded transition-colors ${
+                                                                     templateDarkMode 
+                                                                         ? 'text-white/50 hover:bg-white/5' 
+                                                                         : 'text-slate-700 hover:bg-slate-100'
+                                                                 }`}
                                                                 onClick={() => setEditingCell({ type: 'cell', row: rowIdx, col: col.id })}
                                                                 title="Click to edit"
                                                             >
@@ -1933,7 +2167,9 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                     </td>
                                                 ))}
                                                 {templateExtraColumns.map((_, colIdx) => (
-                                                    <td key={`extra-${colIdx}`} className="px-1 py-1 border-b border-r border-white/5">
+                                                    <td key={`extra-${colIdx}`} className={`px-1 py-1 border-b border-r ${
+                                                         templateDarkMode ? 'border-white/5' : 'border-slate-100'
+                                                     }`}>
                                                         {editingCell?.type === 'cell' && editingCell?.row === rowIdx && editingCell?.col === `extra_${colIdx}` ? (
                                                             <input
                                                                 autoFocus
@@ -1949,9 +2185,8 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                                 onBlur={() => setEditingCell(null)}
                                                                 onKeyDown={(e) => {
                                                                     if (e.key === 'Enter') setEditingCell(null);
-                                                                    if (e.key === 'Tab') {
-                                                                        e.preventDefault();
-                                                                        setEditingCell(null);
+                                                                    if (['Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                                                                        handleCellNavigation(rowIdx, `extra_${colIdx}`, e);
                                                                     }
                                                                 }}
                                                                 className="w-full bg-blue-500/10 border border-blue-500/30 rounded px-2 py-1 text-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500/40"
@@ -1968,7 +2203,9 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                     </td>
                                                 ))}
                                                 {/* Delete row button */}
-                                                <td className="px-1 py-1 border-b border-white/5">
+                                                <td className={`px-1 py-1 border-b ${
+                                                     templateDarkMode ? 'border-white/5' : 'border-slate-100'
+                                                 }`}>
                                                     <button
                                                         onClick={() => setTemplateRows(prev => prev.filter((_, i) => i !== rowIdx))}
                                                         className="opacity-0 group-hover:opacity-100 p-1 rounded text-rose-400/50 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
@@ -1985,20 +2222,30 @@ export const AccessLogs = ({ branding, adminSession }) => {
                         </div>
 
                         {/* Drawer Footer */}
-                        <div className="flex items-center justify-between px-6 py-4 border-t border-white/10 bg-black/20 shrink-0">
+                        <div className={`flex items-center justify-between px-6 py-4 border-t shrink-0 ${
+                            templateDarkMode ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-slate-100'
+                        }`}>
                             <button
                                 onClick={() => {
                                     setTemplateRows(Array.from({ length: 5 }, () => ({})));
                                     setTemplateExtraColumns([]);
                                 }}
-                                className="px-4 py-2 text-xs font-bold rounded-lg border border-white/10 bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/80 transition-all flex items-center gap-2"
+                                className={`px-4 py-2 text-xs font-bold rounded-lg border transition-all flex items-center gap-2 ${
+                                    templateDarkMode 
+                                        ? 'border-white/10 bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/80' 
+                                        : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+                                }`}
                             >
                                 <RefreshCw className="w-3.5 h-3.5" /> Reset Table
                             </button>
                             <div className="flex gap-3">
                                 <button
                                     onClick={() => setShowTemplateBuilder(false)}
-                                    className="px-4 py-2 text-xs font-bold rounded-lg border border-white/15 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white transition-all"
+                                    className={`px-4 py-2 text-xs font-bold rounded-lg border transition-all ${
+                                        templateDarkMode 
+                                            ? 'border-white/15 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white' 
+                                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900'
+                                    }`}
                                 >
                                     Done
                                 </button>
