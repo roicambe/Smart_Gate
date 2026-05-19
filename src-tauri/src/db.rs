@@ -4869,6 +4869,13 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
     let mut enable_entry_exit_validation: bool = true;
     let mut brevo_api_key: Option<String> = None;
     let mut app_icon: Option<String> = None;
+    let mut email_provider: String = "smtp".to_string();
+    let mut smtp_host: Option<String> = None;
+    let mut smtp_port: Option<String> = None;
+    let mut smtp_username: Option<String> = None;
+    let mut smtp_password: Option<String> = None;
+    let mut smtp_from_name: Option<String> = None;
+    let mut brevo_from_name: Option<String> = None;
 
     let mut stmt = conn
         .prepare("SELECT setting_key, setting_value FROM settings")
@@ -4907,6 +4914,13 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
                 "enable_entry_exit_validation" => enable_entry_exit_validation = value == "1" || value.to_lowercase() == "true",
                 "brevo_api_key" => brevo_api_key = Some(value).filter(|v| !v.is_empty()),
                 "app_icon" => app_icon = Some(value).filter(|v| !v.is_empty()),
+                "email_provider" => { if !value.is_empty() { email_provider = value; } },
+                "smtp_host" => smtp_host = Some(value).filter(|v| !v.is_empty()),
+                "smtp_port" => smtp_port = Some(value).filter(|v| !v.is_empty()),
+                "smtp_username" => smtp_username = Some(value).filter(|v| !v.is_empty()),
+                "smtp_password" => smtp_password = Some(value).filter(|v| !v.is_empty()),
+                "smtp_from_name" => smtp_from_name = Some(value).filter(|v| !v.is_empty()),
+                "brevo_from_name" => brevo_from_name = Some(value).filter(|v| !v.is_empty()),
                 "circle_logo_format" => {
                     // Legacy support: if individual ones aren't set yet, they could inherit this
                     // but we'll prioritize individual ones.
@@ -4939,6 +4953,13 @@ pub fn get_system_branding(pool: &DbPool) -> Result<SystemBranding, String> {
         enable_entry_exit_validation,
         brevo_api_key,
         app_icon,
+        email_provider,
+        smtp_host,
+        smtp_port,
+        smtp_username,
+        smtp_password,
+        smtp_from_name,
+        brevo_from_name,
     })
 }
 
@@ -5097,47 +5118,103 @@ pub fn update_system_configuration(
     auto_exit_time: String,
     enable_entry_exit_validation: bool,
     brevo_api_key: Option<String>,
-) -> Result<(), String> {
+    email_provider: String,
+    smtp_host: Option<String>,
+    smtp_port: Option<String>,
+    smtp_username: Option<String>,
+    smtp_password: Option<String>,
+    smtp_from_name: Option<String>,
+    brevo_from_name: Option<String>,
+) -> Result<bool, String> {
     let mut conn = pool.get().map_err(|e| e.to_string())?;
     let old = get_system_branding(pool).unwrap_or_default();
+
+    let mut changes = std::collections::HashMap::new();
+
+    if old.strict_email_domain != strict_email_domain {
+        changes.insert("strict_email_domain", (if old.strict_email_domain { "1" } else { "0" }.to_string(), if strict_email_domain { "1" } else { "0" }.to_string()));
+    }
+    if old.enable_face_recognition != enable_face_recognition {
+        changes.insert("enable_face_recognition", (if old.enable_face_recognition { "1" } else { "0" }.to_string(), if enable_face_recognition { "1" } else { "0" }.to_string()));
+    }
+    if old.enable_auto_exit != enable_auto_exit {
+        changes.insert("enable_auto_exit", (if old.enable_auto_exit { "1" } else { "0" }.to_string(), if enable_auto_exit { "1" } else { "0" }.to_string()));
+    }
+    if old.auto_exit_time != auto_exit_time {
+        changes.insert("auto_exit_time", (old.auto_exit_time.clone(), auto_exit_time.clone()));
+    }
+    if old.enable_entry_exit_validation != enable_entry_exit_validation {
+        changes.insert("enable_entry_exit_validation", (if old.enable_entry_exit_validation { "1" } else { "0" }.to_string(), if enable_entry_exit_validation { "1" } else { "0" }.to_string()));
+    }
+    
+    let old_brevo_key = old.brevo_api_key.unwrap_or_default();
+    let new_brevo_key = brevo_api_key.unwrap_or_default();
+    if old_brevo_key != new_brevo_key {
+        changes.insert("brevo_api_key", (old_brevo_key, new_brevo_key));
+    }
+    
+    if old.email_provider != email_provider {
+        changes.insert("email_provider", (old.email_provider.clone(), email_provider.clone()));
+    }
+    
+    let old_smtp_host = old.smtp_host.unwrap_or_default();
+    let new_smtp_host = smtp_host.unwrap_or_default();
+    if old_smtp_host != new_smtp_host {
+        changes.insert("smtp_host", (old_smtp_host, new_smtp_host));
+    }
+    
+    let old_smtp_port = old.smtp_port.unwrap_or_default();
+    let new_smtp_port = smtp_port.unwrap_or_default();
+    if old_smtp_port != new_smtp_port {
+        changes.insert("smtp_port", (old_smtp_port, new_smtp_port));
+    }
+    
+    let old_smtp_user = old.smtp_username.unwrap_or_default();
+    let new_smtp_user = smtp_username.unwrap_or_default();
+    if old_smtp_user != new_smtp_user {
+        changes.insert("smtp_username", (old_smtp_user, new_smtp_user));
+    }
+    
+    let old_smtp_pass = old.smtp_password.unwrap_or_default();
+    let new_smtp_pass = smtp_password.unwrap_or_default();
+    if old_smtp_pass != new_smtp_pass {
+        changes.insert("smtp_password", (old_smtp_pass, new_smtp_pass));
+    }
+    
+    let old_smtp_from = old.smtp_from_name.unwrap_or_default();
+    let new_smtp_from = smtp_from_name.unwrap_or_default();
+    if old_smtp_from != new_smtp_from {
+        changes.insert("smtp_from_name", (old_smtp_from, new_smtp_from));
+    }
+
+    let old_brevo_from = old.brevo_from_name.unwrap_or_default();
+    let new_brevo_from = brevo_from_name.unwrap_or_default();
+    if old_brevo_from != new_brevo_from {
+        changes.insert("brevo_from_name", (old_brevo_from, new_brevo_from));
+    }
+
+    if changes.is_empty() {
+        return Ok(false);
+    }
+
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    let settings_to_update = [
-        ("strict_email_domain", if strict_email_domain { "1" } else { "0" }.to_string()),
-        ("enable_face_recognition", if enable_face_recognition { "1" } else { "0" }.to_string()),
-        ("enable_auto_exit", if enable_auto_exit { "1" } else { "0" }.to_string()),
-        ("auto_exit_time", auto_exit_time.clone()),
-        ("enable_entry_exit_validation", if enable_entry_exit_validation { "1" } else { "0" }.to_string()),
-        ("brevo_api_key", brevo_api_key.clone().unwrap_or_default()),
-    ];
-
-    for (key, value) in settings_to_update {
+    for (key, (_, new_val)) in &changes {
         tx.execute(
             "INSERT INTO settings (setting_key, setting_value) VALUES (?1, ?2)
              ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
-            params![key, value],
+            params![key, new_val],
         ).map_err(|e| e.to_string())?;
     }
 
     tx.commit().map_err(|e| e.to_string())?;
 
-    let old_values = json!({
-        "strict_email_domain": old.strict_email_domain,
-        "enable_face_recognition": old.enable_face_recognition,
-        "enable_auto_exit": old.enable_auto_exit,
-        "auto_exit_time": old.auto_exit_time,
-        "enable_entry_exit_validation": old.enable_entry_exit_validation,
-        "brevo_api_key": old.brevo_api_key,
-    });
-
-    let new_values = json!({
-        "strict_email_domain": strict_email_domain,
-        "enable_face_recognition": enable_face_recognition,
-        "enable_auto_exit": enable_auto_exit,
-        "auto_exit_time": auto_exit_time,
-        "enable_entry_exit_validation": enable_entry_exit_validation,
-        "brevo_api_key": brevo_api_key,
-    });
+    let mut old_json = serde_json::Map::new();
+    let mut new_json = serde_json::Map::new();
+    for (key, (old_val, new_val)) in &changes {
+        old_json.insert(key.to_string(), serde_json::Value::String(old_val.clone()));
+        new_json.insert(key.to_string(), serde_json::Value::String(new_val.clone()));
+    }
 
     let _ = log_audit_action(
         pool,
@@ -5146,11 +5223,11 @@ pub fn update_system_configuration(
         "System",
         0,
         "System Configuration",
-        Some(old_values),
-        Some(new_values),
+        Some(serde_json::Value::Object(old_json)),
+        Some(serde_json::Value::Object(new_json)),
     );
 
-    Ok(())
+    Ok(true)
 }
 
 // Forgot Password Functions

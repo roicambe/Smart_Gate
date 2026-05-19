@@ -46,6 +46,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
         { id: 'subRole', label: 'Sub Role', value: (log) => log.position_title || (log.roles || []).filter(r => !['student', 'visitor'].includes(String(r).toLowerCase())).join(', ') || 'N/A' },
         { id: 'status', label: 'Status', value: (log) => log.status || 'On Time' },
         { id: 'eventName', label: 'Event', value: (log) => log.event_name || 'N/A' },
+        { id: 'signature', label: 'Signature', value: () => '' },
     ]), []);
 
     const [activeTab, setActiveTab] = useState('gateLogs'); // 'gateLogs' | 'eventLogs'
@@ -1064,6 +1065,7 @@ export const AccessLogs = ({ branding, adminSession }) => {
                             if (label === 'Status') styles[idx] = { cellWidth: 18, halign: 'center', fontStyle: 'bold' };
                             if (label === 'Year Level') styles[idx] = { cellWidth: 18, halign: 'center' };
                             if (label === 'Role' || label === 'Sub Role') styles[idx] = { cellWidth: 25 };
+                            if (label === 'Signature') styles[idx] = { cellWidth: 30 };
                         });
                         return styles;
                     })()
@@ -1863,7 +1865,13 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                         <input
                                             type="checkbox"
                                             checked={manualExportAsTemplate}
-                                            onChange={(e) => setManualExportAsTemplate(e.target.checked)}
+                                            onChange={(e) => {
+                                                const checked = e.target.checked;
+                                                setManualExportAsTemplate(checked);
+                                                if (!checked) {
+                                                    setManualSelectedColumns(prev => prev.filter(id => id !== 'signature'));
+                                                }
+                                            }}
                                             className="w-4 h-4 rounded border-amber-500/30 bg-white/5 text-amber-500 focus:ring-amber-500/30 accent-amber-500 transition-all"
                                         />
                                         <span className="font-medium">Export as Blank Template (Headers Only)</span>
@@ -1874,7 +1882,11 @@ export const AccessLogs = ({ branding, adminSession }) => {
                             <div>
                                 <label className="block text-xs font-bold text-white/50 mb-3">Visible Columns</label>
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3 border border-white/10 rounded-2xl p-5 bg-black/20">
-                                    {EVENT_EXPORT_COLUMNS.filter(col => col.id !== 'eventName' || uniqueEvents.length > 1).map(col => (
+                                    {EVENT_EXPORT_COLUMNS.filter(col => {
+                                        if (col.id === 'eventName' && uniqueEvents.length <= 1) return false;
+                                        if (col.id === 'signature' && !manualExportAsTemplate) return false;
+                                        return true;
+                                    }).map(col => (
                                         <label key={col.id} className="inline-flex items-center gap-3 text-sm text-white/70 hover:text-white transition-colors cursor-pointer group">
                                             <input
                                                 type="checkbox"
@@ -1888,7 +1900,14 @@ export const AccessLogs = ({ branding, adminSession }) => {
                                                 }}
                                                 className="w-4 h-4 rounded border-white/20 bg-white/5 text-emerald-500 focus:ring-emerald-500/30 accent-emerald-500 transition-all"
                                             />
-                                            <span className="font-medium">{col.label}</span>
+                                            <span className="font-medium">
+                                                {col.label}
+                                                {col.id === 'signature' && (
+                                                    <span className="text-[10px] text-amber-400 block font-normal mt-0.5">
+                                                        (Only for blank template)
+                                                    </span>
+                                                )}
+                                            </span>
                                         </label>
                                     ))}
                                 </div>

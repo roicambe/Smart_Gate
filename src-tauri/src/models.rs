@@ -340,6 +340,16 @@ pub struct SystemBranding {
     pub enable_entry_exit_validation: bool,
     pub brevo_api_key: Option<String>,
     pub app_icon: Option<String>,
+    // Email provider selection: "smtp" (default) or "brevo"
+    pub email_provider: String,
+    // SMTP Configuration fields
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<String>,
+    pub smtp_username: Option<String>,
+    pub smtp_password: Option<String>,
+    pub smtp_from_name: Option<String>,
+    // Brevo Configuration fields
+    pub brevo_from_name: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

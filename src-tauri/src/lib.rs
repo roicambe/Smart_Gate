@@ -10,7 +10,9 @@ pub mod face_recognition;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Load .env from current directory or src-tauri subdirectory (for root workspace runs)
     dotenvy::dotenv().ok();
+    dotenvy::from_filename("src-tauri/.env").ok();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())

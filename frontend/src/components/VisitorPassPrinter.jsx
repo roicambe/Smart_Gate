@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Printer, X, Loader2, RefreshCcw } from "lucide-react";
+import { Printer, X, Loader2, RefreshCcw, Info } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { invoke } from "@tauri-apps/api/core";
 import html2canvas from "html2canvas";
@@ -328,20 +328,20 @@ export const VisitorPassPrinter = ({ visitorData, onClose }) => {
                 />
             </div>
 
-            <div className="bg-black/90 backdrop-blur-2xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-4xl overflow-hidden animate-in zoom-in-95 fade-in duration-200">
+            <div className="bg-black/95 backdrop-blur-2xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-5xl overflow-hidden animate-in zoom-in-95 fade-in duration-200">
                 <div className="grid grid-cols-1 md:grid-cols-2">
                     {/* Left Side: Visitor Digital Pass */}
-                    <div className="p-8 border-b md:border-b-0 md:border-r border-white/10 bg-white/5">
+                    <div className="p-10 border-b md:border-b-0 md:border-r border-white/10 bg-white/5 flex flex-col justify-center">
                         <div className="flex flex-col items-center">
-                            <div className="w-full text-center mb-6">
-                                <h3 className="text-blue-400 text-xs font-bold uppercase tracking-[0.3em] mb-1">Visitor Pass</h3>
-                                <div className="h-px w-12 bg-blue-500/50 mx-auto"></div>
+                            <div className="w-full text-center mb-8">
+                                <h3 className="text-blue-400 text-sm font-bold uppercase tracking-[0.3em] mb-1">Visitor Pass</h3>
+                                <div className="h-px w-16 bg-blue-500/50 mx-auto"></div>
                             </div>
 
-                            <div className="bg-white p-4 rounded-2xl shadow-xl mb-6 transform hover:scale-105 transition-transform duration-300">
+                            <div className="bg-white p-5 rounded-3xl shadow-2xl mb-8 transform hover:scale-105 transition-transform duration-300">
                                 <QRCodeSVG
                                     value={visitorId || ""}
-                                    size={180}
+                                    size={220}
                                     level="H"
                                     includeMargin={false}
                                     bgColor="#FFFFFF"
@@ -349,25 +349,25 @@ export const VisitorPassPrinter = ({ visitorData, onClose }) => {
                                 />
                             </div>
 
-                            <div className="w-full space-y-4">
+                            <div className="w-full space-y-6">
                                 <div className="text-center">
-                                    <p className="text-white font-bold text-2xl uppercase tracking-tight">{visitorName}</p>
-                                    <p className="text-blue-400 font-mono text-lg tracking-[0.2em] font-medium mt-1">{visitorId}</p>
+                                    <p className="text-white font-bold text-3xl uppercase tracking-tight">{visitorName}</p>
+                                    <p className="text-blue-400 font-mono text-xl tracking-[0.2em] font-semibold mt-2">{visitorId}</p>
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-4 mt-6">
-                                    <div className="bg-white/5 p-3 rounded-xl border border-white/10">
+                                    <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
                                         <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Purpose of Visit</p>
-                                        <p className="text-white text-sm font-medium line-clamp-2">{purpose}</p>
+                                        <p className="text-white text-base font-semibold line-clamp-2">{purpose}</p>
                                     </div>
-                                    <div className="bg-white/5 p-3 rounded-xl border border-white/10">
+                                    <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
                                         <p className="text-[10px] uppercase tracking-wider text-white/40 mb-1">Person to Visit</p>
-                                        <p className="text-white text-sm font-medium line-clamp-2">{personToVisit}</p>
+                                        <p className="text-white text-base font-semibold line-clamp-2">{personToVisit}</p>
                                     </div>
                                 </div>
 
-                                <div className="flex items-center gap-2 justify-center py-2 px-4 rounded-full bg-blue-500/10 text-blue-400 text-[10px] font-bold uppercase tracking-widest border border-blue-500/20">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+                                <div className="flex items-center gap-2.5 justify-center py-2.5 px-5 rounded-full bg-blue-500/10 text-blue-400 text-xs font-bold uppercase tracking-widest border border-blue-500/20">
+                                    <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
                                     Valid for Today Only
                                 </div>
                             </div>
@@ -375,27 +375,27 @@ export const VisitorPassPrinter = ({ visitorData, onClose }) => {
                     </div>
 
                     {/* Right Side: Printing Interaction */}
-                    <div className="p-8 flex flex-col justify-center items-center text-center">
-                        <div className="w-16 h-16 bg-blue-500/15 rounded-full flex items-center justify-center border-2 border-blue-500/30 mb-6">
-                            <Printer className="w-8 h-8 text-blue-400" />
+                    <div className="p-10 flex flex-col justify-center items-center text-center">
+                        <div className="w-20 h-20 bg-blue-500/15 rounded-full flex items-center justify-center border-2 border-blue-500/30 mb-8">
+                            <Printer className="w-10 h-10 text-blue-400" />
                         </div>
                         
-                        <h2 className="text-2xl font-bold text-white tracking-wide mb-2">Print Physical Pass?</h2>
-                        <p className="text-white/60 mb-8 text-sm max-w-[280px]">
+                        <h2 className="text-3xl font-extrabold text-white tracking-wide mb-3">Print Physical Pass?</h2>
+                        <p className="text-white/60 mb-8 text-base max-w-[340px]">
                             Would you like to print a 58mm thermal receipt for this visitor?
                         </p>
 
                         {printMode === "silent" ? (
-                            <div className="w-full mb-8 space-y-2 text-left">
+                            <div className="w-full mb-6 space-y-2 text-left">
                                 <div className="flex items-center justify-between px-1">
-                                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/40">Select Printer</p>
+                                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/40">Select Printer</p>
                                     <button
                                         type="button"
                                         onClick={loadPrinters}
                                         disabled={isLoadingPrinters || isPrinting}
-                                        className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-0.5 text-[10px] text-white/50 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed"
+                                        className="inline-flex items-center gap-1.5 rounded-md border border-white/10 px-2 py-1 text-[10px] text-white/50 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed"
                                     >
-                                        <RefreshCcw className={`h-2.5 w-2.5 ${isLoadingPrinters ? "animate-spin" : ""}`} />
+                                        <RefreshCcw className={`h-3 w-3 ${isLoadingPrinters ? "animate-spin" : ""}`} />
                                         Refresh
                                     </button>
                                 </div>
@@ -407,7 +407,7 @@ export const VisitorPassPrinter = ({ visitorData, onClose }) => {
                                         window.localStorage.setItem(preferredPrinterStorageKey, nextPrinter);
                                     }}
                                     disabled={isLoadingPrinters || isPrinting || !printers.length}
-                                    className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white outline-none transition focus:ring-2 focus:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 appearance-none"
+                                    className="w-full rounded-xl border border-white/10 bg-black/40 px-4 py-3.5 text-sm text-white outline-none transition focus:ring-2 focus:ring-blue-500/40 disabled:cursor-not-allowed disabled:opacity-50 appearance-none"
                                 >
                                     {isLoadingPrinters && <option value="">Loading printers...</option>}
                                     {!isLoadingPrinters && !printers.length && <option value="">No printers found</option>}
@@ -419,19 +419,32 @@ export const VisitorPassPrinter = ({ visitorData, onClose }) => {
                                 </select>
                             </div>
                         ) : (
-                            <div className="w-full mb-8 rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-left">
+                            <div className="w-full mb-6 rounded-xl border border-white/15 bg-white/5 px-4 py-3.5 text-left">
                                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-white/60">Print Mode</p>
                                 <p className="mt-1 text-sm text-white/80">Window preview mode is enabled for receipt size checking.</p>
                             </div>
                         )}
 
+                        {/* Spam folder warning note */}
+                        <div className="w-full mb-8 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-left text-amber-300 animate-in fade-in duration-300">
+                            <div className="flex gap-3 items-start">
+                                <Info className="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-400" />
+                                <div className="space-y-1">
+                                    <p className="text-xs font-bold uppercase tracking-wider text-amber-400">Important Note</p>
+                                    <p className="text-xs text-white/80 leading-relaxed">
+                                        A digital copy of this QR Pass has been sent to your registered email. If you do not receive it shortly, <strong className="font-extrabold text-amber-300 underline decoration-amber-400 decoration-2 underline-offset-2">please check your Spam or Junk folder</strong>.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
                         <div className="flex gap-4 w-full">
                             <button
                                 onClick={onClose}
                                 disabled={isPrinting}
-                                className="flex-1 px-4 py-3.5 bg-white/5 border border-white/10 text-white/80 font-medium rounded-xl hover:bg-white/10 hover:text-white transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 text-sm"
+                                className="flex-1 px-4 py-3.5 bg-white/5 border border-white/10 text-white/80 font-semibold rounded-xl hover:bg-white/10 hover:text-white transition-all focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 text-sm"
                             >
-                                <X className="w-4 h-4 inline mr-2" />
+                                <X className="w-4 h-4 inline mr-1.5" />
                                 Done
                             </button>
                             <button
