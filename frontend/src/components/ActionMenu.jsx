@@ -459,7 +459,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
             {/* Visitor Registration Modal */}
             {showVisitorModal && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md">
-                    <div className="bg-black/90 backdrop-blur-3xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-2xl overflow-y-auto max-h-[90vh] animate-in zoom-in-95 fade-in duration-200">
+                    <div className="bg-black/90 backdrop-blur-3xl border border-white/20 rounded-3xl shadow-2xl w-full max-w-4xl overflow-y-auto max-h-[90vh] animate-in zoom-in-95 fade-in duration-200">
                         <div className="p-8">
                             <div className="flex items-center gap-4 mb-8">
                                 <div className="h-14 w-14 bg-white/10 rounded-2xl flex items-center justify-center text-white border border-white/20 shadow-inner">
@@ -483,8 +483,8 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                                 </button>
                             </div>
                             <form onSubmit={handleVisitorSubmit} className="space-y-5">
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
-                                    <div>
+                                <div className="grid grid-cols-11 gap-5">
+                                    <div className="col-span-11 sm:col-span-3">
                                         <label className="block text-sm font-medium text-white/70 mb-1">First Name <span className="text-rose-500">*</span></label>
                                         <input 
                                             required 
@@ -495,7 +495,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                                             placeholder="Juan" 
                                         />
                                     </div>
-                                    <div>
+                                    <div className="col-span-11 sm:col-span-3">
                                         <label className="block text-sm font-medium text-white/70 mb-1">Middle Name</label>
                                         <input 
                                             type="text" 
@@ -505,7 +505,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                                             placeholder="Optional" 
                                         />
                                     </div>
-                                    <div>
+                                    <div className="col-span-11 sm:col-span-3">
                                         <label className="block text-sm font-medium text-white/70 mb-1">Last Name <span className="text-rose-500">*</span></label>
                                         <input 
                                             required 
@@ -516,7 +516,7 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
                                             placeholder="Dela Cruz" 
                                         />
                                     </div>
-                                    <div>
+                                    <div className="col-span-11 sm:col-span-2">
                                         <label className="block text-sm font-medium text-white/70 mb-1">Suffix</label>
                                         <SuffixCombobox
                                             value={visitorForm.suffix}

@@ -1,21 +1,80 @@
 use crate::db::{self, DbPool};
 use chrono::Local;
+use lettre::message::header::ContentType;
+use lettre::message::{MultiPart, SinglePart};
+use lettre::transport::smtp::authentication::Credentials;
+use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use reqwest::Client;
 use rusqlite::params;
 use serde_json::json;
 use tauri::{command, State};
 
-async fn send_brevo_email(pool: &DbPool, payload: serde_json::Value) -> Result<(), String> {
+// ─────────────────────────────────────────────────────────────────────────────
+// Inline image attached via CID (Content-ID) – works in ALL email clients
+// including Gmail which strips data: URIs.
+// ─────────────────────────────────────────────────────────────────────────────
+
+struct InlineImage {
+    /// The CID value WITHOUT angle brackets, e.g. "qr@smartgate"
+    cid: String,
+    /// Raw image bytes
+    data: Vec<u8>,
+    /// MIME type, e.g. "image/png"
+    mime_type: String,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Internal email payload (provider-agnostic)
+// ─────────────────────────────────────────────────────────────────────────────
+
+struct EmailPayload {
+    to_email: String,
+    to_name: String,
+    subject: String,
+    html_content: String,
+    from_email: String,
+    from_name: String,
+    /// Inline images referenced via cid: in the HTML
+    inline_images: Vec<InlineImage>,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Brevo (HTTP REST) transport
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn send_via_brevo(pool: &DbPool, payload: &EmailPayload) -> Result<(), String> {
     let mut api_key = db::get_setting(pool, "brevo_api_key")
         .unwrap_or(None)
         .unwrap_or_default();
-    
+
     if api_key.is_empty() {
         api_key = std::env::var("BREVO_API_KEY").unwrap_or_else(|_| "".to_string());
     }
 
     if api_key.is_empty() {
-        return Err("Brevo API Key not found. Please configure it in System Settings.".to_string());
+        return Err(
+            "Brevo API Key not configured. Please add it in System Configuration.".to_string(),
+        );
+    }
+
+    // Build inline attachments for Brevo (referenced in HTML via cid:)
+    let mut brevo_body = json!({
+        "sender": { "name": payload.from_name, "email": payload.from_email },
+        "to": [{ "email": payload.to_email, "name": payload.to_name }],
+        "subject": payload.subject,
+        "htmlContent": payload.html_content
+    });
+
+    if !payload.inline_images.is_empty() {
+        let attachments: Vec<serde_json::Value> = payload.inline_images.iter().map(|img| {
+            let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &img.data);
+            json!({
+                "name": format!("{}.png", img.cid),
+                "content": b64,
+                "contentId": img.cid
+            })
+        }).collect();
+        brevo_body["attachment"] = json!(attachments);
     }
 
     let client = Client::new();
@@ -24,7 +83,7 @@ async fn send_brevo_email(pool: &DbPool, payload: serde_json::Value) -> Result<(
         .header("api-key", api_key)
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
-        .json(&payload)
+        .json(&brevo_body)
         .send()
         .await;
 
@@ -36,7 +95,7 @@ async fn send_brevo_email(pool: &DbPool, payload: serde_json::Value) -> Result<(
                 let status = response.status();
                 let text = response.text().await.unwrap_or_default();
                 Err(format!(
-                    "Failed to send email. Status: {}, Response: {}",
+                    "Brevo send failed. Status: {}, Response: {}",
                     status, text
                 ))
             }
@@ -44,6 +103,137 @@ async fn send_brevo_email(pool: &DbPool, payload: serde_json::Value) -> Result<(
         Err(e) => Err(format!("Request to Brevo failed: {}", e)),
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SMTP (lettre) transport
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn send_via_smtp(pool: &DbPool, payload: &EmailPayload) -> Result<(), String> {
+    let host = db::get_setting(pool, "smtp_host")
+        .unwrap_or(None)
+        .unwrap_or_default();
+    let port_str = db::get_setting(pool, "smtp_port")
+        .unwrap_or(None)
+        .unwrap_or_else(|| "587".to_string());
+    let username = db::get_setting(pool, "smtp_username")
+        .unwrap_or(None)
+        .unwrap_or_default();
+    let password = db::get_setting(pool, "smtp_password")
+        .unwrap_or(None)
+        .unwrap_or_default();
+
+    if host.is_empty() {
+        return Err(
+            "SMTP host is not configured. Please fill in the SMTP settings in System Configuration.".to_string(),
+        );
+    }
+    if username.is_empty() {
+        return Err(
+            "SMTP username is not configured. Please fill in the SMTP settings in System Configuration.".to_string(),
+        );
+    }
+
+    let port: u16 = port_str.parse().unwrap_or(587);
+
+    // Build the From / To header addresses
+    let from_addr = format!("{} <{}>", payload.from_name, payload.from_email)
+        .parse::<lettre::message::Mailbox>()
+        .map_err(|e| format!("Invalid sender address: {}", e))?;
+
+    let to_addr = format!("{} <{}>", payload.to_name, payload.to_email)
+        .parse::<lettre::message::Mailbox>()
+        .map_err(|e| format!("Invalid recipient address: {}", e))?;
+
+    // Build email – plain HTML or multipart/related (when inline images are present)
+    let email = if payload.inline_images.is_empty() {
+        // Simple single-part HTML email
+        Message::builder()
+            .from(from_addr)
+            .to(to_addr)
+            .subject(&payload.subject)
+            .header(ContentType::TEXT_HTML)
+            .body(payload.html_content.clone())
+            .map_err(|e| format!("Failed to build email: {}", e))?
+    } else {
+        // multipart/related: HTML body + CID-referenced inline images
+        let html_part = SinglePart::builder()
+            .header(ContentType::TEXT_HTML)
+            .body(payload.html_content.clone());
+
+        let mut related = MultiPart::related().singlepart(html_part);
+
+        for img in &payload.inline_images {
+            let img_ct = img.mime_type
+                .parse::<ContentType>()
+                .unwrap_or(ContentType::parse("image/png").unwrap());
+
+            // Content-ID must be wrapped in angle brackets per RFC 2392
+            let cid_header = lettre::message::header::ContentId::from(
+                format!("<{}>", img.cid)
+            );
+
+            let img_part = SinglePart::builder()
+                .header(img_ct)
+                .header(cid_header)
+                .body(img.data.clone());
+
+            related = related.singlepart(img_part);
+        }
+
+        Message::builder()
+            .from(from_addr)
+            .to(to_addr)
+            .subject(&payload.subject)
+            .multipart(related)
+            .map_err(|e| format!("Failed to build multipart email: {}", e))?
+    };
+
+    let creds = Credentials::new(username, password);
+
+    // Port 465 → implicit TLS (relay); anything else → STARTTLS
+    if port == 465 {
+        let mailer = AsyncSmtpTransport::<Tokio1Executor>::relay(&host)
+            .map_err(|e| format!("SMTP relay error: {}", e))?
+            .port(port)
+            .credentials(creds)
+            .build();
+        mailer
+            .send(email)
+            .await
+            .map_err(|e| format!("SMTP send failed: {}", e))?;
+    } else {
+        let mailer = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host)
+            .map_err(|e| format!("SMTP STARTTLS error: {}", e))?
+            .port(port)
+            .credentials(creds)
+            .build();
+        mailer
+            .send(email)
+            .await
+            .map_err(|e| format!("SMTP send failed: {}", e))?;
+    }
+
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Unified dispatcher – routes to SMTP or Brevo based on the DB setting
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn send_email(pool: &DbPool, payload: EmailPayload) -> Result<(), String> {
+    let provider = db::get_setting(pool, "email_provider")
+        .unwrap_or(None)
+        .unwrap_or_else(|| "smtp".to_string());
+
+    match provider.to_lowercase().as_str() {
+        "brevo" => send_via_brevo(pool, &payload).await,
+        _ => send_via_smtp(pool, &payload).await, // "smtp" is the default
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public email functions (same API as before, now provider-agnostic)
+// ─────────────────────────────────────────────────────────────────────────────
 
 pub async fn send_verification_otp_email(
     pool: &DbPool,
@@ -87,22 +277,23 @@ pub async fn send_verification_otp_email(
         full_name, otp_code, requested_at_display, transaction_id, requested_at_display
     );
 
-    let payload = json!({
-        "sender": {
-            "name": "Smart Gate Security",
-            "email": "roicambe02@gmail.com"
-        },
-        "to": [
-            {
-                "email": email,
-                "name": full_name
-            }
-        ],
-        "subject": format!("Smart Gate Verification Code [{}]", requested_at_subject),
-        "htmlContent": html_content
-    });
+    // Resolve the "from" address: prefer smtp_from_name/smtp_username if SMTP is active
+    let from_email = resolve_from_email(pool);
+    let from_name = resolve_from_name(pool, "Smart Gate - PLP");
 
-    send_brevo_email(pool, payload).await
+    send_email(
+        pool,
+        EmailPayload {
+            to_email: email.to_string(),
+            to_name: full_name.to_string(),
+            subject: format!("Smart Gate Verification Code [{}]", requested_at_subject),
+            html_content,
+            from_email,
+            from_name,
+            inline_images: vec![],
+        },
+    )
+    .await
 }
 
 #[command]
@@ -146,21 +337,43 @@ pub async fn send_visitor_qr(
         _ => return Ok("No email provided. Skipped sending.".to_string()),
     };
 
-
     let visitor_name = format!("{} {}", first_name, last_name);
 
-    // 2. Generate the QR code URL using a public API.
-    // This perfectly avoids email clients treating the image as an attachment,
-    // embedding it purely in the email HTML itself.
-    let qr_url = format!(
-        "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={}",
-        id_number
-    );
+    let provider = db::get_setting(&state, "email_provider")
+        .unwrap_or(None)
+        .unwrap_or_else(|| "smtp".to_string());
+
+    let is_brevo = provider.to_lowercase() == "brevo";
+
+    // 2. Setup the image source and inline image array based on active provider.
+    // Brevo does not support CID inline images (refuses to render them), but since Brevo
+    // has extremely high sender trust, external URLs (api.qrserver.com) work flawlessly without blocking.
+    // SMTP has no sender reputation, so Gmail blocks external URLs. We must use CID (inline) for SMTP.
+    let (qr_src, inline_images) = if is_brevo {
+        let qr_url = format!(
+            "https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={}",
+            id_number
+        );
+        (qr_url, vec![])
+    } else {
+        let qr_bytes = qrcode_generator::to_png_to_vec(
+            &id_number,
+            qrcode_generator::QrCodeEcc::Medium,
+            300,
+        )
+        .map_err(|e| format!("QR code generation failed: {}", e))?;
+
+        let qr_cid = "qr@smartgate";
+        (format!("cid:{}", qr_cid), vec![InlineImage {
+            cid: qr_cid.to_string(),
+            data: qr_bytes,
+            mime_type: "image/png".to_string(),
+        }])
+    };
 
     let processed_at = Local::now();
     let processed_at_display = processed_at.format("%B %d, %Y at %I:%M:%S %p").to_string();
 
-    // The HTML email body using the direct URL for the image.
     let html_content = format!(
         "<html>\
         <body style=\"margin: 0; padding: 0; background-color: #f8fafc; font-family: Arial, sans-serif; color: #0f172a;\">\
@@ -208,25 +421,25 @@ pub async fn send_visitor_qr(
             </div>\
         </body>\
         </html>",
-        visitor_name, id_number, person_to_visit, purpose, qr_url, id_number, processed_at_display
+        visitor_name, id_number, person_to_visit, purpose, qr_src, id_number, processed_at_display
     );
 
-    let payload = json!({
-        "sender": {
-            "name": "Smart Gate - Pamantansan ng Lungsod ng Pasig",
-            "email": "roicambe02@gmail.com"
-        },
-        "to": [
-            {
-                "email": email,
-                "name": visitor_name
-            }
-        ],
-        "subject": format!("Visitor Pass - {}", id_number),
-        "htmlContent": html_content
-    });
+    let from_email = resolve_from_email(&state);
+    let from_name = resolve_from_name(&state, "Smart Gate - PLP");
 
-    send_brevo_email(&state, payload).await?;
+    send_email(
+        &state,
+        EmailPayload {
+            to_email: email,
+            to_name: visitor_name,
+            subject: format!("Visitor Pass - {}", id_number),
+            html_content,
+            from_email,
+            from_name,
+            inline_images,
+        },
+    )
+    .await?;
     Ok("Email sent successfully!".to_string())
 }
 
@@ -291,20 +504,59 @@ pub async fn send_password_reset_otp_email(
         full_name, otp_code, requested_at_display, transaction_id, requested_at_display
     );
 
-    let payload = json!({
-        "sender": {
-            "name": "Smart Gate Security",
-            "email": "roicambe02@gmail.com"
-        },
-        "to": [
-            {
-                "email": email,
-                "name": full_name
-            }
-        ],
-        "subject": format!("Password Reset Code [{}]", requested_at_subject),
-        "htmlContent": html_content
-    });
+    let from_email = resolve_from_email(pool);
+    let from_name = resolve_from_name(pool, "Smart Gate - PLP");
 
-    send_brevo_email(pool, payload).await
+    send_email(
+        pool,
+        EmailPayload {
+            to_email: email.to_string(),
+            to_name: full_name.to_string(),
+            subject: format!("Password Reset Code [{}]", requested_at_subject),
+            html_content,
+            from_email,
+            from_name,
+            inline_images: vec![],
+        },
+    )
+    .await
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers: resolve From address dynamically based on provider settings
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn resolve_from_email(pool: &DbPool) -> String {
+    let provider = db::get_setting(pool, "email_provider")
+        .unwrap_or(None)
+        .unwrap_or_else(|| "smtp".to_string());
+
+    if provider.to_lowercase() == "brevo" {
+        // For Brevo the sender must be a verified email in the Brevo dashboard.
+        // We strictly use your verified sender roicambe02@gmail.com.
+        "roicambe02@gmail.com".to_string()
+    } else {
+        // For SMTP the username IS the sending address
+        db::get_setting(pool, "smtp_username")
+            .unwrap_or(None)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "noreply@smartgate.app".to_string())
+    }
+}
+
+fn resolve_from_name(pool: &DbPool, fallback: &str) -> String {
+    let provider = db::get_setting(pool, "email_provider")
+        .unwrap_or(None)
+        .unwrap_or_else(|| "smtp".to_string());
+
+    let setting_key = if provider.to_lowercase() == "brevo" {
+        "brevo_from_name"
+    } else {
+        "smtp_from_name"
+    };
+
+    db::get_setting(pool, setting_key)
+        .unwrap_or(None)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| fallback.to_string())
 }

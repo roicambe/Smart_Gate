@@ -736,7 +736,14 @@ pub fn update_system_configuration(
     auto_exit_time: String,
     enable_entry_exit_validation: bool,
     brevo_api_key: Option<String>,
-) -> Result<(), String> {
+    email_provider: String,
+    smtp_host: Option<String>,
+    smtp_port: Option<String>,
+    smtp_username: Option<String>,
+    smtp_password: Option<String>,
+    smtp_from_name: Option<String>,
+    brevo_from_name: Option<String>,
+) -> Result<bool, String> {
     db::update_system_configuration(
         &pool,
         admin_id,
@@ -746,6 +753,13 @@ pub fn update_system_configuration(
         auto_exit_time,
         enable_entry_exit_validation,
         brevo_api_key,
+        email_provider,
+        smtp_host,
+        smtp_port,
+        smtp_username,
+        smtp_password,
+        smtp_from_name,
+        brevo_from_name,
     )
 }
 
