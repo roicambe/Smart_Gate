@@ -542,11 +542,14 @@ export const UserManagement = ({ adminSession, branding }) => {
             setImportResult(result);
             const successCount = result?.success_count || 0;
             const failedCount = result?.failed_count || 0;
+            const skippedCount = result?.skipped_count || 0;
 
             if (failedCount > 0) {
                 const logs = result.error_logs || [];
                 const firstError = logs.length > 0 ? logs[0] : "Check the error log for details.";
                 showError(`Import Complete: ${successCount} Success, ${failedCount} Failed. Error: ${firstError}`);
+            } else if (skippedCount > 0) {
+                showSuccess(`Import Complete: ${successCount} profiles imported, ${skippedCount} existing records skipped.`);
             } else {
                 showSuccess(`Successfully imported ${successCount} profiles.`);
             }
@@ -1463,13 +1466,24 @@ export const UserManagement = ({ adminSession, branding }) => {
                                     </div>
                                     <p className="font-bold text-sm">Import Summary</p>
                                 </div>
-                                <div className="grid grid-cols-2 gap-4 text-xs font-medium pl-9">
+                                <div className="grid grid-cols-3 gap-4 text-xs font-medium pl-9">
                                     <p>Successfully Imported: <span className="text-white font-bold">{importResult.success_count}</span></p>
+                                    <p>Skipped (Existing): <span className="text-white font-bold">{importResult.skipped_count || 0}</span></p>
                                     <p>Failed Records: <span className="text-white font-bold">{importResult.failed_count}</span></p>
                                 </div>
-                                {importResult.error_logs.length > 0 && (
+                                {importResult.skipped_logs && importResult.skipped_logs.length > 0 && (
                                     <div className="mt-3 pl-9 space-y-1">
-                                        <p className="text-[10px] uppercase font-bold text-white/30">Error Details</p>
+                                        <p className="text-[10px] uppercase font-bold text-emerald-400/80">Existing Records (Safely Skipped)</p>
+                                        <div className="max-h-24 overflow-y-auto text-[11px] space-y-1 scrollbar-thin scrollbar-thumb-white/10">
+                                            {importResult.skipped_logs.map((log, i) => (
+                                                <p key={i} className="text-emerald-200/70">• {log}</p>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                                {importResult.error_logs && importResult.error_logs.length > 0 && (
+                                    <div className="mt-3 pl-9 space-y-1">
+                                        <p className="text-[10px] uppercase font-bold text-rose-400/80">Error Details (Action Required)</p>
                                         <div className="max-h-24 overflow-y-auto text-[11px] space-y-1 scrollbar-thin scrollbar-thumb-white/10">
                                             {importResult.error_logs.map((err, i) => (
                                                 <p key={i} className="text-rose-200/70">• {err}</p>

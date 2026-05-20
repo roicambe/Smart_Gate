@@ -74,7 +74,12 @@ export const ActionMenu = ({ view, setView, isGhostScannerDisabled = false, bran
             }
 
             if (details) {
-                showIdCard(details);
+                if (modalActive) {
+                    const messageText = fallbackMessage || `${result.message} - ${getDetailedToastMessage(details)}`;
+                    showSuccess(messageText);
+                } else {
+                    showIdCard(details);
+                }
                 return;
             }
         } catch (error) {
