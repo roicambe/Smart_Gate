@@ -61,7 +61,12 @@ export const EventActionMenu = ({ setView, branding }) => {
             }
 
             if (details) {
-                showIdCard(details);
+                if (modalActive) {
+                    const messageText = fallbackMessage || `${result.message} - ${getDetailedToastMessage(details)}`;
+                    showSuccess(messageText);
+                } else {
+                    showIdCard(details);
+                }
                 return;
             }
         } catch (error) {
@@ -74,6 +79,19 @@ export const EventActionMenu = ({ setView, branding }) => {
     }, [showSuccess, showIdCard]);
 
     const isModalOpen = showManualModal || showQrScanner || showFaceScanner;
+
+    useEffect(() => {
+        if (!isModalOpen) {
+            return;
+        }
+
+        scanCardRequestIdRef.current += 1;
+        dismissIdCard();
+    }, [dismissIdCard, isModalOpen]);
+
+    useEffect(() => () => {
+        dismissIdCard();
+    }, [dismissIdCard]);
 
     const getLocalDateKey = (date) => {
         const year = date.getFullYear();

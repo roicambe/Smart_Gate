@@ -1830,6 +1830,7 @@ pub fn bulk_import_users_from_excel(
     let idx_first_name = require_col(&["first_name", "first name", "given name", "fname", "name", "f_name", "1st name", "first_names", "given_names"])?;
     let idx_last_name = require_col(&["last_name", "last name", "surname", "lname", "family name", "l_name", "2nd name", "last_names", "family_names", "surnames"])?;
     let idx_middle_name = optional_col(&["middle_name", "middle name", "mname", "middle", "mid name", "mid_name", "m_name"]);
+    let idx_suffix = optional_col(&["suffix", "ext", "extension", "name suffix", "suffix name"]);
     let idx_email = optional_col(&["email", "e-mail", "gmail", "yahoo", "outlook", "contact email", "email_address", "email address", "e mail", "official email"]);
     let idx_contact = optional_col(&["contact_number", "contact number", "phone", "cellphone", "mobile", "mobile number", "contact", "tel", "telephone", "cell", "cel", "mobile_no", "contact_no"]);
 
@@ -1903,8 +1904,10 @@ pub fn bulk_import_users_from_excel(
 
     let mut success_count = 0_i64;
     let mut failed_count = 0_i64;
+    let mut skipped_count = 0_i64;
     let mut imported_ids: Vec<String> = Vec::new();
     let mut error_logs: Vec<String> = Vec::new();
+    let mut skipped_logs: Vec<String> = Vec::new();
 
     let strict_email: bool = conn.query_row(
         "SELECT setting_value FROM settings WHERE setting_key = 'strict_email_domain'",
@@ -1914,24 +1917,51 @@ pub fn bulk_import_users_from_excel(
 
     for (row_idx, row) in rows.enumerate() {
         let line_number = row_idx + 2;
-        let get_col = |idx_opt: Option<usize>| -> String {
-            idx_opt
+        let get_col = |idx_opt: Option<usize>, is_required_in_db: bool| -> String {
+            let val = idx_opt
                 .and_then(|idx| row.get(idx))
                 .map(cell_to_string)
                 .unwrap_or_default()
                 .trim()
-                .to_string()
+                .to_string();
+            if !is_required_in_db {
+                let lower = val.to_lowercase();
+                if lower == "n/a" || lower == "na" || lower == "none" {
+                    return String::new();
+                }
+            }
+            val
         };
-        let id_number = get_col(Some(idx_id_number));
-        let first_name = get_col(Some(idx_first_name));
-        let last_name = get_col(Some(idx_last_name));
-        let middle_name = get_col(idx_middle_name);
-        let email = get_col(idx_email);
-        let contact_number = get_col(idx_contact);
+        let id_number = get_col(Some(idx_id_number), true);
+        let first_name_raw = get_col(Some(idx_first_name), true);
+        let last_name_raw = get_col(Some(idx_last_name), true);
+        let middle_name_raw = get_col(idx_middle_name, false);
+        let email = get_col(idx_email, false);
+        let contact_number = get_col(idx_contact, false);
 
         // Silently skip if ID number is missing (e.g., empty rows at the end of the file)
         if id_number.is_empty() {
             continue;
+        }
+
+        // --- Proper Case & Suffix Extraction ---
+        let first_name = to_proper_case(&first_name_raw);
+        let (clean_last_name, extracted_suffix) = extract_suffix(&last_name_raw);
+        let last_name = to_proper_case(&clean_last_name);
+        let middle_name = if middle_name_raw.is_empty() {
+            String::new()
+        } else {
+            to_proper_case(&middle_name_raw)
+        };
+
+        let mut final_suffix = extracted_suffix;
+        if final_suffix.is_none() {
+            if let Some(idx_s) = idx_suffix {
+                let col_suffix = get_col(Some(idx_s), false);
+                if !col_suffix.is_empty() {
+                    final_suffix = Some(standardize_suffix(&col_suffix));
+                }
+            }
         }
 
         if first_name.is_empty() || last_name.is_empty() {
@@ -1993,8 +2023,8 @@ pub fn bulk_import_users_from_excel(
             .unwrap_or(false);
 
         if duplicate_id {
-            failed_count += 1;
-            error_logs.push(format!("Row {line_number}: Duplicate ID Number '{}' already exists.", id_number));
+            skipped_count += 1;
+            skipped_logs.push(format!("Row {line_number}: ID Number '{}' already exists (Skipped - existing record will not be overwritten).", id_number));
             continue;
         }
 
@@ -2003,12 +2033,13 @@ pub fn bulk_import_users_from_excel(
             let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
             tx.execute(
                 "INSERT INTO persons (id_number, first_name, middle_name, last_name, suffix, is_active, created_at)
-                 VALUES (?1, ?2, ?3, ?4, NULL, 1, ?5)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6)",
                 params![
                     id_number,
                     first_name,
                     if middle_name.is_empty() { None::<String> } else { Some(middle_name.clone()) },
                     last_name,
+                    final_suffix,
                     now
                 ],
             )
@@ -2046,9 +2077,9 @@ pub fn bulk_import_users_from_excel(
             }
 
             if behavior == "student" {
-                let program_name_value = get_col(idx_program_name);
-                let program_code_value = get_col(idx_program_code);
-                let year_level_value = get_col(idx_year_level);
+                let program_name_value = get_col(idx_program_name, true);
+                let program_code_value = get_col(idx_program_code, true);
+                let year_level_value = get_col(idx_year_level, false);
                 let program_id = [&program_name_value, &program_code_value]
                     .iter()
                     .filter(|v| !v.is_empty())
@@ -2075,9 +2106,9 @@ pub fn bulk_import_users_from_excel(
                 )
                 .map_err(|e| e.to_string())?;
             } else if behavior == "employee" {
-                let dept_name_value = get_col(idx_department_name);
-                let dept_code_value = get_col(idx_department_code);
-                let pos_title = get_col(idx_position_title);
+                let dept_name_value = get_col(idx_department_name, true);
+                let dept_code_value = get_col(idx_department_code, true);
+                let pos_title = get_col(idx_position_title, false);
                 
                 let department_id = [&dept_name_value, &dept_code_value]
                     .iter()
@@ -2138,8 +2169,10 @@ pub fn bulk_import_users_from_excel(
     Ok(BulkImportResult {
         success_count,
         failed_count,
+        skipped_count,
         imported_ids,
         error_logs,
+        skipped_logs,
     })
 }
 
@@ -4387,7 +4420,7 @@ pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
 
     let total_students: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM persons p 
+            "SELECT COUNT(DISTINCT p.person_id) FROM persons p 
              JOIN person_roles pr ON p.person_id = pr.person_id 
              JOIN roles r ON pr.role_id = r.role_id 
              LEFT JOIN roles r_parent ON r.parent_role_id = r_parent.role_id
@@ -4399,7 +4432,7 @@ pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
 
     let total_employees: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM persons p 
+            "SELECT COUNT(DISTINCT p.person_id) FROM persons p 
              JOIN person_roles pr ON p.person_id = pr.person_id 
              JOIN roles r ON pr.role_id = r.role_id 
              LEFT JOIN roles r_parent ON r.parent_role_id = r_parent.role_id
@@ -4411,7 +4444,7 @@ pub fn get_dashboard_stats(pool: &DbPool) -> Result<DashboardData, String> {
 
     let total_visitors: i64 = conn
         .query_row(
-            "SELECT COUNT(*) FROM persons p 
+            "SELECT COUNT(DISTINCT p.person_id) FROM persons p 
              JOIN person_roles pr ON p.person_id = pr.person_id 
              JOIN roles r ON pr.role_id = r.role_id 
              LEFT JOIN roles r_parent ON r.parent_role_id = r_parent.role_id
@@ -6284,4 +6317,100 @@ pub fn auto_exit_users(pool: &DbPool) -> Result<i64, String> {
 
     Ok(count)
 }
+
+fn to_proper_case(val: &str) -> String {
+    let mut result = String::new();
+    let mut capitalize_next = true;
+    for c in val.chars() {
+        if c.is_alphabetic() {
+            if capitalize_next {
+                result.extend(c.to_uppercase());
+                capitalize_next = false;
+            } else {
+                result.extend(c.to_lowercase());
+            }
+        } else {
+            result.push(c);
+            if c == ' ' || c == '-' {
+                capitalize_next = true;
+            }
+        }
+    }
+    result
+}
+
+fn extract_suffix(last_name: &str) -> (String, Option<String>) {
+    let trimmed = last_name.trim();
+    if trimmed.is_empty() {
+        return (String::new(), None);
+    }
+
+    let suffix_map = [
+        ("jr", "Jr."),
+        ("jr.", "Jr."),
+        ("sr", "Sr."),
+        ("sr.", "Sr."),
+        ("ii", "II"),
+        ("iii", "III"),
+        ("iv", "IV"),
+        ("v", "V"),
+        ("vi", "VI"),
+        ("vii", "VII"),
+        ("viii", "VIII"),
+        ("ix", "IX"),
+        ("x", "X"),
+    ];
+
+    let last_space = trimmed.rfind(' ');
+    let last_comma = trimmed.rfind(',');
+    
+    let separator_idx = match (last_space, last_comma) {
+        (Some(s), Some(c)) => Some(std::cmp::max(s, c)),
+        (Some(s), None) => Some(s),
+        (None, Some(c)) => Some(c),
+        (None, None) => None,
+    };
+
+    if let Some(idx) = separator_idx {
+        let (rest, last_word) = trimmed.split_at(idx);
+        let last_word_clean = last_word.trim_start_matches(|c| c == ' ' || c == ',').trim();
+        let last_word_lower = last_word_clean.to_lowercase();
+
+        for &(suffix_lower, suffix_standard) in &suffix_map {
+            if last_word_lower == suffix_lower {
+                let clean_rest = rest.trim().trim_end_matches(',').trim().to_string();
+                return (clean_rest, Some(suffix_standard.to_string()));
+            }
+        }
+    }
+
+    (trimmed.to_string(), None)
+}
+
+fn standardize_suffix(suffix: &str) -> String {
+    let trimmed = suffix.trim();
+    let lower = trimmed.to_lowercase();
+    let suffix_map = [
+        ("jr", "Jr."),
+        ("jr.", "Jr."),
+        ("sr", "Sr."),
+        ("sr.", "Sr."),
+        ("ii", "II"),
+        ("iii", "III"),
+        ("iv", "IV"),
+        ("v", "V"),
+        ("vi", "VI"),
+        ("vii", "VII"),
+        ("viii", "VIII"),
+        ("ix", "IX"),
+        ("x", "X"),
+    ];
+    for &(suffix_lower, suffix_standard) in &suffix_map {
+        if lower == suffix_lower {
+            return suffix_standard.to_string();
+        }
+    }
+    to_proper_case(trimmed)
+}
+
 

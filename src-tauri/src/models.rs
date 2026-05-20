@@ -356,6 +356,8 @@ pub struct SystemBranding {
 pub struct BulkImportResult {
     pub success_count: i64,
     pub failed_count: i64,
+    pub skipped_count: i64,
     pub imported_ids: Vec<String>,
     pub error_logs: Vec<String>,
+    pub skipped_logs: Vec<String>,
 }
