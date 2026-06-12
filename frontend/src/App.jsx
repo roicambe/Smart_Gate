@@ -5,12 +5,14 @@ import { MainMenu } from "./components/MainMenu";
 import { ActionMenu } from "./components/ActionMenu";
 import { EventActionMenu } from "./components/EventActionMenu";
 import { AdminLayout } from "./components/AdminLayout";
+import { AboutModal } from "./components/common/AboutModal";
 import bgImage from "../imgs/plp-background.jpg";
 
 function App() {
     const [view, setView] = useState("main"); // 'main', 'action_entrance', 'action_exit', 'admin_dashboard', etc.
     const [adminSession, setAdminSession] = useState(null); // stores { account_id, username, full_name, role }
     const [isAdminOverlayOpen, setIsAdminOverlayOpen] = useState(false);
+    const [isAboutOpen, setIsAboutOpen] = useState(false);
     
     // System Branding State
     const [branding, setBranding] = useState({
@@ -80,10 +82,21 @@ function App() {
                 {/* Footer Section - Hidden on Admin Pages */}
                 {!view.startsWith("admin_") && (
                     <footer className="w-full py-4 px-8 flex justify-center items-center text-white/70 text-sm bg-black/20 backdrop-blur-md border-t border-white/10 mt-auto">
-                        <div>&copy; {new Date().getFullYear()} {branding.system_name} | Made by Roi</div>
+                        <div>
+                            &copy; {new Date().getFullYear()} {branding.system_name} | Made by{" "}
+                            <button
+                                type="button"
+                                onClick={() => setIsAboutOpen(true)}
+                                className="text-emerald-400 underline underline-offset-2 decoration-emerald-500/50 hover:text-emerald-300 hover:decoration-emerald-300 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-emerald-400/40 rounded"
+                            >
+                                Roi
+                            </button>
+                        </div>
                     </footer>
                 )}
             </div>
+
+            <AboutModal isOpen={isAboutOpen} onClose={() => setIsAboutOpen(false)} />
         </div>
     );
 }

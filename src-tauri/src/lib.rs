@@ -14,6 +14,7 @@ pub fn run() {
     dotenvy::dotenv().ok();
     dotenvy::from_filename("src-tauri/.env").ok();
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
@@ -181,7 +182,8 @@ pub fn run() {
             commands::reset_face_data,
             commands::get_id_number_from_person_id,
             email::send_visitor_qr,
-            email::send_verification_otp
+            email::send_verification_otp,
+            commands::open_external_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

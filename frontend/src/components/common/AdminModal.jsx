@@ -37,6 +37,8 @@ export const AdminModal = ({
     footer,
     bodyClassName = '',
     closeOnBackdrop = true,
+    backdropClassName = 'bg-black/60 backdrop-blur-md',
+    panelClassName = 'animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300',
 }) => {
     if (!isOpen) return null;
 
@@ -56,11 +58,11 @@ export const AdminModal = ({
             <button
                 type="button"
                 onClick={handleBackdropClick}
-                className="absolute inset-0 bg-black/60 backdrop-blur-md animate-in fade-in duration-300"
+                className={`absolute inset-0 animate-in fade-in duration-300 ${backdropClassName}`}
                 aria-label="Close modal backdrop"
             />
             <div
-                className={`relative flex max-h-[92vh] flex-col w-full ${sizeClass} overflow-hidden rounded-3xl border shadow-2xl backdrop-blur-3xl animate-in fade-in zoom-in-95 slide-in-from-bottom-2 duration-300 ${palette.panel}`}
+                className={`relative flex max-h-[92vh] flex-col w-full ${sizeClass} overflow-hidden rounded-3xl border shadow-2xl backdrop-blur-3xl ${panelClassName} ${palette.panel}`}
                 role="dialog"
                 aria-modal="true"
             >

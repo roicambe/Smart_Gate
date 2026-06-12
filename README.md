@@ -5,6 +5,7 @@
 [![React](https://img.shields.io/badge/React-v19-blue?style=flat&logo=react&logoColor=white)](https://react.dev/)
 [![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v4.2-38bdf8?style=flat&logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
 [![SQLite](https://img.shields.io/badge/SQLite-Pooled-003b57?style=flat&logo=sqlite&logoColor=white)](https://sqlite.org/)
+[![License](https://img.shields.io/badge/License-Proprietary-red.svg?style=flat)](./LICENSE)
 
 An enterprise-grade, high-performance desktop application for campus security, visitor registration, and event attendance tracking. Custom-designed for **Pamantasan ng Lungsod ng Pasig (PLP)**, **Smart Gate** leverages state-of-the-art **Facial Biometrics** (SCRFD + ArcFace run in ONNX Runtime and searched via HNSW graphs in Rust) combined with **QR scanners**, thermal printer integrations, and dynamic administration controls to deliver a seamless kiosk and governance platform.
 
@@ -97,7 +98,7 @@ Smart_Gate/
 ├── frontend/                # React Vite Frontend Application
 │   ├── src/
 │   │   ├── components/      # UI components (FaceScanner, QRScanner, IdCardProvider)
-│   │   │   ├── common/      # Reusable controls (PersonCombobox, Modals)
+│   │   │   ├── common/      # Reusable controls (PersonCombobox, AdminModal, AboutModal)
 │   │   │   ├── views/       # Administrative sub-panels (AccessLogs, UserManagement)
 │   │   │   └── toast/       # Custom toast system
 │   │   ├── App.jsx          # Main client router & state provider
@@ -130,6 +131,7 @@ Smart_Gate/
 
 ### Backend (Rust)
 *   **Tauri v2**: Desktop runtime shell, secure bridging, and native operations.
+*   **tauri-plugin-opener v2**: Opens external URLs and `mailto:` links in the system's default browser or mail client.
 *   **ONNX Runtime (`ort` v2.0.0-rc.9)**: Accelerated CPU inference for deep neural networks.
 *   **HNSW Search (`hnsw_rs` v0.3)**: High-performance vector space indexing for facial embeddings.
 *   **SQLite & Connection Pooling (`rusqlite` + `r2d2`)**: Robust local database connection management.
@@ -140,9 +142,11 @@ Smart_Gate/
 *   **React v19**: Modern declarative UI framework.
 *   **Vite**: Ultrafast development bundler.
 *   **Tailwind CSS v4.2**: Utility-first responsive design framework.
+*   **@tauri-apps/plugin-opener**: JavaScript bridge for triggering OS-level URL and file opens from within the Tauri webview.
 *   **Recharts**: Interactive reporting, graphs, and system usage analytics.
 *   **html5-qrcode**: Streamlined canvas-based QR reader.
 *   **jsPDF & jsPDF-AutoTable**: High-fidelity client-side PDF document layout engine.
+*   **Lucide React**: Consistent, minimal icon library used across the UI.
 
 ---
 
@@ -198,4 +202,7 @@ Tauri will boot up the Vite frontend, compile the Rust backend, link the ONNX mo
 ---
 
 ## 📄 License
-This project is developed for **Pamantasan ng Lungsod ng Pasig**. Please consult with the author (Roi) or system administrators regarding distribution, licensing, and access privileges.
+
+This project is licensed under a **Proprietary Academic License**. See the [LICENSE](./LICENSE) file for full terms.
+
+Developed for **Pamantasan ng Lungsod ng Pasig (PLP)**. Unauthorized copying, redistribution, or commercial use of this software or its source code is strictly prohibited without the express written permission of the authors.

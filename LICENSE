@@ -1,0 +1,97 @@
+PROPRIETARY ACADEMIC LICENSE
+Smart Gate — Campus Access & Security Management System
+Copyright (c) 2026 Roi Yvann M. Cambe and the Smart Gate Development Team.
+All rights reserved.
+
+================================================================================
+
+AUTHORS
+-------
+  Roi Yvann M. Cambe       (Lead Developer)
+  Francis Carl S. Esguerra
+  Gen-Rey B. Jarina
+  Ivee P. Guevarra
+  Jace H. Bellen
+  Jericho Riga
+
+Developed for:
+  Pamantasan ng Lungsod ng Pasig (PLP)
+  Pasig City, Metro Manila, Philippines
+
+================================================================================
+
+TERMS AND CONDITIONS
+
+1. GRANT OF LICENSE
+   The copyright holders grant Pamantasan ng Lungsod ng Pasig (PLP) and its
+   authorized personnel a non-exclusive, non-transferable license to use,
+   deploy, and operate this software solely for internal campus management
+   and academic purposes.
+
+2. RESTRICTIONS
+   You may NOT, without the prior express written permission of the copyright
+   holders:
+
+   a. Copy, reproduce, or duplicate this software or any portion thereof for
+      purposes other than making a reasonable number of backup copies for
+      disaster recovery.
+
+   b. Distribute, sublicense, sell, rent, lease, transfer, or otherwise make
+      this software available to any third party.
+
+   c. Modify, adapt, translate, reverse engineer, decompile, disassemble, or
+      create derivative works based on this software for commercial purposes.
+
+   d. Remove, alter, or obscure any proprietary notices, labels, copyright
+      notices, or this license text from any copy of the software.
+
+   e. Use this software or any of its components as the basis for any
+      commercial product or service.
+
+3. ACADEMIC USE
+   Students, faculty, and staff of Pamantasan ng Lungsod ng Pasig may
+   reference, study, and cite this software for academic, research, and
+   non-commercial educational purposes, provided that proper attribution is
+   given to the original authors.
+
+4. CONTRIBUTIONS
+   Any modifications or improvements made to this software by authorized
+   personnel of PLP remain subject to this license. Such contributions must
+   be reported to and approved by the lead developer before being merged into
+   the official codebase.
+
+5. THIRD-PARTY COMPONENTS
+   This software incorporates open-source components listed in the project's
+   Cargo.toml and package.json files. Those components are governed by their
+   respective licenses (MIT, Apache-2.0, etc.) and are unaffected by this
+   license agreement.
+
+6. DISCLAIMER OF WARRANTIES
+   THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. THE AUTHORS MAKE NO
+   REPRESENTATIONS OR WARRANTIES ABOUT THE SUITABILITY OF THIS SOFTWARE FOR
+   ANY PURPOSE.
+
+7. LIMITATION OF LIABILITY
+   IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+   DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR
+   OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE
+   USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+8. TERMINATION
+   This license is effective until terminated. It will terminate automatically
+   if you fail to comply with any of its terms and conditions. Upon termination,
+   you must cease all use of the software and destroy all copies in your
+   possession.
+
+================================================================================
+
+For permissions, licensing inquiries, or collaboration requests, contact:
+
+  Roi Yvann M. Cambe
+  GitHub  : https://github.com/roicambe
+  Email   : roicambe02@gmail.com
+  Linktree: https://linktr.ee/pu_roi
+
+================================================================================

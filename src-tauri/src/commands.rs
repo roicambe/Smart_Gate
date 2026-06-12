@@ -1233,3 +1233,31 @@ pub fn reset_face_data(
     log::info!("Admin reset face data for person_id={}", person_id);
     Ok(true)
 }
+
+/// Opens a URL or mailto: link in the system's default browser / mail client.
+/// Uses only the standard library — no extra Cargo dependency required.
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(["/C", "start", "", &url])
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {e}"))?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {e}"))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open")
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("Failed to open URL: {e}"))?;
+    }
+    Ok(())
+}
