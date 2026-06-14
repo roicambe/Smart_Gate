@@ -194,6 +194,89 @@ Tauri will boot up the Vite frontend, compile the Rust backend, link the ONNX mo
 
 ---
 
+## 📦 Building the MSI Installer (Windows)
+
+This section documents how to produce a distributable `.msi` installer for **Smart Gate** on Windows.
+
+### Prerequisites
+Make sure you have completed all steps in [Setup & Installation](#-setup--installation) above, plus:
+- **WebView2 Runtime** — already bundled by Tauri automatically on Windows
+- **ONNX models** placed in `src-tauri/models/` (they are bundled into the installer via `tauri.conf.json`)
+
+---
+
+### Step 1 — Sync Tauri Package Versions
+
+Before building, ensure the Rust `tauri` crate version matches the NPM `@tauri-apps/api` version. A mismatch will abort the build with an error like:
+
+```
+Error Found version mismatched Tauri packages:
+tauri (v2.x.x) : @tauri-apps/api (v2.x.x)
+```
+
+**To fix:** Update the `tauri` version in [`src-tauri/Cargo.toml`](./src-tauri/Cargo.toml) to match what npm resolved, then run:
+
+```powershell
+cd src-tauri
+cargo update -p tauri
+```
+
+This updates `Cargo.lock` with the latest compatible crates (tauri, tauri-build, wry, tao, etc.) without touching other dependencies.
+
+---
+
+### Step 2 — Build the Installer
+
+The Tauri CLI must be run from the **`frontend/`** directory, since that is where `package.json` and `@tauri-apps/cli` are installed:
+
+```powershell
+cd frontend
+npx tauri build
+```
+
+This single command will:
+1. Run `npm run build` inside `frontend/` to compile the React/Vite frontend into `frontend/dist/`
+2. Compile the entire Rust backend in **release mode** (first build may take 15–30 minutes)
+3. Bundle the ONNX models from `src-tauri/models/`
+4. Produce both an **MSI** and an **NSIS `.exe`** installer
+
+---
+
+### Step 3 — Locate the Output
+
+After a successful build, the installer files are written to:
+
+```
+src-tauri/target/release/bundle/
+├── msi/
+│   └── Smart Gate_0.1.0_x64_en-US.msi   ← Windows MSI installer
+└── nsis/
+    └── Smart Gate_0.1.0_x64-setup.exe    ← NSIS installer (alternative)
+```
+
+---
+
+### Building MSI Only (Optional)
+
+To skip NSIS and produce only the MSI, pass the `--bundles` flag:
+
+```powershell
+cd frontend
+npx tauri build --bundles msi
+```
+
+---
+
+### ⚠️ Notes
+
+| Topic | Detail |
+|---|---|
+| **`.env` file** | `src-tauri/.env` (SMTP/Brevo keys) is **not** bundled. Configure keys via the Admin panel after installation. |
+| **Code Signing** | Without a certificate, Windows SmartScreen will show a warning. Safe to dismiss for internal/dev use. |
+| **Rebuild triggers** | After any changes to Rust source files, a full recompile is needed. Frontend-only changes are faster. |
+
+---
+
 ## 🔒 Security & Data Privacy
 *   **Local-First Architecture**: Your biometrics stay yours. Facial images are processed in-memory and converted into embeddings. The original images do not leave the computer.
 *   **Encryption & Hashing**: Administrative credentials are comprehensively hashed using custom cryptographic algorithms before saving to the database.
